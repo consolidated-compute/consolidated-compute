@@ -1,0 +1,97 @@
+name: Upstream Stable Release Monitor
+
+on:
+  schedule:
+    - cron: "17 13 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: upstream-stable-release-monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  stage-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Stage a new stable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORK_REPOSITORY: ${{ github.repository }}
+          FORK_SHA: ${{ github.sha }}
+          UPSTREAM_REPOSITORY: getpaseo/paseo
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_json="$(gh api "repos/${UPSTREAM_REPOSITORY}/releases/latest")"
+          release_tag="$(jq -r '.tag_name' <<<"${release_json}")"
+          release_url="$(jq -r '.html_url' <<<"${release_json}")"
+          published_at="$(jq -r '.published_at' <<<"${release_json}")"
+          is_draft="$(jq -r '.draft' <<<"${release_json}")"
+          is_prerelease="$(jq -r '.prerelease' <<<"${release_json}")"
+
+          if [[ "${is_draft}" != "false" || "${is_prerelease}" != "false" ]]; then
+            echo "::error::GitHub returned a draft or prerelease from releases/latest."
+            exit 1
+          fi
+          if [[ ! "${release_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Latest stable release tag is not vMAJOR.MINOR.PATCH: ${release_tag}"
+            exit 1
+          fi
+
+          release_ref="refs/remotes/upstream/releases/${release_tag}"
+          git fetch --no-tags https://github.com/getpaseo/paseo.git \
+            "refs/tags/${release_tag}:${release_ref}"
+          release_sha="$(git rev-parse "${release_ref}^{commit}")"
+
+          if git merge-base --is-ancestor "${release_sha}" HEAD; then
+            echo "${release_tag} (${release_sha}) is already integrated."
+            exit 0
+          fi
+
+          issue_title="Sync Paseo ${release_tag}"
+          existing_issue="$(
+            gh issue list --repo "${FORK_REPOSITORY}" --state all --limit 100 --json title,url |
+              jq -r --arg title "${issue_title}" 'map(select(.title == $title))[0].url // empty'
+          )"
+          existing_pr="$(
+            gh pr list --repo "${FORK_REPOSITORY}" --state all --limit 100 --json title,url |
+              jq -r --arg tag "${release_tag}" 'map(select(.title | contains($tag)))[0].url // empty'
+          )"
+
+          if [[ -n "${existing_issue}" ]]; then
+            echo "Sync issue already exists: ${existing_issue}"
+            exit 0
+          fi
+          if [[ -n "${existing_pr}" ]]; then
+            echo "Sync pull request already exists: ${existing_pr}"
+            exit 0
+          fi
+
+          body_file="$(mktemp)"
+          trap 'rm -f "${body_file}"' EXIT
+          cat >"${body_file}" <<EOF
+          Paseo published stable release [${release_tag}](${release_url}) on ${published_at}.
+
+          - Release commit: \`${release_sha}\`
+          - Fork \`main\` when detected: \`${FORK_SHA}\`
+
+          Follow [the fork-maintenance playbook](https://github.com/${FORK_REPOSITORY}/blob/main/docs/fork-maintenance.md) to prepare a signed draft sync pull request. Preserve upstream ancestry, record divergence and conflict evidence, and keep inherited delivery workflows quarantined.
+
+          This issue was opened by the scheduled upstream stable-release monitor. It does not sync prereleases or upstream \`main\`.
+          EOF
+
+          gh issue create \
+            --repo "${FORK_REPOSITORY}" \
+            --title "${issue_title}" \
+            --body-file "${body_file}"

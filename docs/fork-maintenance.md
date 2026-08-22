@@ -1,6 +1,6 @@
 # Fork maintenance
 
-Consolidated Compute stays close to [Paseo](https://github.com/getpaseo/paseo). Preserve upstream ancestry and isolate fork behavior so a sync is a reviewable product change instead of a repository-wide port.
+Consolidated Compute follows [Paseo](https://github.com/getpaseo/paseo) on a deliberate stable-release cadence. Preserve upstream ancestry and isolate fork behavior so a sync is a reviewable product change instead of a repository-wide port.
 
 ## Remotes
 
@@ -15,45 +15,56 @@ git config remote.upstream.pushurl DISABLED
 git fetch --no-tags upstream
 ```
 
-Keep tags separate until Consolidated Compute defines its own release and version lineage. Check the configuration with:
+Do not fetch upstream tags in bulk. Fetch only the stable release tag selected for a sync so Paseo tags stay separate from Consolidated Compute's future release lineage. Check the configuration with:
 
 ```bash
 git remote -v
 git config --get-regexp '^remote\.(origin|upstream)\.(url|pushurl|fetch)$'
 ```
 
-## Sync through a pull request
+## Stable-release sync cadence
 
-Never rebase, force-push, or merge directly into canonical `main`. Rebase unmerged topic branches only. Do not require linear history on `main`; upstream merge ancestry must remain visible.
+Sync published Paseo stable releases. A stable release is a non-draft, non-prerelease GitHub release with a `vMAJOR.MINOR.PATCH` tag. Do not sync upstream `main`, beta tags, release candidates, or every upstream commit.
 
-Start from a clean, current fork branch:
+An urgent security fix or a Paseo change that blocks Consolidated Compute development can be synced early. Link the exception to an issue and explain why waiting for the next stable release is unsafe or stops planned work.
+
+`.github/workflows/upstream-release-monitor.yml` checks GitHub daily and can be run manually. When the latest stable release is not in the fork, it opens one deduplicated sync issue. It does not create a branch or pull request; sync commits stay signed and reviewed without storing a signing key in Actions.
+
+Every sync uses a pull request. Never rebase, force-push, or merge directly into canonical `main`. Rebase unmerged topic branches only. Do not require linear history on `main`; upstream merge ancestry must remain visible.
+
+Inspect GitHub's latest stable release, then start from a clean, current fork branch. Replace `vX.Y.Z` with the release tag returned by GitHub:
 
 ```bash
+gh api repos/getpaseo/paseo/releases/latest \
+  --jq '{tag: .tag_name, published: .published_at, draft: .draft, prerelease: .prerelease}'
 git status --short
 git fetch --no-tags origin main:refs/remotes/origin/main
-git fetch --no-tags upstream main:refs/remotes/upstream/main
-git switch -c sync/paseo-YYYY-MM-DD origin/main
-git merge upstream/main
+git fetch --no-tags upstream \
+  'refs/tags/vX.Y.Z:refs/remotes/upstream/releases/vX.Y.Z'
+git switch -c sync/paseo-vX.Y.Z origin/main
+git merge --no-commit --no-ff refs/remotes/upstream/releases/vX.Y.Z
+git commit -S -m 'chore: sync Paseo vX.Y.Z'
 ```
 
-Resolve conflicts on the sync branch, run the affected checks, push the branch, and merge it through the normal pull-request path. If the fork has no unique commits, the sync branch can fast-forward. Once the fork diverges, keep the merge commit produced by the sync.
+Resolve conflicts before creating the signed merge commit. Run the affected checks, push the branch, and merge it through the normal pull-request path. Keep the merge commit so the imported release ancestry remains visible.
 
 Favor the current upstream structure during conflict resolution. Reapply the smallest Consolidated Compute change that preserves the feature. Do not accept either whole file without reviewing both sides. Record each conflicted file and the chosen resolution in the pull request.
 
 ## Measure divergence
 
-Fetch both remotes immediately before measuring. Compare remote branches rather than a local branch or `HEAD`.
+Fetch `origin/main` and the selected stable tag immediately before measuring. Compare the release tag with the remote fork branch rather than a local branch or `HEAD`.
 
 ```bash
-git rev-list --left-right --count upstream/main...origin/main
-git merge-base upstream/main origin/main
-git diff --stat "$(git merge-base upstream/main origin/main)"..origin/main
-git diff --shortstat upstream/main..origin/main
+release_ref=refs/remotes/upstream/releases/vX.Y.Z
+git rev-list --left-right --count "$release_ref"...origin/main
+git merge-base "$release_ref" origin/main
+git diff --stat "$(git merge-base "$release_ref" origin/main)"..origin/main
+git diff --shortstat "$release_ref"..origin/main
 ```
 
-The first count is upstream-only commits: how far the fork lags. The second count is fork-only commits: the graph divergence. The merge-base diff is the fork patch surface. The tip-to-tip diff shows the current content difference.
+The first count is release-only commits: how far the fork lags the selected release. The second count is fork-only commits: the graph divergence. The merge-base diff is the fork patch surface. The tip-to-tip diff shows the current content difference.
 
-Record all four facts. A single ahead/behind number hides whether the fork is behind, fork-only, or two-sided. Do not make live upstream equality a pull-request check; upstream can move while an unrelated change is under review.
+Record all four facts. A single ahead/behind number hides whether the fork is behind, fork-only, or two-sided. Do not make equality with upstream `main` a pull-request check.
 
 ## Shallow-fork boundaries
 
@@ -80,7 +91,7 @@ Do not enable that gate, run `release:*` commands, or push `v*` tags until [the 
 
 Every upstream sync pull request includes:
 
-- upstream and fork tip SHAs before the merge;
+- the selected Paseo tag or exception commit, its SHA, publication date when applicable, and the fork tip SHA before the merge;
 - upstream-only and fork-only commit counts before and after;
 - the merge-base SHA and fork patch summary;
 - conflicted files and their resolutions;
