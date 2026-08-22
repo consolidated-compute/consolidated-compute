@@ -28,7 +28,7 @@ Sync published Paseo stable releases. A stable release is a non-draft, non-prere
 
 An urgent security fix or a Paseo change that blocks Consolidated Compute development can be synced early. Link the exception to an issue and explain why waiting for the next stable release is unsafe or stops planned work.
 
-`.github/workflows/upstream-release-monitor.yml` checks GitHub daily and can be run manually. When the latest stable release is not in the fork, it opens one deduplicated sync issue. It does not create a branch or pull request; sync commits stay signed and reviewed without storing a signing key in Actions.
+`.github/workflows/upstream-release-monitor.yml` checks GitHub daily and can be run manually from the repository default branch. When the latest stable release is not in the fork, it opens one deduplicated sync issue. It does not create a branch or pull request; sync commits stay signed and reviewed without storing a signing key in Actions.
 
 Every sync uses a pull request. Never rebase, force-push, or merge directly into canonical `main`. Rebase unmerged topic branches only. Do not require linear history on `main`; upstream merge ancestry must remain visible.
 
