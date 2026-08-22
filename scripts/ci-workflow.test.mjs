@@ -130,13 +130,14 @@ test("fork delivery and write-back jobs stay quarantined", () => {
     const jobs = jobBlocks(readFileSync(workflowPath, "utf8"));
 
     for (const jobId of jobIds) {
-      const job = jobs.get(jobId)?.join("\n");
+      const job = jobs.get(jobId);
       assert.ok(job, `${workflowName} is missing job ${jobId}`);
-      assert.match(job, /^    if:/m, `${workflowName}:${jobId} needs a job-level gate`);
+      const jobCondition = job.find((line) => line.startsWith("    if:"));
+      assert.ok(jobCondition, `${workflowName}:${jobId} needs a job-level gate`);
       assert.match(
-        job,
+        jobCondition,
         /vars\.CC_DELIVERY_ENABLED == 'true'/,
-        `${workflowName}:${jobId} must fail closed without CC_DELIVERY_ENABLED=true`,
+        `${workflowName}:${jobId} job-level gate must fail closed without CC_DELIVERY_ENABLED=true`,
       );
     }
   }
