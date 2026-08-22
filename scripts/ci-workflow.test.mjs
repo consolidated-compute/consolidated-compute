@@ -31,6 +31,21 @@ const gatedCiJobs = new Map([
   ["cli-tests-3", { name: "cli-tests (shard 3/3)", contract: "cli" }],
 ]);
 
+const quarantinedDeliveryJobs = new Map([
+  ["android-apk-release.yml", ["publish-android-apk"]],
+  ["deploy-app.yml", ["deploy"]],
+  ["deploy-relay.yml", ["deploy"]],
+  ["deploy-website.yml", ["deploy"]],
+  [
+    "desktop-release.yml",
+    ["create-release", "publish-macos", "publish-linux", "publish-windows", "finalize-rollout"],
+  ],
+  ["desktop-rollout.yml", ["stamp"]],
+  ["docker.yml", ["publish"]],
+  ["nix-update-hash.yml", ["update-hash"]],
+  ["release-notes-sync.yml", ["sync-release-notes"]],
+]);
+
 function jobBlocks(source) {
   const jobs = new Map();
   let currentJob;
@@ -106,6 +121,25 @@ test("change gating allows superseded workflow runs to cancel", () => {
       /\$\{\{\s*always\(\)/,
       "always() keeps jobs alive after concurrency cancellation; use !cancelled() for fail-open gating",
     );
+  }
+});
+
+test("fork delivery and write-back jobs stay quarantined", () => {
+  for (const [workflowName, jobIds] of quarantinedDeliveryJobs) {
+    const workflowPath = new URL(`.github/workflows/${workflowName}`, repoRoot);
+    const jobs = jobBlocks(readFileSync(workflowPath, "utf8"));
+
+    for (const jobId of jobIds) {
+      const job = jobs.get(jobId);
+      assert.ok(job, `${workflowName} is missing job ${jobId}`);
+      const jobCondition = job.find((line) => line.startsWith("    if:"));
+      assert.ok(jobCondition, `${workflowName}:${jobId} needs a job-level gate`);
+      assert.match(
+        jobCondition,
+        /vars\.CC_DELIVERY_ENABLED == 'true'/,
+        `${workflowName}:${jobId} job-level gate must fail closed without CC_DELIVERY_ENABLED=true`,
+      );
+    }
   }
 });
 

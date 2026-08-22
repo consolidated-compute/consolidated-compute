@@ -21,6 +21,7 @@ env:
 
 jobs:
   stamp:
+    if: ${{ vars.CC_DELIVERY_ENABLED == 'true' }}
     permissions:
       contents: write
     runs-on: ubuntu-latest

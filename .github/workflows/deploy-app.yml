@@ -11,6 +11,7 @@ on:
 
 jobs:
   deploy:
+    if: ${{ vars.CC_DELIVERY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
 
     steps:
