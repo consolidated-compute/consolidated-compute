@@ -86,6 +86,7 @@ export function useAggregatedAgents(options?: {
           attentionTimestamp: agent.attentionTimestamp,
           archivedAt: agent.archivedAt,
           createdAt: agent.createdAt,
+          parentAgentId: agent.parentAgentId,
           labels: agent.labels,
           projectPlacement: agent.projectPlacement,
         };

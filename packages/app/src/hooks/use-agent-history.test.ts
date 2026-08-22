@@ -84,6 +84,7 @@ function historyEntry(input: {
   cwd: string;
   updatedAt: string;
   title?: string | null;
+  parentAgentId?: string;
   archivedAt?: string | null;
   searchScore?: number;
 }): FetchAgentHistoryEntry {
@@ -120,7 +121,7 @@ function historyEntry(input: {
       attentionReason: null,
       attentionTimestamp: null,
       archivedAt: input.archivedAt ?? null,
-      labels: {},
+      labels: input.parentAgentId ? { "paseo.parent-agent-id": input.parentAgentId } : {},
     },
     project: {
       projectKey: input.cwd,
@@ -209,6 +210,7 @@ describe("fetchAgentHistoryPage", () => {
             cwd: "/repo",
             updatedAt: "2026-04-02T10:00:00.000Z",
             title: "History one",
+            parentAgentId: "parent-1",
           }),
         ],
       }),
@@ -218,6 +220,7 @@ describe("fetchAgentHistoryPage", () => {
 
     expect(page.agents).toEqual([
       expect.objectContaining({
+        parentAgentId: "parent-1",
         id: "history-1",
         serverId: "server-1",
         serverLabel: "server-1",
