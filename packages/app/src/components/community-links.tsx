@@ -5,6 +5,7 @@ import { Heart } from "lucide-react-native";
 import { Button } from "@/components/ui/button";
 import { GitHubIcon } from "@/components/icons/github-icon";
 import { DiscordIcon } from "@/components/icons/discord-icon";
+import { PRODUCT_REPOSITORY_URL } from "@/constants/product";
 import { openExternalUrl } from "@/utils/open-external-url";
 
 const renderGitHubIcon = (color: string) => <GitHubIcon color={color} size={14} />;
@@ -12,7 +13,7 @@ const renderDiscordIcon = (color: string) => <DiscordIcon color={color} size={14
 
 export function CommunityLinks() {
   const handleOpenGitHub = useCallback(() => {
-    void openExternalUrl("https://github.com/getpaseo/paseo");
+    void openExternalUrl(PRODUCT_REPOSITORY_URL);
   }, []);
 
   const handleOpenSponsor = useCallback(() => {

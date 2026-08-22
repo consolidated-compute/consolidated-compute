@@ -297,7 +297,7 @@ test.describe("Add Project command-center flow", () => {
     const title = addProjectFlow(page).getByTestId("add-project-flow-title");
     await expect(title.getByText("Choose destination", { exact: true })).toBeVisible();
     await expect(title.getByText("localhost", { exact: true })).toBeVisible();
-    await expect(title).not.toContainText("Where should Paseo create");
+    await expect(title).not.toContainText("Where should Consolidated Compute create");
     await addProjectFlowBack(page).click();
     await expect(addProjectFlowInput(page)).toHaveValue(remote);
   });

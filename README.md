@@ -1,8 +1,12 @@
 <p align="center">
-  <img src="packages/website/public/logo.svg" width="64" height="64" alt="Paseo logo">
+  <img src="packages/website/public/logo.svg" width="64" height="64" alt="Consolidated Compute logo">
 </p>
 
-<h1 align="center">Paseo</h1>
+<h1 align="center">Consolidated Compute</h1>
+
+<p align="center">A control plane for agent teams, built as a shallow fork of <a href="https://github.com/getpaseo/paseo">Paseo</a>.</p>
+
+> Consolidated Compute is in foundation development. Runtime compatibility identifiers, installation commands, and release artifacts still use Paseo names until the fork defines its own release destinations and migration policy.
 
 <p align="center">
   <a href="README.md">English</a> ·

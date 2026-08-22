@@ -1,5 +1,6 @@
 import { createInstance } from "i18next";
 import { initReactI18next } from "react-i18next";
+import { brandTranslationResources } from "./brand-resources";
 import { observeI18nInit } from "./init";
 import { ar } from "./resources/ar";
 import { en } from "./resources/en";
@@ -19,15 +20,15 @@ observeI18nInit(
     fallbackLng: "en",
     lng: "en",
     resources: {
-      ar: { translation: ar },
-      en: { translation: en },
-      es: { translation: es },
-      fr: { translation: fr },
-      ja: { translation: ja },
-      ko: { translation: ko },
-      "pt-BR": { translation: ptBR },
-      ru: { translation: ru },
-      "zh-CN": { translation: zhCN },
+      ar: { translation: brandTranslationResources(ar) },
+      en: { translation: brandTranslationResources(en) },
+      es: { translation: brandTranslationResources(es) },
+      fr: { translation: brandTranslationResources(fr) },
+      ja: { translation: brandTranslationResources(ja) },
+      ko: { translation: brandTranslationResources(ko) },
+      "pt-BR": { translation: brandTranslationResources(ptBR) },
+      ru: { translation: brandTranslationResources(ru) },
+      "zh-CN": { translation: brandTranslationResources(zhCN) },
     },
     interpolation: {
       escapeValue: false,

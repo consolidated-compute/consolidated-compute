@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { DiscordIcon } from "@/components/icons/discord-icon";
 import { GitHubIcon } from "@/components/icons/github-icon";
+import { PRODUCT_NEW_ISSUE_URL } from "@/constants/product";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,7 +28,6 @@ import { resolveAppVersion } from "@/utils/app-version";
 import { openExternalUrl } from "@/utils/open-external-url";
 
 const DISCORD_URL = "https://discord.gg/jz8T2uahpH";
-const GITHUB_ISSUE_URL = "https://github.com/getpaseo/paseo/issues/new";
 const CHANGELOG_URL = "https://paseo.sh/changelog";
 const ThemedActivity = withUnistyles(Activity);
 const ThemedCircleHelp = withUnistyles(CircleHelp);
@@ -94,7 +94,7 @@ export function SidebarHelpMenu() {
   }, []);
 
   const openGitHubIssue = useCallback(() => {
-    void openExternalUrl(GITHUB_ISSUE_URL);
+    void openExternalUrl(PRODUCT_NEW_ISSUE_URL);
   }, []);
 
   const openChangelog = useCallback(() => {
