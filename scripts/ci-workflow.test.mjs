@@ -7,6 +7,10 @@ const repoRoot = new URL("../", import.meta.url);
 const ciWorkflowPath = new URL(".github/workflows/ci.yml", repoRoot);
 const dockerWorkflowPath = new URL(".github/workflows/docker.yml", repoRoot);
 const nixWorkflowPath = new URL(".github/workflows/nix.yml", repoRoot);
+const upstreamReleaseMonitorPath = new URL(
+  ".github/workflows/upstream-release-monitor.yml",
+  repoRoot,
+);
 const filtersPath = new URL(".github/ci-paths.yml", repoRoot);
 const serverTsconfigPath = new URL("packages/server/tsconfig.server.json", repoRoot);
 const desktopPackagePath = new URL("packages/desktop/package.json", repoRoot);
@@ -141,6 +145,32 @@ test("fork delivery and write-back jobs stay quarantined", () => {
       );
     }
   }
+});
+
+test("upstream monitor stages stable releases without weakening review controls", () => {
+  const source = readFileSync(upstreamReleaseMonitorPath, "utf8");
+
+  assert.match(source, /^  schedule:\s*$/m);
+  assert.match(source, /^    - cron: "17 13 \* \* \*"$/m);
+  assert.match(source, /^  workflow_dispatch:\s*$/m);
+  assert.match(source, /^  contents: read$/m);
+  assert.match(source, /^  issues: write$/m);
+  assert.match(source, /^  pull-requests: read$/m);
+  assert.match(source, /^          ref: \$\{\{ github\.event\.repository\.default_branch \}\}$/m);
+  assert.match(
+    source,
+    /^          DEFAULT_BRANCH: \$\{\{ github\.event\.repository\.default_branch \}\}$/m,
+  );
+  assert.match(source, /GITHUB_REF_NAME.*DEFAULT_BRANCH/);
+  assert.match(source, /repos\/\$\{UPSTREAM_REPOSITORY\}\/releases\/latest/);
+  assert.match(source, /\^v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$/);
+  assert.match(source, /git merge-base --is-ancestor/);
+  assert.match(source, /gh api --method GET search\/issues/);
+  assert.match(source, /gh issue create/);
+  assert.match(source, /docs\/fork-maintenance\.md/);
+  assert.doesNotMatch(source, /contents: write|pull-requests: write|git push|gh pr create/);
+  assert.doesNotMatch(source, /--limit 100/);
+  assert.doesNotMatch(source, /refs\/heads\/main|upstream\/main/);
 });
 
 test("focused contracts stay inside existing required checks", () => {
