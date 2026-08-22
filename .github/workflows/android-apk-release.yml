@@ -21,6 +21,7 @@ env:
 
 jobs:
   publish-android-apk:
+    if: ${{ vars.CC_DELIVERY_ENABLED == 'true' }}
     permissions:
       contents: write
       packages: read

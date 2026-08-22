@@ -26,6 +26,7 @@ concurrency:
 
 jobs:
   sync-release-notes:
+    if: ${{ vars.CC_DELIVERY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
