@@ -97,12 +97,13 @@ import {
   type AgentDeepLinkTarget,
 } from "@getpaseo/protocol/agent-deep-link";
 import { AgentNavigationInbox, parseAgentDeepLinkFromArgv } from "./agent-navigation.js";
+import { APP_DISPLAY_NAME, resolveCompatibilityUserDataPath } from "./app-identity.js";
 
 const DEV_SERVER_URL = process.env.EXPO_DEV_URL ?? "http://localhost:8081";
 const APP_SCHEME = "paseo";
 const PASEO_DEBUG = process.env.PASEO_DEBUG === "1";
 const DISABLE_SINGLE_INSTANCE_LOCK = process.env.PASEO_DISABLE_SINGLE_INSTANCE_LOCK === "1";
-const APP_NAME = process.env.PASEO_TEST_APP_NAME?.trim() || "Paseo";
+const APP_NAME = process.env.PASEO_TEST_APP_NAME?.trim() || APP_DISPLAY_NAME;
 const UPDATE_QUIT_DEADLINE_MS = 5_000;
 const pendingBrowserWindowOpenRequests = new PendingBrowserWindowOpenRequests();
 const agentNavigationInbox = new AgentNavigationInbox();
@@ -116,6 +117,13 @@ const bootstrapComplete = new Promise<void>((resolve) => {
 });
 let bootstrapIsComplete = false;
 
+const forcedUserDataDir = process.env.PASEO_ELECTRON_USER_DATA_DIR?.trim();
+if (forcedUserDataDir) {
+  app.setPath("userData", forcedUserDataDir);
+  log.info("[dev-user-data] forced userData dir:", forcedUserDataDir);
+} else {
+  app.setPath("userData", resolveCompatibilityUserDataPath(app.getPath("appData")));
+}
 app.setName(APP_NAME);
 
 interface AttachedBrowserInput {
@@ -276,11 +284,7 @@ function installBrowserWindowOpenHandler(input: {
 // In dev mode, detect git worktrees and isolate each instance so multiple
 // Electron windows can run side-by-side (separate userData = separate lock).
 let devWorktreeName: string | null = null;
-const forcedUserDataDir = process.env.PASEO_ELECTRON_USER_DATA_DIR?.trim();
-if (forcedUserDataDir) {
-  app.setPath("userData", forcedUserDataDir);
-  log.info("[dev-user-data] forced userData dir:", forcedUserDataDir);
-} else if (!app.isPackaged) {
+if (!forcedUserDataDir && !app.isPackaged) {
   try {
     const topLevel = execFileSync("git", ["rev-parse", "--show-toplevel"], {
       encoding: "utf-8",

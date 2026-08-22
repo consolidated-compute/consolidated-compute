@@ -64,7 +64,9 @@ Record all four facts. A single ahead/behind number hides whether the fork is be
 - Put fork-owned behavior in new, narrow modules and integration points. Avoid repository-wide renames and formatting churn.
 - Keep `LICENSE` and third-party notices intact. Add fork attribution separately; do not replace upstream copyright or author metadata.
 
-Display branding is separate from runtime identity. A packaged branding change must decide application IDs, deep links, state-directory compatibility, signing, update feeds, artifact names, package destinations, mobile ownership, and migration behavior together.
+Display branding is separate from runtime identity. The fork displays **Consolidated Compute** in translated app copy, native app labels, PWA metadata, and desktop window chrome. Keep the existing `Paseo` Electron user-data directory so the display rename does not strand settings or browser sessions.
+
+Keep application IDs, deep-link schemes, state directories, package scopes, environment variables, CLI names, artifact names, signing, update feeds, package destinations, and mobile ownership unchanged until the release process defines their Consolidated Compute replacements and migration behavior. Source code may therefore display Consolidated Compute while compatibility paths and unpublished package metadata still contain `Paseo` or `paseo`.
 
 ## Repository and release controls
 
