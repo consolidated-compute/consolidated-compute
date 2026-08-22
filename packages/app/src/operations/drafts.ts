@@ -53,7 +53,13 @@ export function operationsWorkspaceKey(serverId: string, workspaceId: string): s
 }
 
 export function compareText(left: string, right: string): number {
-  return left.localeCompare(right, undefined, { sensitivity: "base" });
+  const foldedLeft = left.toLowerCase();
+  const foldedRight = right.toLowerCase();
+  if (foldedLeft < foldedRight) return -1;
+  if (foldedLeft > foldedRight) return 1;
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
 }
 
 export function buildHostMap(

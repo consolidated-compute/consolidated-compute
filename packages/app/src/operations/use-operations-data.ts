@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { useAggregatedAgents } from "@/hooks/use-aggregated-agents";
 import { useProjects } from "@/hooks/use-projects";
 import {
@@ -67,15 +67,17 @@ export function useOperationsData(): OperationsData {
   }, [hosts, runtime, runtimeVersion]);
 
   const model = useMemo(() => {
-    const next = buildOperationsModel({
+    return buildOperationsModel({
       hosts: hostFacts,
       projects,
       agents,
       previous: previousRef.current,
     });
-    previousRef.current = next;
-    return next;
   }, [agents, hostFacts, projects]);
+
+  useEffect(() => {
+    previousRef.current = model;
+  }, [model]);
 
   const serverIds = useMemo(() => hosts.map((host) => host.serverId), [hosts]);
   const refreshAll = useCallback(async () => {

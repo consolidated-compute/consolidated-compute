@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AggregatedAgent } from "@/hooks/use-aggregated-agents";
 import type { ProjectSummary, WorkspaceSummary } from "@/utils/projects";
+import { compareText } from "./drafts";
 import {
   buildOperationsModel,
   type OperationsAgentNode,
@@ -95,6 +96,10 @@ function flattenModelProjects(
 }
 
 describe("buildOperationsModel", () => {
+  it("uses locale-independent case-insensitive text ordering", () => {
+    expect(["ä", "z", "a", "A"].sort(compareText)).toEqual(["A", "a", "z", "ä"]);
+  });
+
   it("groups managed agents once, preserves hierarchy, and excludes offline rows from live totals", () => {
     const model = buildOperationsModel({
       hosts: [
