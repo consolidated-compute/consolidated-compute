@@ -1992,6 +1992,7 @@ export const useSessionStore = create<SessionStore>()(
             attentionReason: agent.attentionReason ?? null,
             attentionTimestamp: agent.attentionTimestamp ?? null,
             createdAt: agent.createdAt,
+            parentAgentId: agent.parentAgentId,
             labels: agent.labels,
           });
         }
