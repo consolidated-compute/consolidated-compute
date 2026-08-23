@@ -107,6 +107,44 @@ function AvailabilityAlert({
   );
 }
 
+function providerSubagentIssueText(
+  host: OperationsHostFacts,
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
+  const state = host.providerSubagentActivity;
+  if (state?.kind === "unsupported") {
+    return t("operations.availability.providerSubagentsUnsupported", {
+      host: host.serverName,
+    });
+  }
+  if (state?.kind === "error") {
+    return t(
+      state.hasSnapshot
+        ? "operations.availability.providerSubagentsLastKnown"
+        : "operations.availability.providerSubagentsUnavailable",
+      { host: host.serverName },
+    );
+  }
+  return "";
+}
+
+function ProviderSubagentAvailabilityAlert({
+  hosts,
+}: {
+  hosts: readonly OperationsHostFacts[];
+}): ReactElement | null {
+  const { t } = useTranslation();
+  if (hosts.length === 0) return null;
+  return (
+    <Alert
+      variant="warning"
+      title={t("operations.availability.providerSubagentsPartial")}
+      description={hosts.map((host) => providerSubagentIssueText(host, t)).join("\n")}
+      testID="operations-provider-subagents-partial"
+    />
+  );
+}
+
 function OperationsStatusAlerts({
   availability,
   isRevalidating,
@@ -120,7 +158,15 @@ function OperationsStatusAlerts({
   const showUpdating = isRevalidating || availability.isPartiallyLoading;
   const showAvailability =
     availability.unavailableHosts.length > 0 && availability.body.kind !== "all_hosts_unavailable";
-  if (!didManualRefreshFail && !showUpdating && !showAvailability) return null;
+  const showProviderSubagentAvailability = availability.providerSubagentIssueHosts.length > 0;
+  if (
+    !didManualRefreshFail &&
+    !showUpdating &&
+    !showAvailability &&
+    !showProviderSubagentAvailability
+  ) {
+    return null;
+  }
 
   return (
     <View style={styles.statusAlerts}>
@@ -143,6 +189,9 @@ function OperationsStatusAlerts({
           hosts={availability.unavailableHosts}
           areAllHostsUnavailable={availability.areAllHostsUnavailable}
         />
+      ) : null}
+      {showProviderSubagentAvailability ? (
+        <ProviderSubagentAvailabilityAlert hosts={availability.providerSubagentIssueHosts} />
       ) : null}
     </View>
   );

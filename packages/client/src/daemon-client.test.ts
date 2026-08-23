@@ -751,6 +751,54 @@ test("advertises client capabilities in hello", async () => {
   });
 });
 
+test("lists host-wide provider subagent activity through the snapshot RPC", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_provider_subagent_snapshot",
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen({ features: { providerSubagentActivitySnapshot: true } });
+  await connectPromise;
+
+  const promise = client.listProviderSubagentActivity({ requestId: "snapshot-1" });
+  expect(parseSentFrame(mock.sent[0])).toEqual({
+    type: "agent.provider_subagents.snapshot.get.request",
+    requestId: "snapshot-1",
+  });
+
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "agent.provider_subagents.snapshot.get.response",
+      payload: {
+        requestId: "snapshot-1",
+        subagents: [
+          {
+            id: "child-1",
+            parentAgentId: "parent-1",
+            provider: "codex",
+            title: "Review",
+            description: "Inspect the diff",
+            status: "running",
+            createdAt: "2026-08-22T10:00:00.000Z",
+            updatedAt: "2026-08-22T10:01:00.000Z",
+            toolCallId: "tool-1",
+          },
+        ],
+        error: null,
+      },
+    }),
+  );
+
+  await expect(promise).resolves.toMatchObject({
+    subagents: [{ id: "child-1", parentAgentId: "parent-1" }],
+  });
+});
+
 test("allows callers to disable default client capabilities", async () => {
   const mock = createMockTransport();
   const client = new DaemonClient({

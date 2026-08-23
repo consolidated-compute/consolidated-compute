@@ -29,10 +29,26 @@ export interface ProviderSubagentTimelineState {
   rows: Map<number, ProviderSubagentTimelineRow>;
 }
 
+export type ProviderSubagentActivityState =
+  | { kind: "loading"; hasSnapshot: boolean }
+  | { kind: "ready" }
+  | { kind: "unsupported" }
+  | { kind: "error"; hasSnapshot: boolean; error: string };
+
 interface ProviderSubagentState {
   descriptors: Map<string, ProviderSubagentDescriptorPayload>;
   timelines: Map<string, ProviderSubagentTimelineState>;
   hiddenFromTrack: Set<string>;
+  activityByServer: Map<string, ProviderSubagentActivityState>;
+  activityGenerationByServer: Map<string, number>;
+  beginActivitySnapshot(serverId: string): number;
+  replaceActivitySnapshot(
+    serverId: string,
+    generation: number,
+    subagents: ProviderSubagentDescriptorPayload[],
+  ): void;
+  failActivitySnapshot(serverId: string, generation: number, error: string): void;
+  markActivityUnsupported(serverId: string): void;
   hideFromTrack(serverId: string, parentAgentId: string, subagentIds: readonly string[]): void;
   replaceList(
     serverId: string,
@@ -72,8 +88,51 @@ export function providerSubagentLifecycleStatus(
 }
 
 type ProviderSubagentListClient = Pick<DaemonClient, "listProviderSubagents">;
+type ProviderSubagentActivityClient = Pick<DaemonClient, "listProviderSubagentActivity">;
 
 const pendingListRequests = new WeakMap<ProviderSubagentListClient, Map<string, Promise<void>>>();
+const pendingActivityRequests = new WeakMap<
+  ProviderSubagentActivityClient,
+  Map<string, Promise<void>>
+>();
+
+export function refreshProviderSubagentActivity(
+  client: ProviderSubagentActivityClient,
+  serverId: string,
+): Promise<void> {
+  let clientRequests = pendingActivityRequests.get(client);
+  if (!clientRequests) {
+    clientRequests = new Map();
+    pendingActivityRequests.set(client, clientRequests);
+  }
+  const pending = clientRequests.get(serverId);
+  if (pending) return pending;
+
+  const generation = useProviderSubagentStore.getState().beginActivitySnapshot(serverId);
+  const request = client
+    .listProviderSubagentActivity()
+    .then((payload) => {
+      useProviderSubagentStore
+        .getState()
+        .replaceActivitySnapshot(serverId, generation, payload.subagents);
+      return undefined;
+    })
+    .catch((error: unknown) => {
+      useProviderSubagentStore
+        .getState()
+        .failActivitySnapshot(
+          serverId,
+          generation,
+          error instanceof Error ? error.message : String(error),
+        );
+      throw error;
+    })
+    .finally(() => {
+      clientRequests?.delete(serverId);
+    });
+  clientRequests.set(serverId, request);
+  return request;
+}
 
 export function refreshProviderSubagents(
   client: ProviderSubagentListClient,
@@ -104,6 +163,17 @@ export function refreshProviderSubagents(
 
 function parentPrefix(serverId: string, parentAgentId: string): string {
   return `${serverId}\0${parentAgentId}\0`;
+}
+
+function serverPrefix(serverId: string): string {
+  return `${serverId}\0`;
+}
+
+function hasActivitySnapshot(state: ProviderSubagentActivityState | undefined): boolean {
+  return (
+    state?.kind === "ready" ||
+    ((state?.kind === "loading" || state?.kind === "error") && state.hasSnapshot)
+  );
 }
 
 const EMPTY_TIMELINE: ProviderSubagentTimelineState = {
@@ -192,10 +262,86 @@ function buildTimelineResponseRows(
   return rows;
 }
 
-export const useProviderSubagentStore = create<ProviderSubagentState>((set) => ({
+export const useProviderSubagentStore = create<ProviderSubagentState>((set, get) => ({
   descriptors: new Map(),
   timelines: new Map(),
   hiddenFromTrack: new Set(),
+  activityByServer: new Map(),
+  activityGenerationByServer: new Map(),
+  beginActivitySnapshot(serverId) {
+    const generation = (get().activityGenerationByServer.get(serverId) ?? 0) + 1;
+    set((state) => {
+      const activityGenerationByServer = new Map(state.activityGenerationByServer);
+      activityGenerationByServer.set(serverId, generation);
+      const activityByServer = new Map(state.activityByServer);
+      activityByServer.set(serverId, {
+        kind: "loading",
+        hasSnapshot: hasActivitySnapshot(state.activityByServer.get(serverId)),
+      });
+      return { activityByServer, activityGenerationByServer };
+    });
+    return generation;
+  },
+  replaceActivitySnapshot(serverId, generation, subagents) {
+    set((state) => {
+      if (state.activityGenerationByServer.get(serverId) !== generation) return state;
+      const prefix = serverPrefix(serverId);
+      const descriptors = new Map(
+        [...state.descriptors].filter(([key]) => !key.startsWith(prefix)),
+      );
+      for (const subagent of subagents) {
+        descriptors.set(
+          providerSubagentKey(serverId, subagent.parentAgentId, subagent.id),
+          subagent,
+        );
+      }
+      const retainedKeys = new Set(descriptors.keys());
+      const timelines = new Map(
+        [...state.timelines].filter(([key]) => !key.startsWith(prefix) || retainedKeys.has(key)),
+      );
+      const hiddenFromTrack = new Set(
+        [...state.hiddenFromTrack].filter(
+          (key) => !key.startsWith(prefix) || retainedKeys.has(key),
+        ),
+      );
+      for (const subagent of subagents) {
+        const key = providerSubagentKey(serverId, subagent.parentAgentId, subagent.id);
+        const current = timelines.get(key);
+        const previous = state.descriptors.get(key);
+        if (subagent.status === "running") hiddenFromTrack.delete(key);
+        if (current && previous?.status !== subagent.status) {
+          timelines.set(
+            key,
+            buildTimelineState(current.rows, current.epoch, subagent, current.hasOlder),
+          );
+        }
+      }
+      const activityByServer = new Map(state.activityByServer);
+      activityByServer.set(serverId, { kind: "ready" });
+      return { descriptors, timelines, hiddenFromTrack, activityByServer };
+    });
+  },
+  failActivitySnapshot(serverId, generation, error) {
+    set((state) => {
+      if (state.activityGenerationByServer.get(serverId) !== generation) return state;
+      const activityByServer = new Map(state.activityByServer);
+      activityByServer.set(serverId, {
+        kind: "error",
+        hasSnapshot: hasActivitySnapshot(state.activityByServer.get(serverId)),
+        error,
+      });
+      return { activityByServer };
+    });
+  },
+  markActivityUnsupported(serverId) {
+    set((state) => {
+      const activityGenerationByServer = new Map(state.activityGenerationByServer);
+      activityGenerationByServer.set(serverId, (activityGenerationByServer.get(serverId) ?? 0) + 1);
+      const activityByServer = new Map(state.activityByServer);
+      activityByServer.set(serverId, { kind: "unsupported" });
+      return { activityByServer, activityGenerationByServer };
+    });
+  },
   hideFromTrack(serverId, parentAgentId, subagentIds) {
     set((state) => {
       const hiddenFromTrack = new Set(state.hiddenFromTrack);

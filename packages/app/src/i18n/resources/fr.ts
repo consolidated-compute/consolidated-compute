@@ -260,6 +260,8 @@ export const fr: TranslationResources = {
     empty: "Aucun agent actif",
     emptyDescription: "Les agents gérés apparaîtront ici au démarrage du travail",
     untitledAgent: "Agent sans titre",
+    untitledProviderSubagent: "Sous-agent fournisseur sans titre",
+    providerSubagent: "Sous-agent fournisseur",
     otherWork: "Autre travail",
     unavailableWorkspace: "Espace de travail indisponible",
     lastKnown: "Dernier état connu",
@@ -292,6 +294,12 @@ export const fr: TranslationResources = {
       hostLastKnown: "{{host}} est indisponible ; affichage des dernières données connues",
       hostUnavailable: "{{host}} est indisponible",
       noData: "Aucune donnée d’agent en cache n’est disponible",
+      providerSubagentsPartial: "Certaines données de sous-agents fournisseur sont indisponibles",
+      providerSubagentsUnsupported:
+        "{{host}} doit être mis à jour pour afficher les sous-agents fournisseur",
+      providerSubagentsLastKnown:
+        "Les sous-agents de {{host}} n’ont pas pu être actualisés ; affichage des dernières données connues",
+      providerSubagentsUnavailable: "Les sous-agents de {{host}} n’ont pas pu être chargés",
     },
     relationship: {
       crossWorkspace: "Enfant de {{parent}} dans un autre espace de travail",

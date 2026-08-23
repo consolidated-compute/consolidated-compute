@@ -111,13 +111,39 @@ function livePriority(draft: AgentDraft): number {
 function treePriority(draft: AgentDraft): number {
   let priority = livePriority(draft);
   for (const child of draft.children) priority = Math.min(priority, treePriority(child));
+  for (const child of draft.providerSubagents) {
+    if (!child.isLastKnown) {
+      priority = Math.min(priority, getWorkspaceStateBucketPriority(child.state));
+    }
+  }
   return priority;
 }
 
 function treeLastActivity(draft: AgentDraft): number {
   let latest = draft.agent.lastActivityAt.getTime();
   for (const child of draft.children) latest = Math.max(latest, treeLastActivity(child));
+  for (const child of draft.providerSubagents) {
+    latest = Math.max(latest, child.lastActivityAt.getTime());
+  }
   return latest;
+}
+
+function compareProviderSubagents(
+  left: OperationsAgentNode["providerSubagents"][number],
+  right: OperationsAgentNode["providerSubagents"][number],
+): number {
+  const leftPriority = left.isLastKnown
+    ? OFFLINE_PRIORITY
+    : getWorkspaceStateBucketPriority(left.state);
+  const rightPriority = right.isLastKnown
+    ? OFFLINE_PRIORITY
+    : getWorkspaceStateBucketPriority(right.state);
+  return (
+    leftPriority - rightPriority ||
+    right.lastActivityAt.getTime() - left.lastActivityAt.getTime() ||
+    compareText(left.label, right.label) ||
+    compareText(left.key, right.key)
+  );
 }
 
 function compareAgentDrafts(left: AgentDraft, right: AgentDraft): number {
@@ -131,6 +157,7 @@ function compareAgentDrafts(left: AgentDraft, right: AgentDraft): number {
 
 function toAgentNode(draft: AgentDraft): OperationsAgentNode {
   draft.children.sort(compareAgentDrafts);
+  draft.providerSubagents.sort(compareProviderSubagents);
   return {
     key: draft.key,
     serverId: draft.agent.serverId,
@@ -143,6 +170,7 @@ function toAgentNode(draft: AgentDraft): OperationsAgentNode {
     lastActivityAt: draft.agent.lastActivityAt,
     parent: draft.parent,
     children: draft.children.map(toAgentNode),
+    providerSubagents: draft.providerSubagents,
   };
 }
 
@@ -170,6 +198,15 @@ function aggregateNodes(nodes: readonly OperationsAgentNode[]): {
     if (nextPriority < priority) {
       priority = nextPriority;
       state = node.state;
+    }
+    for (const child of node.providerSubagents) {
+      lastActivity = Math.max(lastActivity, child.lastActivityAt.getTime());
+      if (child.isLastKnown) continue;
+      const childPriority = getWorkspaceStateBucketPriority(child.state);
+      if (childPriority < priority) {
+        priority = childPriority;
+        state = child.state;
+      }
     }
   }
   return {
@@ -262,11 +299,16 @@ export function buildProjects(
 
 export function summarizeAgents(agents: readonly AgentDraft[]): OperationsSummary {
   const summary: OperationsSummary = { working: 0, attention: 0, idle: 0 };
-  for (const agent of agents) {
-    if (agent.isLastKnown) continue;
-    if (agent.state === "running") summary.working += 1;
-    else if (agent.state === "done") summary.idle += 1;
+  const addState = (state: WorkspaceStateBucket) => {
+    if (state === "running") summary.working += 1;
+    else if (state === "done") summary.idle += 1;
     else summary.attention += 1;
+  };
+  for (const agent of agents) {
+    if (!agent.isLastKnown) addState(agent.state);
+    for (const child of agent.providerSubagents) {
+      if (!child.isLastKnown) addState(child.state);
+    }
   }
   return summary;
 }

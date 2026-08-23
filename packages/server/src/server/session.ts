@@ -2182,6 +2182,9 @@ export class Session {
         return this.handleAgentTimelineListPromptsRequest(msg, source);
       case "agent.provider_subagents.list.request":
         return this.handleProviderSubagentListRequest(msg);
+      case "agent.provider_subagents.snapshot.get.request":
+        this.handleProviderSubagentSnapshotRequest(msg);
+        return undefined;
       case "agent.provider_subagents.timeline.get.request":
         return this.handleProviderSubagentTimelineRequest(msg);
       case "agent.timeline.set_subscription.request": {
@@ -7024,6 +7027,30 @@ export class Session {
         payload: {
           requestId: msg.requestId,
           parentAgentId: msg.parentAgentId,
+          subagents: [],
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  private handleProviderSubagentSnapshotRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.provider_subagents.snapshot.get.request" }>,
+  ): void {
+    try {
+      this.emit({
+        type: "agent.provider_subagents.snapshot.get.response",
+        payload: {
+          requestId: msg.requestId,
+          subagents: this.agentManager.listProviderSubagentActivity(),
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emit({
+        type: "agent.provider_subagents.snapshot.get.response",
+        payload: {
+          requestId: msg.requestId,
           subagents: [],
           error: error instanceof Error ? error.message : String(error),
         },

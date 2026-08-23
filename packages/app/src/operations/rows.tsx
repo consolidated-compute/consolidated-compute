@@ -14,7 +14,12 @@ import { getProviderIcon, type ProviderIconProps } from "@/components/provider-i
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { getStatusDotColor } from "@/utils/status-dot-color";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
-import type { OperationsAgentNode, OperationsProject, OperationsWorkspace } from "./model";
+import type {
+  OperationsAgentNode,
+  OperationsProject,
+  OperationsProviderSubagentNode,
+  OperationsWorkspace,
+} from "./model";
 
 interface OperationsAgentRowProps {
   agent: OperationsAgentNode;
@@ -94,6 +99,58 @@ function statusDotStyle(state: OperationsAgentNode["state"]): StyleProp<ViewStyl
   }
 }
 
+function OperationsProviderSubagentRow({
+  subagent,
+}: {
+  subagent: OperationsProviderSubagentNode;
+}): ReactElement {
+  const { t } = useTranslation();
+  const title = subagent.label || t("operations.untitledProviderSubagent");
+  const stateLabel = t(`operations.states.${subagent.state}`);
+  const accessibilityLabel = [
+    title,
+    t("operations.providerSubagent"),
+    stateLabel,
+    subagent.isLastKnown ? t("operations.lastKnown") : null,
+    subagent.subtitle || null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(". ");
+
+  return (
+    <View
+      accessibilityLabel={accessibilityLabel}
+      style={styles.row}
+      testID={`operations-provider-subagent-${encodeURIComponent(subagent.serverId)}-${encodeURIComponent(subagent.parentAgentId)}-${encodeURIComponent(subagent.subagentId)}`}
+    >
+      <View style={styles.agentLeading}>
+        <View
+          style={statusDotStyle(subagent.state)}
+          testID={`operations-provider-subagent-state-${subagent.state}`}
+        />
+        <ThemedProviderGlyph provider={subagent.provider} />
+      </View>
+      <View style={styles.rowBody}>
+        <Text style={styles.rowTitle} numberOfLines={1}>
+          {title}
+        </Text>
+        <View style={styles.metaRow}>
+          <Text style={styles.stateText}>{stateLabel}</Text>
+          <Text style={styles.metaText}>{t("operations.providerSubagent")}</Text>
+          {subagent.isLastKnown ? (
+            <Text style={styles.metaText}>{t("operations.lastKnown")}</Text>
+          ) : null}
+          {subagent.subtitle ? (
+            <Text style={styles.metaText} numberOfLines={1}>
+              {subagent.subtitle}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+    </View>
+  );
+}
+
 export function OperationsAgentRow({ agent, workspaceId }: OperationsAgentRowProps): ReactElement {
   const { t } = useTranslation();
   const title = agent.title || t("operations.untitledAgent");
@@ -150,13 +207,16 @@ export function OperationsAgentRow({ agent, workspaceId }: OperationsAgentRowPro
         </View>
         <ThemedChevronRight size={14} />
       </Pressable>
-      {agent.children.length > 0 ? (
+      {agent.children.length > 0 || agent.providerSubagents.length > 0 ? (
         <View
           style={styles.children}
           testID={`operations-agent-children-${agent.serverId}-${agent.agentId}`}
         >
           {agent.children.map((child) => (
             <OperationsAgentRow key={child.key} agent={child} workspaceId={workspaceId} />
+          ))}
+          {agent.providerSubagents.map((subagent) => (
+            <OperationsProviderSubagentRow key={subagent.key} subagent={subagent} />
           ))}
         </View>
       ) : null}

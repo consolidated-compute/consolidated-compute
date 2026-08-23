@@ -4,6 +4,7 @@ import type { ProjectSummary, WorkspaceSummary } from "@/utils/projects";
 import type {
   OperationsHostFacts,
   OperationsParentRelationship,
+  OperationsProviderSubagentNode,
   OperationsWorkspaceKind,
 } from "./model";
 
@@ -42,6 +43,7 @@ export interface AgentDraft {
   isLastKnown: boolean;
   parent: OperationsParentRelationship | null;
   children: AgentDraft[];
+  providerSubagents: OperationsProviderSubagentNode[];
 }
 
 export function operationsAgentKey(serverId: string, agentId: string): string {

@@ -5,6 +5,8 @@ import {
 } from "@getpaseo/protocol/agent-state-bucket";
 import type { AggregatedAgent } from "@/hooks/use-aggregated-agents";
 import type { ProjectSummary } from "@/utils/projects";
+import type { ProviderSubagentDescriptorPayload } from "@getpaseo/protocol/messages";
+import { buildSubagentRowPresentationData } from "@/subagents/track-presentation";
 import {
   buildHostMap,
   buildKnownWorkspaceMap,
@@ -23,10 +25,18 @@ export type OperationsHostState =
   | { kind: "offline"; hasLoadedDirectory: boolean; error: string | null }
   | { kind: "error"; hasLoadedDirectory: boolean; isOnline: boolean; error: string };
 
+export type OperationsProviderSubagentActivityState =
+  | { kind: "initial_loading" }
+  | { kind: "loading"; hasSnapshot: boolean }
+  | { kind: "ready" }
+  | { kind: "unsupported" }
+  | { kind: "error"; hasSnapshot: boolean; error: string };
+
 export interface OperationsHostFacts {
   serverId: string;
   serverName: string;
   state: OperationsHostState;
+  providerSubagentActivity?: OperationsProviderSubagentActivityState;
 }
 
 export interface OperationsSummary {
@@ -60,6 +70,25 @@ export interface OperationsAgentNode {
   lastActivityAt: Date;
   parent: OperationsParentRelationship | null;
   children: readonly OperationsAgentNode[];
+  providerSubagents: readonly OperationsProviderSubagentNode[];
+}
+
+export interface OperationsProviderSubagentNode {
+  key: string;
+  serverId: string;
+  parentAgentId: string;
+  subagentId: string;
+  provider: ProviderSubagentDescriptorPayload["provider"];
+  label: string;
+  subtitle: string;
+  state: WorkspaceStateBucket;
+  isLastKnown: boolean;
+  lastActivityAt: Date;
+}
+
+export interface OperationsProviderSubagentFacts {
+  serverId: string;
+  descriptor: ProviderSubagentDescriptorPayload;
 }
 
 export interface OperationsWorkspace {
@@ -101,6 +130,7 @@ export interface BuildOperationsModelInput {
   hosts: readonly OperationsHostFacts[];
   projects: readonly ProjectSummary[];
   agents: readonly AggregatedAgent[];
+  providerSubagents?: readonly OperationsProviderSubagentFacts[];
   previous?: OperationsModel | null;
 }
 
@@ -120,6 +150,50 @@ function hasLoadedDirectory(host: OperationsHostFacts): boolean {
 
 function hasLiveDirectory(host: OperationsHostFacts): boolean {
   return host.state.kind === "ready" || host.state.kind === "revalidating";
+}
+
+function hasProviderSubagentSnapshot(host: OperationsHostFacts | undefined): boolean {
+  const state = host?.providerSubagentActivity;
+  if (!state) return false;
+  return (
+    state.kind === "ready" ||
+    ((state.kind === "loading" || state.kind === "error") && state.hasSnapshot)
+  );
+}
+
+function hasLiveProviderSubagentSnapshot(host: OperationsHostFacts | undefined): boolean {
+  return host?.providerSubagentActivity?.kind === "ready" && hasLiveDirectory(host);
+}
+
+function toProviderSubagentNode(
+  serverId: string,
+  descriptor: ProviderSubagentDescriptorPayload,
+  isLastKnown: boolean,
+): OperationsProviderSubagentNode {
+  const presentation = buildSubagentRowPresentationData({
+    kind: "provider",
+    id: descriptor.id,
+    parentAgentId: descriptor.parentAgentId,
+    provider: descriptor.provider,
+    title: descriptor.title,
+    description: descriptor.description,
+    subtitle: descriptor.subtitle ?? null,
+    status: descriptor.status,
+    requiresAttention: false,
+    createdAt: new Date(descriptor.createdAt),
+  });
+  return {
+    key: `${serverId}\0${descriptor.parentAgentId}\0${descriptor.id}`,
+    serverId,
+    parentAgentId: descriptor.parentAgentId,
+    subagentId: descriptor.id,
+    provider: descriptor.provider,
+    label: presentation.label,
+    subtitle: presentation.subtitle,
+    state: presentation.statusBucket ?? "done",
+    isLastKnown,
+    lastActivityAt: new Date(descriptor.updatedAt),
+  };
 }
 
 function stabilizeByKey<T extends { key: string }>(
@@ -177,10 +251,27 @@ export function buildOperationsModel(input: BuildOperationsModelInput): Operatio
       isLastKnown: !host || !hasLiveDirectory(host),
       parent: null,
       children: [],
+      providerSubagents: [],
     };
     workspace.agents.push(draft);
     agentDrafts.push(draft);
     draftsByKey.set(draft.key, draft);
+  }
+
+  for (const item of input.providerSubagents ?? []) {
+    const host = hostByServerId.get(item.serverId);
+    if (!hasProviderSubagentSnapshot(host)) continue;
+    const parent = draftsByKey.get(
+      operationsAgentKey(item.serverId, item.descriptor.parentAgentId),
+    );
+    if (!parent) continue;
+    parent.providerSubagents.push(
+      toProviderSubagentNode(
+        item.serverId,
+        item.descriptor,
+        !hasLiveProviderSubagentSnapshot(host),
+      ),
+    );
   }
 
   const parentByChild = connectAgentHierarchy(agentDrafts, draftsByKey);
@@ -194,17 +285,26 @@ export function buildOperationsModel(input: BuildOperationsModelInput): Operatio
       ? input.previous.summary
       : nextSummary;
   const liveAgentCount = nextSummary.working + nextSummary.attention + nextSummary.idle;
+  const providerSubagentCount = agentDrafts.reduce(
+    (count, agent) => count + agent.providerSubagents.length,
+    0,
+  );
   const isInitialLoading =
     hosts.some((host) => host.state.kind === "initial_loading") &&
     hosts.every((host) => !hasLoadedDirectory(host));
   const isRevalidating = hosts.some((host) => host.state.kind === "revalidating");
-  const hasPartialData = hosts.some((host) => host.state.kind !== "ready");
+  const hasPartialData = hosts.some(
+    (host) =>
+      host.state.kind !== "ready" ||
+      (host.providerSubagentActivity !== undefined &&
+        host.providerSubagentActivity.kind !== "ready"),
+  );
 
   return {
     hosts,
     projects,
     summary,
-    agentCount: agentDrafts.length,
+    agentCount: agentDrafts.length + providerSubagentCount,
     liveAgentCount,
     isInitialLoading,
     isRevalidating,

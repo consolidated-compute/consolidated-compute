@@ -7,16 +7,24 @@ import {
   type OperationsAgentNode,
   type OperationsHostFacts,
   type OperationsHostState,
+  type OperationsProviderSubagentActivityState,
 } from "./model";
 
 function host(
   serverId: string,
-  options: { serverName?: string; state?: OperationsHostState } = {},
+  options: {
+    serverName?: string;
+    state?: OperationsHostState;
+    providerSubagentActivity?: OperationsProviderSubagentActivityState;
+  } = {},
 ): OperationsHostFacts {
   return {
     serverId,
     serverName: options.serverName ?? serverId,
     state: options.state ?? { kind: "ready" },
+    ...(options.providerSubagentActivity
+      ? { providerSubagentActivity: options.providerSubagentActivity }
+      : {}),
   };
 }
 
@@ -96,6 +104,126 @@ function flattenModelProjects(
 }
 
 describe("buildOperationsModel", () => {
+  it("attaches provider-native children by host-qualified identity and presents terminal states", () => {
+    const model = buildOperationsModel({
+      hosts: [
+        host("alpha", { providerSubagentActivity: { kind: "ready" } }),
+        host("beta", { providerSubagentActivity: { kind: "ready" } }),
+      ],
+      projects: [],
+      agents: [
+        agent({ id: "parent", serverId: "alpha" }),
+        agent({ id: "parent", serverId: "beta" }),
+      ],
+      providerSubagents: [
+        {
+          serverId: "alpha",
+          descriptor: {
+            id: "shared-child",
+            parentAgentId: "parent",
+            provider: "codex",
+            title: "reviewer",
+            description: "Review the diff",
+            status: "running",
+            createdAt: "2026-08-22T10:00:00.000Z",
+            updatedAt: "2026-08-22T10:01:00.000Z",
+            toolCallId: "tool-1",
+          },
+        },
+        {
+          serverId: "alpha",
+          descriptor: {
+            id: "failed-child",
+            parentAgentId: "parent",
+            provider: "claude",
+            title: "tester",
+            description: "Run the test",
+            status: "failed",
+            createdAt: "2026-08-22T10:00:00.000Z",
+            updatedAt: "2026-08-22T10:02:00.000Z",
+            toolCallId: "tool-2",
+          },
+        },
+        {
+          serverId: "beta",
+          descriptor: {
+            id: "shared-child",
+            parentAgentId: "parent",
+            provider: "codex",
+            title: "reviewer",
+            description: "Review another diff",
+            status: "canceled",
+            createdAt: "2026-08-22T10:00:00.000Z",
+            updatedAt: "2026-08-22T10:03:00.000Z",
+            toolCallId: "tool-3",
+          },
+        },
+        {
+          serverId: "beta",
+          descriptor: {
+            id: "completed-child",
+            parentAgentId: "parent",
+            provider: "opencode",
+            title: "explorer",
+            description: "Map the repository",
+            status: "completed",
+            createdAt: "2026-08-22T10:00:00.000Z",
+            updatedAt: "2026-08-22T10:04:00.000Z",
+            toolCallId: "tool-4",
+          },
+        },
+      ],
+    });
+
+    const parents = flattenModelProjects(model.projects);
+    const providerChildren = parents.flatMap((node) => node.providerSubagents);
+    expect(providerChildren).toHaveLength(4);
+    expect(new Set(providerChildren.map((child) => child.key)).size).toBe(4);
+    expect(providerChildren).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          serverId: "alpha",
+          subagentId: "shared-child",
+          label: "Review the diff",
+          subtitle: "reviewer",
+          state: "running",
+        }),
+        expect.objectContaining({ subagentId: "failed-child", state: "failed" }),
+        expect.objectContaining({ serverId: "beta", subagentId: "shared-child", state: "done" }),
+        expect.objectContaining({ subagentId: "completed-child", state: "done" }),
+      ]),
+    );
+    expect(model.agentCount).toBe(6);
+    expect(model.summary).toEqual({ working: 1, attention: 1, idle: 4 });
+  });
+
+  it("does not expose partial per-parent data for an unsupported host", () => {
+    const model = buildOperationsModel({
+      hosts: [host("old-host", { providerSubagentActivity: { kind: "unsupported" } })],
+      projects: [],
+      agents: [agent({ id: "parent", serverId: "old-host" })],
+      providerSubagents: [
+        {
+          serverId: "old-host",
+          descriptor: {
+            id: "partial-child",
+            parentAgentId: "parent",
+            provider: "codex",
+            title: "reviewer",
+            description: "Partial data",
+            status: "running",
+            createdAt: "2026-08-22T10:00:00.000Z",
+            updatedAt: "2026-08-22T10:01:00.000Z",
+            toolCallId: null,
+          },
+        },
+      ],
+    });
+
+    expect(flattenModelProjects(model.projects)[0]?.providerSubagents).toEqual([]);
+    expect(model.hasPartialData).toBe(true);
+  });
+
   it("uses locale-independent case-insensitive text ordering", () => {
     expect(["ä", "z", "a", "A"].sort(compareText)).toEqual(["A", "a", "z", "ä"]);
   });
