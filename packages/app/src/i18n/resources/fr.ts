@@ -255,6 +255,44 @@ export const fr: TranslationResources = {
       clearSearch: "Effacer la recherche",
     },
   },
+  operations: {
+    title: "Opérations",
+    empty: "Aucun agent actif",
+    emptyDescription: "Les agents gérés apparaîtront ici au démarrage du travail",
+    untitledAgent: "Agent sans titre",
+    lastKnown: "Dernier état connu",
+    actions: {
+      refresh: "Actualiser",
+      openAgent: "Ouvrir {{agent}}",
+      openWorkspace: "Ouvrir l’espace de travail {{workspace}}",
+    },
+    summary: {
+      working: "En cours",
+      attention: "Attention",
+      idle: "Inactif",
+      accessibility: "En cours {{working}}, attention {{attention}}, inactif {{idle}}",
+    },
+    states: {
+      running: "En cours",
+      needs_input: "Entrée requise",
+      attention: "Attention",
+      failed: "Échec",
+      done: "Inactif",
+    },
+    availability: {
+      allUnavailable: "Tous les hôtes sont indisponibles",
+      partial: "Certaines données d’hôte sont indisponibles",
+      updating: "Actualisation des Opérations",
+      hostLastKnown: "{{host}} est indisponible ; affichage des dernières données connues",
+      hostUnavailable: "{{host}} est indisponible",
+      noData: "Aucune donnée d’agent en cache n’est disponible",
+    },
+    relationship: {
+      crossWorkspace: "Enfant de {{parent}} dans un autre espace de travail",
+      missing: "L’agent parent {{parent}} est indisponible",
+      cycle: "Relation parent non valide",
+    },
+  },
   agentList: {
     fallbackTitle: "Nouvelle séance",
     dateSections: {

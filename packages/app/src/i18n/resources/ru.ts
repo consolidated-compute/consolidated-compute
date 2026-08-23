@@ -253,6 +253,44 @@ export const ru: TranslationResources = {
       clearSearch: "Очистить поиск",
     },
   },
+  operations: {
+    title: "Операции",
+    empty: "Нет активных агентов",
+    emptyDescription: "Управляемые агенты появятся здесь после начала работы",
+    untitledAgent: "Агент без названия",
+    lastKnown: "Последнее известное состояние",
+    actions: {
+      refresh: "Обновить",
+      openAgent: "Открыть {{agent}}",
+      openWorkspace: "Открыть рабочую область {{workspace}}",
+    },
+    summary: {
+      working: "Работают",
+      attention: "Требуют внимания",
+      idle: "Ожидают",
+      accessibility: "Работают {{working}}, требуют внимания {{attention}}, ожидают {{idle}}",
+    },
+    states: {
+      running: "Работает",
+      needs_input: "Нужен ввод",
+      attention: "Требует внимания",
+      failed: "Сбой",
+      done: "Ожидает",
+    },
+    availability: {
+      allUnavailable: "Все хосты недоступны",
+      partial: "Часть данных хостов недоступна",
+      updating: "Операции обновляются",
+      hostLastKnown: "{{host}} недоступен; показаны последние известные данные",
+      hostUnavailable: "{{host}} недоступен",
+      noData: "Кэшированные данные агентов отсутствуют",
+    },
+    relationship: {
+      crossWorkspace: "Дочерний агент {{parent}} в другой рабочей области",
+      missing: "Родительский агент {{parent}} недоступен",
+      cycle: "Недопустимая родительская связь",
+    },
+  },
   agentList: {
     fallbackTitle: "Новая сессия",
     dateSections: {

@@ -251,6 +251,44 @@ export const zhCN: TranslationResources = {
       clearSearch: "清除搜索",
     },
   },
+  operations: {
+    title: "运行中心",
+    empty: "没有活跃的 Agent",
+    emptyDescription: "工作开始后，受管 Agent 将显示在这里",
+    untitledAgent: "未命名 Agent",
+    lastKnown: "最后已知状态",
+    actions: {
+      refresh: "刷新",
+      openAgent: "打开 {{agent}}",
+      openWorkspace: "打开工作区 {{workspace}}",
+    },
+    summary: {
+      working: "工作中",
+      attention: "需要注意",
+      idle: "空闲",
+      accessibility: "工作中 {{working}}，需要注意 {{attention}}，空闲 {{idle}}",
+    },
+    states: {
+      running: "工作中",
+      needs_input: "需要输入",
+      attention: "需要注意",
+      failed: "失败",
+      done: "空闲",
+    },
+    availability: {
+      allUnavailable: "所有 Host 均不可用",
+      partial: "部分 Host 数据不可用",
+      updating: "正在刷新运行中心",
+      hostLastKnown: "{{host}} 不可用；正在显示最后已知数据",
+      hostUnavailable: "{{host}} 不可用",
+      noData: "没有缓存的 Agent 数据",
+    },
+    relationship: {
+      crossWorkspace: "另一个工作区中 {{parent}} 的子 Agent",
+      missing: "父 Agent {{parent}} 不可用",
+      cycle: "父级关系无效",
+    },
+  },
   agentList: {
     fallbackTitle: "新会话",
     dateSections: {

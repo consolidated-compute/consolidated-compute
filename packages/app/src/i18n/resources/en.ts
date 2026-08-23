@@ -249,6 +249,44 @@ export const en = {
       clearSearch: "Clear search",
     },
   },
+  operations: {
+    title: "Operations",
+    empty: "No active agents",
+    emptyDescription: "Managed agents will appear here when work starts",
+    untitledAgent: "Untitled agent",
+    lastKnown: "Last known",
+    actions: {
+      refresh: "Refresh",
+      openAgent: "Open {{agent}}",
+      openWorkspace: "Open workspace {{workspace}}",
+    },
+    summary: {
+      working: "Working",
+      attention: "Attention",
+      idle: "Idle",
+      accessibility: "Working {{working}}, attention {{attention}}, idle {{idle}}",
+    },
+    states: {
+      running: "Working",
+      needs_input: "Needs input",
+      attention: "Attention",
+      failed: "Failed",
+      done: "Idle",
+    },
+    availability: {
+      allUnavailable: "All hosts unavailable",
+      partial: "Some host data unavailable",
+      updating: "Updating Operations",
+      hostLastKnown: "{{host}} is unavailable; showing last-known data",
+      hostUnavailable: "{{host}} is unavailable",
+      noData: "No cached agent data is available",
+    },
+    relationship: {
+      crossWorkspace: "Child of {{parent}} in another workspace",
+      missing: "Parent {{parent}} is unavailable",
+      cycle: "Invalid parent relationship",
+    },
+  },
   agentList: {
     fallbackTitle: "New session",
     dateSections: {

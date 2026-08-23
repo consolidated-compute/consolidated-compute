@@ -251,6 +251,44 @@ export const ar: TranslationResources = {
       clearSearch: "مسح البحث",
     },
   },
+  operations: {
+    title: "العمليات",
+    empty: "لا توجد وكلاء نشطة",
+    emptyDescription: "ستظهر الوكلاء المُدارة هنا عند بدء العمل",
+    untitledAgent: "وكيل بلا عنوان",
+    lastKnown: "آخر حالة معروفة",
+    actions: {
+      refresh: "تحديث",
+      openAgent: "فتح {{agent}}",
+      openWorkspace: "فتح مساحة العمل {{workspace}}",
+    },
+    summary: {
+      working: "يعمل",
+      attention: "يحتاج إلى انتباه",
+      idle: "خامل",
+      accessibility: "يعمل {{working}}، يحتاج إلى انتباه {{attention}}، خامل {{idle}}",
+    },
+    states: {
+      running: "يعمل",
+      needs_input: "يحتاج إلى إدخال",
+      attention: "يحتاج إلى انتباه",
+      failed: "فشل",
+      done: "خامل",
+    },
+    availability: {
+      allUnavailable: "جميع المضيفين غير متاحين",
+      partial: "بعض بيانات المضيف غير متاحة",
+      updating: "جارٍ تحديث العمليات",
+      hostLastKnown: "{{host}} غير متاح؛ يتم عرض آخر حالة معروفة",
+      hostUnavailable: "{{host}} غير متاح",
+      noData: "لا تتوفر بيانات وكلاء مخزنة مؤقتًا",
+    },
+    relationship: {
+      crossWorkspace: "تابع لـ {{parent}} في مساحة عمل أخرى",
+      missing: "الوكيل الأصل {{parent}} غير متاح",
+      cycle: "علاقة أصل غير صالحة",
+    },
+  },
   agentList: {
     fallbackTitle: "جلسة جديدة",
     dateSections: {

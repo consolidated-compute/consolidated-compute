@@ -428,6 +428,10 @@ export function buildSchedulesRoute() {
   return "/schedules" as const;
 }
 
+export function buildOperationsRoute() {
+  return "/operations" as const;
+}
+
 export function buildOpenProjectRoute() {
   return "/open-project" as const;
 }
