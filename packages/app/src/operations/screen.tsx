@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import type { OperationsHostFacts, OperationsSummary } from "./model";
 import { OperationsProjectRows } from "./rows";
-import { resolveOperationsAvailability } from "./screen-state";
+import { resolveOperationsAvailability, type OperationsAvailability } from "./screen-state";
 import { useOperationsData } from "./use-operations-data";
 
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner, (theme) => ({
@@ -67,6 +67,14 @@ function hostIssueText(
   t: ReturnType<typeof useTranslation>["t"],
 ): string {
   if (host.state.kind !== "offline" && host.state.kind !== "error") return "";
+  if (host.state.kind === "error") {
+    return t(
+      host.state.hasLoadedDirectory
+        ? "operations.availability.hostDataLastKnown"
+        : "operations.availability.hostDataUnavailable",
+      { host: host.serverName },
+    );
+  }
   if (host.state.hasLoadedDirectory) {
     return t("operations.availability.hostLastKnown", { host: host.serverName });
   }
@@ -99,17 +107,60 @@ function AvailabilityAlert({
   );
 }
 
+function OperationsStatusAlerts({
+  availability,
+  isRevalidating,
+  didManualRefreshFail,
+}: {
+  availability: OperationsAvailability;
+  isRevalidating: boolean;
+  didManualRefreshFail: boolean;
+}): ReactElement | null {
+  const { t } = useTranslation();
+  const showUpdating = isRevalidating || availability.isPartiallyLoading;
+  const showAvailability =
+    availability.unavailableHosts.length > 0 && availability.body.kind !== "all_hosts_unavailable";
+  if (!didManualRefreshFail && !showUpdating && !showAvailability) return null;
+
+  return (
+    <View style={styles.statusAlerts}>
+      {didManualRefreshFail ? (
+        <Alert
+          variant="error"
+          title={t("operations.availability.refreshFailed")}
+          testID="operations-refresh-failed"
+        />
+      ) : null}
+      {showUpdating ? (
+        <Alert
+          variant="info"
+          title={t("operations.availability.updating")}
+          testID="operations-revalidating"
+        />
+      ) : null}
+      {showAvailability ? (
+        <AvailabilityAlert
+          hosts={availability.unavailableHosts}
+          areAllHostsUnavailable={availability.areAllHostsUnavailable}
+        />
+      ) : null}
+    </View>
+  );
+}
+
 function OperationsScreenContent(): ReactElement {
   const { t } = useTranslation();
   const operations = useOperationsData();
   const availability = useMemo(() => resolveOperationsAvailability(operations), [operations]);
   const [isManualRefresh, setIsManualRefresh] = useState(false);
+  const [didManualRefreshFail, setDidManualRefreshFail] = useState(false);
   const isRefreshing = isManualRefresh || operations.isRevalidating;
   const refresh = useCallback(() => {
+    setDidManualRefreshFail(false);
     setIsManualRefresh(true);
     void operations
       .refreshAll()
-      .catch(() => undefined)
+      .catch(() => setDidManualRefreshFail(true))
       .finally(() => setIsManualRefresh(false));
   }, [operations]);
   const headerAction = useMemo(
@@ -161,17 +212,6 @@ function OperationsScreenContent(): ReactElement {
       >
         <View style={styles.content}>
           <Summary summary={operations.summary} />
-          {operations.isRevalidating ? (
-            <Alert
-              variant="info"
-              title={t("operations.availability.updating")}
-              testID="operations-revalidating"
-            />
-          ) : null}
-          <AvailabilityAlert
-            hosts={availability.unavailableHosts}
-            areAllHostsUnavailable={availability.areAllHostsUnavailable}
-          />
           <View style={styles.projects}>
             {operations.projects.map((project) => (
               <OperationsProjectRows key={project.key} project={project} />
@@ -185,6 +225,11 @@ function OperationsScreenContent(): ReactElement {
   return (
     <View style={styles.container} testID="operations-screen">
       <MenuHeader title={t("operations.title")} rightContent={headerAction} />
+      <OperationsStatusAlerts
+        availability={availability}
+        isRevalidating={operations.isRevalidating}
+        didManualRefreshFail={didManualRefreshFail}
+      />
       {body}
     </View>
   );
@@ -209,6 +254,17 @@ const styles = StyleSheet.create((theme) => ({
     },
     paddingVertical: theme.spacing[4],
     gap: theme.spacing[4],
+  },
+  statusAlerts: {
+    width: "100%",
+    maxWidth: 960,
+    alignSelf: "center",
+    paddingHorizontal: {
+      xs: theme.spacing[3],
+      md: theme.spacing[6],
+    },
+    paddingTop: theme.spacing[4],
+    gap: theme.spacing[3],
   },
   summary: {
     flexDirection: "row",

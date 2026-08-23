@@ -259,6 +259,8 @@ export const ja: TranslationResources = {
     empty: "アクティブなエージェントはありません",
     emptyDescription: "作業が始まると管理対象エージェントがここに表示されます",
     untitledAgent: "無題のエージェント",
+    otherWork: "その他の作業",
+    unavailableWorkspace: "利用できないワークスペース",
     lastKnown: "最終確認時",
     actions: {
       refresh: "更新",
@@ -282,6 +284,9 @@ export const ja: TranslationResources = {
       allUnavailable: "すべてのホストが利用できません",
       partial: "一部のホストデータを利用できません",
       updating: "オペレーションを更新中",
+      refreshFailed: "オペレーションを更新できませんでした",
+      hostDataLastKnown: "{{host}}のデータを更新できません。最終確認時のデータを表示しています",
+      hostDataUnavailable: "{{host}}のデータを読み込めませんでした",
       hostLastKnown: "{{host}}は利用できません。最終確認時のデータを表示しています",
       hostUnavailable: "{{host}}は利用できません",
       noData: "キャッシュされたエージェントデータはありません",

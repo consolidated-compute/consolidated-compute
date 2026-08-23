@@ -258,6 +258,8 @@ export const ru: TranslationResources = {
     empty: "Нет активных агентов",
     emptyDescription: "Управляемые агенты появятся здесь после начала работы",
     untitledAgent: "Агент без названия",
+    otherWork: "Другая работа",
+    unavailableWorkspace: "Недоступная рабочая область",
     lastKnown: "Последнее известное состояние",
     actions: {
       refresh: "Обновить",
@@ -281,6 +283,9 @@ export const ru: TranslationResources = {
       allUnavailable: "Все хосты недоступны",
       partial: "Часть данных хостов недоступна",
       updating: "Операции обновляются",
+      refreshFailed: "Не удалось обновить операции",
+      hostDataLastKnown: "Не удалось обновить данные {{host}}; показаны последние известные данные",
+      hostDataUnavailable: "Не удалось загрузить данные {{host}}",
       hostLastKnown: "{{host}} недоступен; показаны последние известные данные",
       hostUnavailable: "{{host}} недоступен",
       noData: "Кэшированные данные агентов отсутствуют",

@@ -256,6 +256,8 @@ export const zhCN: TranslationResources = {
     empty: "没有活跃的 Agent",
     emptyDescription: "工作开始后，受管 Agent 将显示在这里",
     untitledAgent: "未命名 Agent",
+    otherWork: "其他工作",
+    unavailableWorkspace: "不可用的工作区",
     lastKnown: "最后已知状态",
     actions: {
       refresh: "刷新",
@@ -279,6 +281,9 @@ export const zhCN: TranslationResources = {
       allUnavailable: "所有 Host 均不可用",
       partial: "部分 Host 数据不可用",
       updating: "正在刷新运行中心",
+      refreshFailed: "无法刷新运行中心",
+      hostDataLastKnown: "无法刷新 {{host}} 的数据；正在显示最后已知数据",
+      hostDataUnavailable: "无法加载 {{host}} 的数据",
       hostLastKnown: "{{host}} 不可用；正在显示最后已知数据",
       hostUnavailable: "{{host}} 不可用",
       noData: "没有缓存的 Agent 数据",

@@ -56,6 +56,29 @@ function parentText(
   return t("operations.relationship.cycle");
 }
 
+function workspaceTitle(
+  workspace: OperationsWorkspace,
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
+  if (workspace.title) return workspace.title;
+  if (workspace.kind === "unavailable" && workspace.name === "Unavailable workspace") {
+    return t("operations.unavailableWorkspace");
+  }
+  if (workspace.kind === "unassigned" && workspace.name === "Other work") {
+    return t("operations.otherWork");
+  }
+  return workspace.name;
+}
+
+function projectTitle(
+  project: OperationsProject,
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
+  return project.viewKey === null && project.name === "Other work"
+    ? t("operations.otherWork")
+    : project.name;
+}
+
 function statusDotStyle(state: OperationsAgentNode["state"]): StyleProp<ViewStyle> {
   switch (state) {
     case "needs_input":
@@ -73,7 +96,17 @@ function statusDotStyle(state: OperationsAgentNode["state"]): StyleProp<ViewStyl
 
 export function OperationsAgentRow({ agent, workspaceId }: OperationsAgentRowProps): ReactElement {
   const { t } = useTranslation();
+  const title = agent.title || t("operations.untitledAgent");
+  const stateLabel = t(`operations.states.${agent.state}`);
   const relationship = parentText(agent, t);
+  const accessibilityLabel = [
+    t("operations.actions.openAgent", { agent: title }),
+    stateLabel,
+    agent.isLastKnown ? t("operations.lastKnown") : null,
+    relationship,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(". ");
   const openAgent = useCallback(() => {
     navigateToAgent({
       serverId: agent.serverId,
@@ -87,9 +120,7 @@ export function OperationsAgentRow({ agent, workspaceId }: OperationsAgentRowPro
     <View style={styles.agentTree}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={t("operations.actions.openAgent", {
-          agent: agent.title || t("operations.untitledAgent"),
-        })}
+        accessibilityLabel={accessibilityLabel}
         onPress={openAgent}
         style={rowStyle}
         testID={`operations-agent-${agent.serverId}-${agent.agentId}`}
@@ -103,10 +134,10 @@ export function OperationsAgentRow({ agent, workspaceId }: OperationsAgentRowPro
         </View>
         <View style={styles.rowBody}>
           <Text style={styles.rowTitle} numberOfLines={1}>
-            {agent.title || t("operations.untitledAgent")}
+            {title}
           </Text>
           <View style={styles.metaRow}>
-            <Text style={styles.stateText}>{t(`operations.states.${agent.state}`)}</Text>
+            <Text style={styles.stateText}>{stateLabel}</Text>
             {agent.isLastKnown ? (
               <Text style={styles.metaText}>{t("operations.lastKnown")}</Text>
             ) : null}
@@ -139,7 +170,7 @@ export function OperationsWorkspaceRows({
   workspace: OperationsWorkspace;
 }): ReactElement {
   const { t } = useTranslation();
-  const title = workspace.title || workspace.name;
+  const title = workspaceTitle(workspace, t);
   const openWorkspace = useCallback(() => {
     if (!workspace.workspaceId) return;
     navigateToWorkspace({ serverId: workspace.serverId, workspaceId: workspace.workspaceId });
@@ -147,6 +178,13 @@ export function OperationsWorkspaceRows({
   const workspaceMeta = workspace.currentBranch
     ? `${workspace.serverName} · ${workspace.currentBranch}`
     : workspace.serverName;
+  const accessibilityLabel = [
+    t("operations.actions.openWorkspace", { workspace: title }),
+    workspaceMeta,
+    workspace.isLastKnown ? t("operations.lastKnown") : null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(". ");
 
   const content = (
     <>
@@ -172,7 +210,7 @@ export function OperationsWorkspaceRows({
       {workspace.workspaceId ? (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={t("operations.actions.openWorkspace", { workspace: title })}
+          accessibilityLabel={accessibilityLabel}
           onPress={openWorkspace}
           style={rowStyle}
         >
@@ -191,10 +229,11 @@ export function OperationsWorkspaceRows({
 }
 
 export function OperationsProjectRows({ project }: { project: OperationsProject }): ReactElement {
+  const { t } = useTranslation();
   return (
     <View style={styles.project} testID={`operations-project-${encodeURIComponent(project.key)}`}>
       <Text accessibilityRole="header" style={styles.projectTitle}>
-        {project.name}
+        {projectTitle(project, t)}
       </Text>
       {project.workspaces.map((workspace) => (
         <OperationsWorkspaceRows key={workspace.key} workspace={workspace} />

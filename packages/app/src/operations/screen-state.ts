@@ -10,6 +10,7 @@ export interface OperationsAvailability {
   body: OperationsBodyState;
   unavailableHosts: readonly OperationsHostFacts[];
   areAllHostsUnavailable: boolean;
+  isPartiallyLoading: boolean;
 }
 
 function isUnavailable(host: OperationsHostFacts): boolean {
@@ -20,6 +21,8 @@ export function resolveOperationsAvailability(model: OperationsModel): Operation
   const unavailableHosts = model.hosts.filter(isUnavailable);
   const areAllHostsUnavailable =
     model.hosts.length > 0 && unavailableHosts.length === model.hosts.length;
+  const isPartiallyLoading =
+    !model.isInitialLoading && model.hosts.some((host) => host.state.kind === "initial_loading");
 
   let body: OperationsBodyState;
   if (model.isInitialLoading) body = { kind: "initial_loading" };
@@ -27,5 +30,5 @@ export function resolveOperationsAvailability(model: OperationsModel): Operation
   else if (areAllHostsUnavailable) body = { kind: "all_hosts_unavailable" };
   else body = { kind: "empty" };
 
-  return { body, unavailableHosts, areAllHostsUnavailable };
+  return { body, unavailableHosts, areAllHostsUnavailable, isPartiallyLoading };
 }

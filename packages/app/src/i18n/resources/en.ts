@@ -254,6 +254,8 @@ export const en = {
     empty: "No active agents",
     emptyDescription: "Managed agents will appear here when work starts",
     untitledAgent: "Untitled agent",
+    otherWork: "Other work",
+    unavailableWorkspace: "Unavailable workspace",
     lastKnown: "Last known",
     actions: {
       refresh: "Refresh",
@@ -277,6 +279,9 @@ export const en = {
       allUnavailable: "All hosts unavailable",
       partial: "Some host data unavailable",
       updating: "Updating Operations",
+      refreshFailed: "Could not refresh Operations",
+      hostDataLastKnown: "{{host}} data could not be refreshed; showing last-known data",
+      hostDataUnavailable: "{{host}} data could not be loaded",
       hostLastKnown: "{{host}} is unavailable; showing last-known data",
       hostUnavailable: "{{host}} is unavailable",
       noData: "No cached agent data is available",

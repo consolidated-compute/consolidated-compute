@@ -139,7 +139,20 @@ test.describe("Operations", () => {
         await capture(page, testInfo, "operations-wide");
       });
 
-      await test.step("agent drill-down and the desktop sidebar return to Operations", async () => {
+      await test.step("workspace and agent drill-down return through the desktop sidebar", async () => {
+        await page
+          .getByTestId(`operations-workspace-${secondaryDaemon.serverId}-${secondary.workspaceId}`)
+          .getByRole("button", { name: /^Open workspace Secondary operations workspace\./ })
+          .click();
+        await expect(page).toHaveURL(
+          new RegExp(
+            `/h/${secondaryDaemon.serverId}/workspace/${encodeURIComponent(secondary.workspaceId)}`,
+          ),
+          { timeout: 30_000 },
+        );
+        await page.locator('[data-testid="sidebar-operations"]:visible').click();
+        await expect(page).toHaveURL(/\/operations$/);
+
         await page
           .getByTestId(`operations-agent-${secondaryDaemon.serverId}-${secondaryAgent.id}`)
           .click();
@@ -169,6 +182,17 @@ test.describe("Operations", () => {
         await expectSummaryTotal(page, 5);
         await expect(page.getByTestId("operations-refresh")).toBeVisible();
         await capture(page, testInfo, "operations-compact");
+      });
+
+      await test.step("failed manual refresh remains visible", async () => {
+        await secondaryDaemon.close();
+        await expect(page.getByTestId("operations-partial-hosts")).toBeVisible({
+          timeout: 30_000,
+        });
+        await page.getByTestId("operations-refresh").click();
+        await expect(page.getByTestId("operations-refresh-failed")).toBeVisible({
+          timeout: 30_000,
+        });
       });
     } finally {
       await secondary.cleanup().catch(() => undefined);

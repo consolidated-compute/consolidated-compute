@@ -50,6 +50,7 @@ describe("resolveOperationsAvailability", () => {
       body: { kind: "all_hosts_unavailable" },
       unavailableHosts: hosts,
       areAllHostsUnavailable: true,
+      isPartiallyLoading: false,
     });
   });
 
@@ -64,6 +65,48 @@ describe("resolveOperationsAvailability", () => {
       body: { kind: "content" },
       unavailableHosts: [offline],
       areAllHostsUnavailable: true,
+      isPartiallyLoading: false,
+    });
+  });
+
+  it("keeps mixed-host loading visible after another host has loaded", () => {
+    const hosts: OperationsHostFacts[] = [
+      {
+        serverId: "ready",
+        serverName: "Ready",
+        state: { kind: "ready" },
+      },
+      {
+        serverId: "loading",
+        serverName: "Loading",
+        state: { kind: "initial_loading" },
+      },
+    ];
+
+    expect(resolveOperationsAvailability(model({ hosts }))).toEqual({
+      body: { kind: "empty" },
+      unavailableHosts: [],
+      areAllHostsUnavailable: false,
+      isPartiallyLoading: true,
+    });
+  });
+
+  it("retains partial-host errors alongside an empty result", () => {
+    const unavailable: OperationsHostFacts = {
+      serverId: "offline",
+      serverName: "Offline",
+      state: { kind: "offline", hasLoadedDirectory: false, error: null },
+    };
+    const hosts: OperationsHostFacts[] = [
+      { serverId: "ready", serverName: "Ready", state: { kind: "ready" } },
+      unavailable,
+    ];
+
+    expect(resolveOperationsAvailability(model({ hosts }))).toEqual({
+      body: { kind: "empty" },
+      unavailableHosts: [unavailable],
+      areAllHostsUnavailable: false,
+      isPartiallyLoading: false,
     });
   });
 });

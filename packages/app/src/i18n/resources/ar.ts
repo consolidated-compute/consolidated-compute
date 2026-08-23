@@ -253,9 +253,11 @@ export const ar: TranslationResources = {
   },
   operations: {
     title: "العمليات",
-    empty: "لا توجد وكلاء نشطة",
-    emptyDescription: "ستظهر الوكلاء المُدارة هنا عند بدء العمل",
+    empty: "لا يوجد وكلاء نشطون",
+    emptyDescription: "سيظهر الوكلاء المُدارون هنا عند بدء العمل",
     untitledAgent: "وكيل بلا عنوان",
+    otherWork: "أعمال أخرى",
+    unavailableWorkspace: "مساحة عمل غير متاحة",
     lastKnown: "آخر حالة معروفة",
     actions: {
       refresh: "تحديث",
@@ -279,6 +281,9 @@ export const ar: TranslationResources = {
       allUnavailable: "جميع المضيفين غير متاحين",
       partial: "بعض بيانات المضيف غير متاحة",
       updating: "جارٍ تحديث العمليات",
+      refreshFailed: "تعذر تحديث العمليات",
+      hostDataLastKnown: "تعذر تحديث بيانات {{host}}؛ يتم عرض آخر حالة معروفة",
+      hostDataUnavailable: "تعذر تحميل بيانات {{host}}",
       hostLastKnown: "{{host}} غير متاح؛ يتم عرض آخر حالة معروفة",
       hostUnavailable: "{{host}} غير متاح",
       noData: "لا تتوفر بيانات وكلاء مخزنة مؤقتًا",

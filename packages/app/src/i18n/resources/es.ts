@@ -259,6 +259,8 @@ export const es: TranslationResources = {
     empty: "No hay agentes activos",
     emptyDescription: "Los agentes gestionados aparecerán aquí cuando comience el trabajo",
     untitledAgent: "Agente sin título",
+    otherWork: "Otro trabajo",
+    unavailableWorkspace: "Espacio de trabajo no disponible",
     lastKnown: "Último estado conocido",
     actions: {
       refresh: "Actualizar",
@@ -282,6 +284,10 @@ export const es: TranslationResources = {
       allUnavailable: "Todos los hosts no están disponibles",
       partial: "Faltan datos de algunos hosts",
       updating: "Actualizando Operaciones",
+      refreshFailed: "No se pudo actualizar Operaciones",
+      hostDataLastKnown:
+        "No se pudieron actualizar los datos de {{host}}; se muestran los últimos conocidos",
+      hostDataUnavailable: "No se pudieron cargar los datos de {{host}}",
       hostLastKnown: "{{host}} no está disponible; se muestran los últimos datos conocidos",
       hostUnavailable: "{{host}} no está disponible",
       noData: "No hay datos de agentes en caché",
