@@ -261,6 +261,14 @@ export const zhCN: TranslationResources = {
     otherWork: "其他工作",
     unavailableWorkspace: "不可用的工作区",
     lastKnown: "最后已知状态",
+    forge: {
+      factsUnknown: "变更请求状态未知",
+      statusUnknown: "状态未知",
+      checksUnknown: "检查状态未知",
+      noChecks: "无检查",
+      reviewPending: "等待审查",
+      reviewUnknown: "审查状态未知",
+    },
     actions: {
       refresh: "刷新",
       openAgent: "打开 {{agent}}",

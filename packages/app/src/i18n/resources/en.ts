@@ -259,6 +259,14 @@ export const en = {
     otherWork: "Other work",
     unavailableWorkspace: "Unavailable workspace",
     lastKnown: "Last known",
+    forge: {
+      factsUnknown: "Change request status unknown",
+      statusUnknown: "Status unknown",
+      checksUnknown: "Checks unknown",
+      noChecks: "No checks",
+      reviewPending: "Review pending",
+      reviewUnknown: "Review unknown",
+    },
     actions: {
       refresh: "Refresh",
       openAgent: "Open {{agent}}",

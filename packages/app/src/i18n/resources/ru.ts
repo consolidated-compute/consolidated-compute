@@ -263,6 +263,14 @@ export const ru: TranslationResources = {
     otherWork: "Другая работа",
     unavailableWorkspace: "Недоступная рабочая область",
     lastKnown: "Последнее известное состояние",
+    forge: {
+      factsUnknown: "Статус запроса на изменение неизвестен",
+      statusUnknown: "Статус неизвестен",
+      checksUnknown: "Статус проверок неизвестен",
+      noChecks: "Нет проверок",
+      reviewPending: "Ожидает ревью",
+      reviewUnknown: "Статус ревью неизвестен",
+    },
     actions: {
       refresh: "Обновить",
       openAgent: "Открыть {{agent}}",

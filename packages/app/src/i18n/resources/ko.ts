@@ -262,6 +262,14 @@ export const ko: TranslationResources = {
     otherWork: "기타 작업",
     unavailableWorkspace: "사용할 수 없는 워크스페이스",
     lastKnown: "마지막 확인 상태",
+    forge: {
+      factsUnknown: "변경 요청 상태를 알 수 없음",
+      statusUnknown: "상태 알 수 없음",
+      checksUnknown: "검사 상태 알 수 없음",
+      noChecks: "검사 없음",
+      reviewPending: "리뷰 대기 중",
+      reviewUnknown: "리뷰 상태 알 수 없음",
+    },
     actions: {
       refresh: "새로고침",
       openAgent: "{{agent}} 열기",

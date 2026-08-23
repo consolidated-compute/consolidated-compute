@@ -14,6 +14,7 @@ import { getProviderIcon, type ProviderIconProps } from "@/components/provider-i
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { getStatusDotColor } from "@/utils/status-dot-color";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
+import { formatOperationsChangeRequestLabel } from "./forge-context";
 import type {
   OperationsAgentNode,
   OperationsProject,
@@ -82,6 +83,48 @@ function projectTitle(
   return project.viewKey === null && project.name === "Other work"
     ? t("operations.otherWork")
     : project.name;
+}
+
+function forgeContextParts(
+  workspace: OperationsWorkspace,
+  t: ReturnType<typeof useTranslation>["t"],
+): string[] {
+  const context = workspace.forgeContext;
+  if (context.kind === "none") return [];
+  if (context.kind === "unknown") return [t("operations.forge.factsUnknown")];
+
+  const changeRequest = context.changeRequest;
+  const state =
+    changeRequest.state === "unknown"
+      ? t("operations.forge.statusUnknown")
+      : t(`workspace.git.pr.states.${changeRequest.state}`);
+  const checks = (() => {
+    switch (changeRequest.checksStatus) {
+      case "success":
+        return t("workspace.git.pr.checksSummary.passedAccessible");
+      case "failure":
+        return t("workspace.git.pr.checksSummary.failedAccessible");
+      case "pending":
+        return t("workspace.git.pr.checksSummary.runningAccessible");
+      case "none":
+        return t("operations.forge.noChecks");
+      case "unknown":
+        return t("operations.forge.checksUnknown");
+    }
+  })();
+  const review = (() => {
+    switch (changeRequest.reviewDecision) {
+      case "approved":
+        return t("workspace.git.pr.activity.approved");
+      case "changes_requested":
+        return t("workspace.git.pr.activity.requestedChanges");
+      case "pending":
+        return t("operations.forge.reviewPending");
+      case "unknown":
+        return t("operations.forge.reviewUnknown");
+    }
+  })();
+  return [formatOperationsChangeRequestLabel(changeRequest), state, checks, review];
 }
 
 function statusDotStyle(state: OperationsAgentNode["state"]): StyleProp<ViewStyle> {
@@ -238,9 +281,11 @@ export function OperationsWorkspaceRows({
   const workspaceMeta = workspace.currentBranch
     ? `${workspace.serverName} · ${workspace.currentBranch}`
     : workspace.serverName;
+  const forgeParts = forgeContextParts(workspace, t);
   const accessibilityLabel = [
     t("operations.actions.openWorkspace", { workspace: title }),
     workspaceMeta,
+    ...forgeParts,
     workspace.isLastKnown ? t("operations.lastKnown") : null,
   ]
     .filter((part): part is string => Boolean(part))
@@ -257,6 +302,14 @@ export function OperationsWorkspaceRows({
           {workspaceMeta}
           {workspace.isLastKnown ? ` · ${t("operations.lastKnown")}` : ""}
         </Text>
+        {forgeParts.length > 0 ? (
+          <Text
+            style={styles.metaText}
+            testID={`operations-forge-${workspace.serverId}-${workspace.workspaceId ?? workspace.kind}`}
+          >
+            {forgeParts.join(" · ")}
+          </Text>
+        ) : null}
       </View>
       {workspace.workspaceId ? <ThemedChevronRight size={14} /> : null}
     </>

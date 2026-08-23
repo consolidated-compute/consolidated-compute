@@ -32,6 +32,7 @@ function workspace(id: string, name: string): WorkspaceSummary {
   return {
     id,
     name,
+    workspaceDirectory: `/repo/${id}`,
     workspaceKind: "worktree",
     status: "done",
     currentBranch: `branch/${id}`,
@@ -461,6 +462,55 @@ describe("buildOperationsModel", () => {
     expect(
       flattenModelProjects(model.projects).find((node) => node.agentId === "stale")?.isLastKnown,
     ).toBe(true);
+  });
+
+  it("marks cached forge status unknown when its host directory is stale", () => {
+    const cachedWorkspace = workspace("cached", "Cached");
+    cachedWorkspace.forge = "gitlab";
+    cachedWorkspace.forgeRuntime = {
+      pullRequest: {
+        number: 9,
+        url: "https://gitlab.example/acme/app/-/merge_requests/9",
+        title: "Cached work",
+        state: "open",
+        baseRefName: "main",
+        headRefName: "feature/cached",
+        isMerged: false,
+        checksStatus: "success",
+        reviewDecision: "approved",
+      },
+      error: null,
+    };
+    const model = buildOperationsModel({
+      hosts: [
+        host("offline", {
+          state: { kind: "offline", hasLoadedDirectory: true, error: null },
+        }),
+      ],
+      projects: [
+        project({
+          viewKey: "cached-project",
+          name: "acme/app",
+          hosts: [{ serverId: "offline", workspaces: [cachedWorkspace] }],
+        }),
+      ],
+      agents: [agent({ id: "cached-agent", serverId: "offline", workspaceId: "cached" })],
+    });
+
+    expect(model.projects[0]?.workspaces[0]).toMatchObject({
+      workspaceDirectory: "/repo/cached",
+      isLastKnown: true,
+      forgeContext: {
+        kind: "change_request",
+        changeRequest: {
+          forge: "gitlab",
+          number: 9,
+          state: "unknown",
+          checksStatus: "unknown",
+          reviewDecision: "unknown",
+        },
+      },
+    });
   });
 
   it("reports initial loading only while an unloaded host is actively loading", () => {

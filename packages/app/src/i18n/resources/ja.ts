@@ -264,6 +264,14 @@ export const ja: TranslationResources = {
     otherWork: "その他の作業",
     unavailableWorkspace: "利用できないワークスペース",
     lastKnown: "最終確認時",
+    forge: {
+      factsUnknown: "変更リクエストの状態は不明です",
+      statusUnknown: "状態不明",
+      checksUnknown: "チェック不明",
+      noChecks: "チェックなし",
+      reviewPending: "レビュー待ち",
+      reviewUnknown: "レビュー不明",
+    },
     actions: {
       refresh: "更新",
       openAgent: "{{agent}}を開く",
