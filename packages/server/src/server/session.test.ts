@@ -470,6 +470,49 @@ test("routes host-scoped agent skills requests through the daemon owner", async 
   });
 });
 
+test("returns the global provider subagent snapshot without loading dormant parents", async () => {
+  const messages: SessionOutboundMessage[] = [];
+  const listProviderSubagentActivity = vi.fn(() => [
+    {
+      id: "child-1",
+      parentAgentId: "parent-1",
+      provider: "codex" as const,
+      title: "Review",
+      description: "Inspect the diff",
+      status: "running" as const,
+      createdAt: "2026-08-22T10:00:00.000Z",
+      updatedAt: "2026-08-22T10:01:00.000Z",
+      toolCallId: "tool-1",
+      cwd: null,
+      subtitle: null,
+    },
+  ]);
+  const getStoredAgent = vi.fn();
+  const listStoredAgents = vi.fn();
+  const session = createSessionForTest({
+    messages,
+    agentManager: { listProviderSubagentActivity },
+    agentStorage: { get: getStoredAgent, list: listStoredAgents },
+  });
+
+  await session.handleMessage({
+    type: "agent.provider_subagents.snapshot.get.request",
+    requestId: "snapshot-1",
+  });
+
+  expect(listProviderSubagentActivity).toHaveBeenCalledOnce();
+  expect(getStoredAgent).not.toHaveBeenCalled();
+  expect(listStoredAgents).not.toHaveBeenCalled();
+  expect(messages).toContainEqual({
+    type: "agent.provider_subagents.snapshot.get.response",
+    payload: {
+      requestId: "snapshot-1",
+      subagents: [expect.objectContaining({ id: "child-1", parentAgentId: "parent-1" })],
+      error: null,
+    },
+  });
+});
+
 test("routes plugin requests and releases its owned catalog subscription on cleanup", async () => {
   const messages: SessionOutboundMessage[] = [];
   const listeners = new Set<(pluginId: string) => void>();

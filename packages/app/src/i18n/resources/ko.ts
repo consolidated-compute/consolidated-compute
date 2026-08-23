@@ -257,6 +257,8 @@ export const ko: TranslationResources = {
     empty: "활성 에이전트 없음",
     emptyDescription: "작업이 시작되면 관리되는 에이전트가 여기에 표시됩니다",
     untitledAgent: "제목 없는 에이전트",
+    untitledProviderSubagent: "제목 없는 공급자 하위 에이전트",
+    providerSubagent: "공급자 하위 에이전트",
     otherWork: "기타 작업",
     unavailableWorkspace: "사용할 수 없는 워크스페이스",
     lastKnown: "마지막 확인 상태",
@@ -288,6 +290,12 @@ export const ko: TranslationResources = {
       hostLastKnown: "{{host}}을(를) 사용할 수 없어 마지막 확인 데이터를 표시합니다",
       hostUnavailable: "{{host}}을(를) 사용할 수 없음",
       noData: "캐시된 에이전트 데이터가 없습니다",
+      providerSubagentsPartial: "일부 공급자 하위 에이전트 데이터를 사용할 수 없음",
+      providerSubagentsUnsupported:
+        "공급자 하위 에이전트를 표시하려면 {{host}} 호스트를 업데이트해야 합니다",
+      providerSubagentsLastKnown:
+        "{{host}}의 공급자 하위 에이전트를 새로 고칠 수 없어 마지막으로 확인된 데이터를 표시합니다",
+      providerSubagentsUnavailable: "{{host}}의 공급자 하위 에이전트를 불러올 수 없습니다",
     },
     relationship: {
       crossWorkspace: "다른 워크스페이스에 있는 {{parent}}의 하위 에이전트",

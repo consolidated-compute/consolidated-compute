@@ -254,6 +254,8 @@ export const en = {
     empty: "No active agents",
     emptyDescription: "Managed agents will appear here when work starts",
     untitledAgent: "Untitled agent",
+    untitledProviderSubagent: "Untitled provider subagent",
+    providerSubagent: "Provider subagent",
     otherWork: "Other work",
     unavailableWorkspace: "Unavailable workspace",
     lastKnown: "Last known",
@@ -285,6 +287,11 @@ export const en = {
       hostLastKnown: "{{host}} is unavailable; showing last-known data",
       hostUnavailable: "{{host}} is unavailable",
       noData: "No cached agent data is available",
+      providerSubagentsPartial: "Some provider subagent data unavailable",
+      providerSubagentsUnsupported: "{{host}} requires a host update to show provider subagents",
+      providerSubagentsLastKnown:
+        "{{host}} provider subagents could not be refreshed; showing last-known data",
+      providerSubagentsUnavailable: "{{host}} provider subagents could not be loaded",
     },
     relationship: {
       crossWorkspace: "Child of {{parent}} in another workspace",

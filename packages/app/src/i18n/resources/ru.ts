@@ -258,6 +258,8 @@ export const ru: TranslationResources = {
     empty: "Нет активных агентов",
     emptyDescription: "Управляемые агенты появятся здесь после начала работы",
     untitledAgent: "Агент без названия",
+    untitledProviderSubagent: "Подагент провайдера без названия",
+    providerSubagent: "Подагент провайдера",
     otherWork: "Другая работа",
     unavailableWorkspace: "Недоступная рабочая область",
     lastKnown: "Последнее известное состояние",
@@ -289,6 +291,11 @@ export const ru: TranslationResources = {
       hostLastKnown: "{{host}} недоступен; показаны последние известные данные",
       hostUnavailable: "{{host}} недоступен",
       noData: "Кэшированные данные агентов отсутствуют",
+      providerSubagentsPartial: "Часть данных подагентов провайдера недоступна",
+      providerSubagentsUnsupported: "Чтобы показать подагентов провайдера, обновите хост {{host}}",
+      providerSubagentsLastKnown:
+        "Не удалось обновить подагентов на {{host}}; показаны последние известные данные",
+      providerSubagentsUnavailable: "Не удалось загрузить подагентов на {{host}}",
     },
     relationship: {
       crossWorkspace: "Дочерний агент {{parent}} в другой рабочей области",

@@ -259,6 +259,8 @@ export const ja: TranslationResources = {
     empty: "アクティブなエージェントはありません",
     emptyDescription: "作業が始まると管理対象エージェントがここに表示されます",
     untitledAgent: "無題のエージェント",
+    untitledProviderSubagent: "無題のプロバイダーサブエージェント",
+    providerSubagent: "プロバイダーサブエージェント",
     otherWork: "その他の作業",
     unavailableWorkspace: "利用できないワークスペース",
     lastKnown: "最終確認時",
@@ -290,6 +292,12 @@ export const ja: TranslationResources = {
       hostLastKnown: "{{host}}は利用できません。最終確認時のデータを表示しています",
       hostUnavailable: "{{host}}は利用できません",
       noData: "キャッシュされたエージェントデータはありません",
+      providerSubagentsPartial: "一部のプロバイダーサブエージェントデータを利用できません",
+      providerSubagentsUnsupported:
+        "プロバイダーサブエージェントを表示するには {{host}} の更新が必要です",
+      providerSubagentsLastKnown:
+        "{{host}} のプロバイダーサブエージェントを更新できなかったため、最後に確認されたデータを表示しています",
+      providerSubagentsUnavailable: "{{host}} のプロバイダーサブエージェントを読み込めませんでした",
     },
     relationship: {
       crossWorkspace: "別のワークスペースにある{{parent}}の子",

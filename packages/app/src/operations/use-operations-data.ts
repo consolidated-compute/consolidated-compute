@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { useAggregatedAgents } from "@/hooks/use-aggregated-agents";
 import { useProjects } from "@/hooks/use-projects";
+import { useHostFeatureAvailabilityMap } from "@/runtime/host-features";
 import {
   getHostRuntimeStore,
   isHostRuntimeDirectoryLoading,
@@ -8,10 +9,17 @@ import {
   useHosts,
 } from "@/runtime/host-runtime";
 import {
+  refreshProviderSubagentActivity,
+  type ProviderSubagentActivityState,
+  useProviderSubagentStore,
+} from "@/subagents/provider-store";
+import {
   buildOperationsModel,
   type OperationsHostFacts,
   type OperationsHostState,
   type OperationsModel,
+  type OperationsProviderSubagentActivityState,
+  type OperationsProviderSubagentFacts,
 } from "./model";
 
 export interface OperationsData extends OperationsModel {
@@ -42,6 +50,15 @@ function toHostState(snapshot: HostRuntimeSnapshot | null): OperationsHostState 
   return { kind: "ready" };
 }
 
+function toProviderSubagentActivityState(
+  supported: boolean | null | undefined,
+  state: ProviderSubagentActivityState | undefined,
+): OperationsProviderSubagentActivityState {
+  if (supported === false) return { kind: "unsupported" };
+  if (state) return state;
+  return { kind: "initial_loading" };
+}
+
 export function useOperationsData(): OperationsData {
   const hosts = useHosts();
   const runtime = getHostRuntimeStore();
@@ -53,6 +70,39 @@ export function useOperationsData(): OperationsData {
   const { agents } = useAggregatedAgents();
   const { projects } = useProjects();
   const previousRef = useRef<OperationsModel | null>(null);
+  const automaticSnapshotKeyByServer = useRef(new Map<string, string>());
+  const serverIds = useMemo(() => hosts.map((host) => host.serverId), [hosts]);
+  const providerSubagentSupport = useHostFeatureAvailabilityMap(
+    serverIds,
+    "providerSubagentActivitySnapshot",
+  );
+  const providerSubagentDescriptors = useProviderSubagentStore((state) => state.descriptors);
+  const providerSubagentActivityByServer = useProviderSubagentStore(
+    (state) => state.activityByServer,
+  );
+
+  useEffect(() => {
+    for (const serverId of serverIds) {
+      const supported = providerSubagentSupport.get(serverId);
+      if (supported === false) {
+        automaticSnapshotKeyByServer.current.delete(serverId);
+        if (
+          useProviderSubagentStore.getState().activityByServer.get(serverId)?.kind !== "unsupported"
+        ) {
+          useProviderSubagentStore.getState().markActivityUnsupported(serverId);
+        }
+        continue;
+      }
+      if (supported !== true) continue;
+      const snapshot = runtime.getSnapshot(serverId);
+      const client = snapshot?.client;
+      if (!client || snapshot.connectionStatus !== "online") continue;
+      const snapshotKey = `${snapshot.clientGeneration}:${snapshot.connectionEpoch}`;
+      if (automaticSnapshotKeyByServer.current.get(serverId) === snapshotKey) continue;
+      automaticSnapshotKeyByServer.current.set(serverId, snapshotKey);
+      void refreshProviderSubagentActivity(client, serverId).catch(() => undefined);
+    }
+  }, [providerSubagentSupport, runtime, runtimeVersion, serverIds]);
 
   const hostFacts = useMemo<OperationsHostFacts[]>(() => {
     void runtimeVersion;
@@ -62,27 +112,51 @@ export function useOperationsData(): OperationsData {
         serverId: host.serverId,
         serverName: host.label,
         state: toHostState(snapshot),
+        providerSubagentActivity: toProviderSubagentActivityState(
+          providerSubagentSupport.get(host.serverId),
+          providerSubagentActivityByServer.get(host.serverId),
+        ),
       };
     });
-  }, [hosts, runtime, runtimeVersion]);
+  }, [hosts, providerSubagentActivityByServer, providerSubagentSupport, runtime, runtimeVersion]);
+
+  const providerSubagents = useMemo<OperationsProviderSubagentFacts[]>(() => {
+    const facts: OperationsProviderSubagentFacts[] = [];
+    for (const serverId of serverIds) {
+      const prefix = `${serverId}\0`;
+      for (const [key, descriptor] of providerSubagentDescriptors) {
+        if (key.startsWith(prefix)) facts.push({ serverId, descriptor });
+      }
+    }
+    return facts;
+  }, [providerSubagentDescriptors, serverIds]);
 
   const model = useMemo(() => {
     return buildOperationsModel({
       hosts: hostFacts,
       projects,
       agents,
+      providerSubagents,
       previous: previousRef.current,
     });
-  }, [agents, hostFacts, projects]);
+  }, [agents, hostFacts, projects, providerSubagents]);
 
   useEffect(() => {
     previousRef.current = model;
   }, [model]);
 
-  const serverIds = useMemo(() => hosts.map((host) => host.serverId), [hosts]);
   const refreshAll = useCallback(async () => {
-    await Promise.all(serverIds.map((serverId) => runtime.refreshDirectories(serverId)));
-  }, [runtime, serverIds]);
+    await Promise.all(
+      serverIds.flatMap((serverId) => {
+        const requests: Promise<unknown>[] = [runtime.refreshDirectories(serverId)];
+        const client = runtime.getClient(serverId);
+        if (client && providerSubagentSupport.get(serverId) === true) {
+          requests.push(refreshProviderSubagentActivity(client, serverId));
+        }
+        return requests;
+      }),
+    );
+  }, [providerSubagentSupport, runtime, serverIds]);
 
   return useMemo(() => ({ ...model, refreshAll }), [model, refreshAll]);
 }

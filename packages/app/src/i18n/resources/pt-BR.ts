@@ -259,6 +259,8 @@ export const ptBR: TranslationResources = {
     empty: "Nenhum agente ativo",
     emptyDescription: "Os agentes gerenciados aparecerão aqui quando o trabalho começar",
     untitledAgent: "Agente sem título",
+    untitledProviderSubagent: "Subagente do provedor sem título",
+    providerSubagent: "Subagente do provedor",
     otherWork: "Outros trabalhos",
     unavailableWorkspace: "Workspace indisponível",
     lastKnown: "Último estado conhecido",
@@ -291,6 +293,12 @@ export const ptBR: TranslationResources = {
       hostLastKnown: "{{host}} está indisponível; exibindo os últimos dados conhecidos",
       hostUnavailable: "{{host}} está indisponível",
       noData: "Não há dados de agentes em cache",
+      providerSubagentsPartial: "Alguns dados de subagentes do provedor estão indisponíveis",
+      providerSubagentsUnsupported:
+        "{{host}} precisa ser atualizado para mostrar subagentes do provedor",
+      providerSubagentsLastKnown:
+        "Não foi possível atualizar os subagentes de {{host}}; mostrando os últimos dados conhecidos",
+      providerSubagentsUnavailable: "Não foi possível carregar os subagentes de {{host}}",
     },
     relationship: {
       crossWorkspace: "Filho de {{parent}} em outro workspace",

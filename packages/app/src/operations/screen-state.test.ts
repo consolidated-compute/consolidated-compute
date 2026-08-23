@@ -49,6 +49,7 @@ describe("resolveOperationsAvailability", () => {
     expect(resolveOperationsAvailability(model({ hosts }))).toEqual({
       body: { kind: "all_hosts_unavailable" },
       unavailableHosts: hosts,
+      providerSubagentIssueHosts: [],
       areAllHostsUnavailable: true,
       isPartiallyLoading: false,
     });
@@ -64,6 +65,7 @@ describe("resolveOperationsAvailability", () => {
     expect(resolveOperationsAvailability(model({ hosts: [offline], agentCount: 2 }))).toEqual({
       body: { kind: "content" },
       unavailableHosts: [offline],
+      providerSubagentIssueHosts: [],
       areAllHostsUnavailable: true,
       isPartiallyLoading: false,
     });
@@ -86,6 +88,7 @@ describe("resolveOperationsAvailability", () => {
     expect(resolveOperationsAvailability(model({ hosts }))).toEqual({
       body: { kind: "empty" },
       unavailableHosts: [],
+      providerSubagentIssueHosts: [],
       areAllHostsUnavailable: false,
       isPartiallyLoading: true,
     });
@@ -105,6 +108,36 @@ describe("resolveOperationsAvailability", () => {
     expect(resolveOperationsAvailability(model({ hosts }))).toEqual({
       body: { kind: "empty" },
       unavailableHosts: [unavailable],
+      providerSubagentIssueHosts: [],
+      areAllHostsUnavailable: false,
+      isPartiallyLoading: false,
+    });
+  });
+
+  it("reports unsupported and failed provider subagent snapshots without hiding managed data", () => {
+    const unsupported: OperationsHostFacts = {
+      serverId: "old",
+      serverName: "Old",
+      state: { kind: "ready" },
+      providerSubagentActivity: { kind: "unsupported" },
+    };
+    const failed: OperationsHostFacts = {
+      serverId: "failed",
+      serverName: "Failed",
+      state: { kind: "ready" },
+      providerSubagentActivity: {
+        kind: "error",
+        hasSnapshot: true,
+        error: "snapshot failed",
+      },
+    };
+
+    expect(
+      resolveOperationsAvailability(model({ hosts: [unsupported, failed], agentCount: 2 })),
+    ).toEqual({
+      body: { kind: "content" },
+      unavailableHosts: [],
+      providerSubagentIssueHosts: [unsupported, failed],
       areAllHostsUnavailable: false,
       isPartiallyLoading: false,
     });

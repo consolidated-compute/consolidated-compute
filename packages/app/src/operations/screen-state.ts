@@ -9,6 +9,7 @@ export type OperationsBodyState =
 export interface OperationsAvailability {
   body: OperationsBodyState;
   unavailableHosts: readonly OperationsHostFacts[];
+  providerSubagentIssueHosts: readonly OperationsHostFacts[];
   areAllHostsUnavailable: boolean;
   isPartiallyLoading: boolean;
 }
@@ -19,10 +20,20 @@ function isUnavailable(host: OperationsHostFacts): boolean {
 
 export function resolveOperationsAvailability(model: OperationsModel): OperationsAvailability {
   const unavailableHosts = model.hosts.filter(isUnavailable);
+  const providerSubagentIssueHosts = model.hosts.filter((host) => {
+    const state = host.providerSubagentActivity;
+    return state?.kind === "unsupported" || state?.kind === "error";
+  });
   const areAllHostsUnavailable =
     model.hosts.length > 0 && unavailableHosts.length === model.hosts.length;
   const isPartiallyLoading =
-    !model.isInitialLoading && model.hosts.some((host) => host.state.kind === "initial_loading");
+    !model.isInitialLoading &&
+    model.hosts.some(
+      (host) =>
+        host.state.kind === "initial_loading" ||
+        host.providerSubagentActivity?.kind === "initial_loading" ||
+        host.providerSubagentActivity?.kind === "loading",
+    );
 
   let body: OperationsBodyState;
   if (model.isInitialLoading) body = { kind: "initial_loading" };
@@ -30,5 +41,11 @@ export function resolveOperationsAvailability(model: OperationsModel): Operation
   else if (areAllHostsUnavailable) body = { kind: "all_hosts_unavailable" };
   else body = { kind: "empty" };
 
-  return { body, unavailableHosts, areAllHostsUnavailable, isPartiallyLoading };
+  return {
+    body,
+    unavailableHosts,
+    providerSubagentIssueHosts,
+    areAllHostsUnavailable,
+    isPartiallyLoading,
+  };
 }

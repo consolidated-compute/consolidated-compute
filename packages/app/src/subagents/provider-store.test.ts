@@ -10,10 +10,116 @@ afterEach(() => {
     descriptors: new Map(),
     timelines: new Map(),
     hiddenFromTrack: new Set(),
+    activityByServer: new Map(),
+    activityGenerationByServer: new Map(),
   });
 });
 
 describe("provider subagent client store", () => {
+  test("reconciles an authoritative host snapshot with later live updates", () => {
+    const store = useProviderSubagentStore.getState();
+    const generation = store.beginActivitySnapshot(SERVER_ID);
+    store.replaceActivitySnapshot(SERVER_ID, generation, [
+      {
+        id: SUBAGENT_ID,
+        parentAgentId: PARENT_ID,
+        provider: "codex",
+        title: "Review",
+        description: null,
+        status: "running",
+        createdAt: "2026-08-22T10:00:00.000Z",
+        updatedAt: "2026-08-22T10:01:00.000Z",
+        toolCallId: "tool-1",
+      },
+    ]);
+    store.applyUpdate(SERVER_ID, {
+      kind: "upsert",
+      subagent: {
+        id: SUBAGENT_ID,
+        parentAgentId: PARENT_ID,
+        provider: "codex",
+        title: "Review",
+        description: null,
+        status: "completed",
+        createdAt: "2026-08-22T10:00:00.000Z",
+        updatedAt: "2026-08-22T10:02:00.000Z",
+        toolCallId: "tool-1",
+      },
+    });
+
+    const state = useProviderSubagentStore.getState();
+    expect(state.activityByServer.get(SERVER_ID)).toEqual({ kind: "ready" });
+    expect([...state.descriptors.values()]).toHaveLength(1);
+    expect(
+      state.descriptors.get(providerSubagentKey(SERVER_ID, PARENT_ID, SUBAGENT_ID))?.status,
+    ).toBe("completed");
+  });
+
+  test("ignores a delayed snapshot from before reconnect", () => {
+    const store = useProviderSubagentStore.getState();
+    const staleGeneration = store.beginActivitySnapshot(SERVER_ID);
+    const currentGeneration = store.beginActivitySnapshot(SERVER_ID);
+    store.replaceActivitySnapshot(SERVER_ID, currentGeneration, [
+      {
+        id: "current-child",
+        parentAgentId: PARENT_ID,
+        provider: "codex",
+        title: "Current",
+        description: null,
+        status: "running",
+        createdAt: "2026-08-22T10:00:00.000Z",
+        updatedAt: "2026-08-22T10:02:00.000Z",
+        toolCallId: null,
+      },
+    ]);
+    store.replaceActivitySnapshot(SERVER_ID, staleGeneration, [
+      {
+        id: "stale-child",
+        parentAgentId: PARENT_ID,
+        provider: "codex",
+        title: "Stale",
+        description: null,
+        status: "completed",
+        createdAt: "2026-08-22T09:00:00.000Z",
+        updatedAt: "2026-08-22T09:01:00.000Z",
+        toolCallId: null,
+      },
+    ]);
+
+    const descriptors = useProviderSubagentStore.getState().descriptors;
+    expect([...descriptors.values()].map((descriptor) => descriptor.id)).toEqual(["current-child"]);
+  });
+
+  test("retains the last complete snapshot when a refresh fails", () => {
+    const store = useProviderSubagentStore.getState();
+    const initialGeneration = store.beginActivitySnapshot(SERVER_ID);
+    store.replaceActivitySnapshot(SERVER_ID, initialGeneration, [
+      {
+        id: SUBAGENT_ID,
+        parentAgentId: PARENT_ID,
+        provider: "codex",
+        title: "Review",
+        description: null,
+        status: "completed",
+        createdAt: "2026-08-22T10:00:00.000Z",
+        updatedAt: "2026-08-22T10:01:00.000Z",
+        toolCallId: null,
+      },
+    ]);
+    const failedGeneration = store.beginActivitySnapshot(SERVER_ID);
+    store.failActivitySnapshot(SERVER_ID, failedGeneration, "snapshot failed");
+
+    const state = useProviderSubagentStore.getState();
+    expect(state.activityByServer.get(SERVER_ID)).toEqual({
+      kind: "error",
+      hasSnapshot: true,
+      error: "snapshot failed",
+    });
+    expect(state.descriptors.has(providerSubagentKey(SERVER_ID, PARENT_ID, SUBAGENT_ID))).toBe(
+      true,
+    );
+  });
+
   test("builds a shared stream model from ordered provider updates", () => {
     const subagents = useProviderSubagentStore.getState();
     subagents.applyUpdate(SERVER_ID, {

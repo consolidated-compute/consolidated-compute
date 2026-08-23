@@ -256,6 +256,8 @@ export const ar: TranslationResources = {
     empty: "لا يوجد وكلاء نشطون",
     emptyDescription: "سيظهر الوكلاء المُدارون هنا عند بدء العمل",
     untitledAgent: "وكيل بلا عنوان",
+    untitledProviderSubagent: "وكيل فرعي بلا عنوان من مزوّد الخدمة",
+    providerSubagent: "وكيل فرعي من مزوّد الخدمة",
     otherWork: "أعمال أخرى",
     unavailableWorkspace: "مساحة عمل غير متاحة",
     lastKnown: "آخر حالة معروفة",
@@ -287,6 +289,12 @@ export const ar: TranslationResources = {
       hostLastKnown: "{{host}} غير متاح؛ يتم عرض آخر حالة معروفة",
       hostUnavailable: "{{host}} غير متاح",
       noData: "لا تتوفر بيانات وكلاء مخزنة مؤقتًا",
+      providerSubagentsPartial: "بعض بيانات الوكلاء الفرعيين من مزوّدي الخدمة غير متاحة",
+      providerSubagentsUnsupported:
+        "يتطلب {{host}} تحديث المضيف لعرض الوكلاء الفرعيين من مزوّدي الخدمة",
+      providerSubagentsLastKnown:
+        "تعذر تحديث الوكلاء الفرعيين على {{host}}؛ يتم عرض آخر بيانات معروفة",
+      providerSubagentsUnavailable: "تعذر تحميل الوكلاء الفرعيين من مزوّد الخدمة على {{host}}",
     },
     relationship: {
       crossWorkspace: "تابع لـ {{parent}} في مساحة عمل أخرى",
