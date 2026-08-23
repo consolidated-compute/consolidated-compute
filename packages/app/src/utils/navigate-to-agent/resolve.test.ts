@@ -97,4 +97,37 @@ describe("resolveNavigateToAgent", () => {
     expect(hostNavigations).toEqual([{ route: "/h/server-1/agent/missing-agent" }]);
     expect(tabNavigations).toEqual([]);
   });
+
+  it("keeps identical agent IDs host-qualified", () => {
+    const { deps, hostNavigations, tabNavigations } = createFakeNavigators({
+      agentWorkspaceId: null,
+    });
+    deps.readAgentNavTarget = ({ serverId }) => ({
+      agentWorkspaceId: serverId === "server-a" ? "workspace-a" : "workspace-b",
+    });
+
+    const routes = ["server-a", "server-b"].map((serverId) =>
+      resolveNavigateToAgent({ serverId, agentId: "shared-agent", pin: true }, deps),
+    );
+
+    expect(routes).toEqual([
+      "/h/server-a/workspace/workspace-a",
+      "/h/server-b/workspace/workspace-b",
+    ]);
+    expect(hostNavigations).toEqual([]);
+    expect(tabNavigations).toEqual([
+      {
+        serverId: "server-a",
+        workspaceId: "workspace-a",
+        target: { kind: "agent", agentId: "shared-agent" },
+        pin: true,
+      },
+      {
+        serverId: "server-b",
+        workspaceId: "workspace-b",
+        target: { kind: "agent", agentId: "shared-agent" },
+        pin: true,
+      },
+    ]);
+  });
 });
