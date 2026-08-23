@@ -1,5 +1,6 @@
 import { router, usePathname } from "expo-router";
 import {
+  Activity,
   CalendarClock,
   FolderPlus,
   GitBranch,
@@ -64,8 +65,9 @@ import { useCloseAgentListGesture } from "@/mobile-panels/gestures";
 import { MobilePanelOverlay } from "@/mobile-panels/presentation";
 import { useIsMobilePanelPresented } from "@/mobile-panels/provider";
 import {
-  buildOpenProjectRoute,
   buildNewWorkspaceRoute,
+  buildOpenProjectRoute,
+  buildOperationsRoute,
   buildSchedulesRoute,
   buildSessionsRoute,
   buildSettingsAddHostRoute,
@@ -117,6 +119,7 @@ interface SidebarLabels {
   searchHosts: string;
   sessions: string;
   schedules: string;
+  operations: string;
   closeSidebar: string;
 }
 
@@ -126,6 +129,7 @@ interface MobileSidebarProps extends SidebarSharedProps {
   closeSidebar: () => void;
   handleViewMoreNavigate: () => void;
   handleViewSchedulesNavigate: () => void;
+  handleViewOperationsNavigate: () => void;
 }
 
 interface DesktopSidebarProps extends SidebarSharedProps {
@@ -133,6 +137,7 @@ interface DesktopSidebarProps extends SidebarSharedProps {
   active: boolean;
   handleViewMore: () => void;
   handleViewSchedules: () => void;
+  handleViewOperations: () => void;
 }
 
 export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boolean }) {
@@ -231,6 +236,10 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     router.push(buildSchedulesRoute());
   }, []);
 
+  const handleViewOperationsNavigate = useCallback(() => {
+    router.push(buildOperationsRoute());
+  }, []);
+
   const newWorkspaceKeys = useShortcutKeys("new-workspace");
   const labels = useMemo(
     (): SidebarLabels => ({
@@ -242,6 +251,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       searchHosts: t("sidebar.host.searchPlaceholder"),
       sessions: t("sidebar.sections.sessions"),
       schedules: t("sidebar.sections.schedules"),
+      operations: t("operations.title"),
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
@@ -283,6 +293,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           handleOpenHostSettings={handleOpenHostSettingsMobile}
           handleViewMoreNavigate={handleViewMoreNavigate}
           handleViewSchedulesNavigate={handleViewSchedulesNavigate}
+          handleViewOperationsNavigate={handleViewOperationsNavigate}
         />
       </RetainedPanelActivity>
     );
@@ -301,6 +312,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleOpenHostSettings={handleOpenHostSettingsDesktop}
         handleViewMore={handleViewMoreNavigate}
         handleViewSchedules={handleViewSchedulesNavigate}
+        handleViewOperations={handleViewOperationsNavigate}
       />
     </RetainedPanelActivity>
   );
@@ -632,11 +644,13 @@ function MobileSidebar({
   closeSidebar,
   handleViewMoreNavigate,
   handleViewSchedulesNavigate,
+  handleViewOperationsNavigate,
 }: MobileSidebarProps) {
   const pathname = usePathname();
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
+  const isOperationsActive = pathname === "/operations";
   const { gesture: closeGesture, gestureRef: closeGestureRef } = useCloseAgentListGesture();
   const dragGestureHostPresented = useIsMobilePanelPresented("agent-list");
 
@@ -649,6 +663,11 @@ function MobileSidebar({
     closeSidebar();
     handleViewSchedulesNavigate();
   }, [closeSidebar, handleViewSchedulesNavigate]);
+
+  const handleViewOperations = useCallback(() => {
+    closeSidebar();
+    handleViewOperationsNavigate();
+  }, [closeSidebar, handleViewOperationsNavigate]);
 
   const handleWorkspacePress = useCallback(() => {
     closeSidebar();
@@ -678,6 +697,14 @@ function MobileSidebar({
             variant="compact"
             shortcutKeys={newWorkspaceKeys}
             onBeforeNavigate={closeSidebar}
+          />
+          <SidebarHeaderRow
+            icon={Activity}
+            label={labels.operations}
+            onPress={handleViewOperations}
+            isActive={isOperationsActive}
+            testID="sidebar-operations"
+            variant="compact"
           />
           <SidebarHeaderRow
             icon={History}
@@ -784,12 +811,14 @@ function DesktopSidebar({
   active,
   handleViewMore,
   handleViewSchedules,
+  handleViewOperations,
 }: DesktopSidebarProps) {
   const ownsTopLeft = useOwnsWindowChromeCorner("top-left");
   const pathname = usePathname();
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
+  const isOperationsActive = pathname === "/operations";
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
   const { width: viewportWidth } = useWindowDimensions();
@@ -903,6 +932,14 @@ function DesktopSidebar({
               testID="sidebar-global-new-workspace"
               variant="compact"
               shortcutKeys={newWorkspaceKeys}
+            />
+            <SidebarHeaderRow
+              icon={Activity}
+              label={labels.operations}
+              onPress={handleViewOperations}
+              isActive={isOperationsActive}
+              testID="sidebar-operations"
+              variant="compact"
             />
             <SidebarHeaderRow
               icon={History}

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { router, type Href } from "expo-router";
 import { useTranslation } from "react-i18next";
 import {
+  Activity,
   CalendarClock,
   CircleDashed,
   Folder,
@@ -24,6 +25,7 @@ import { useSidebarViewStore } from "@/stores/sidebar-view-store";
 import { clearCommandCenterFocusRestoreElement } from "@/utils/command-center-focus-restore";
 import {
   buildOpenProjectRoute,
+  buildOperationsRoute,
   buildSchedulesRoute,
   buildSessionsRoute,
   buildSettingsRoute,
@@ -34,6 +36,9 @@ import { useCommandCenterActions } from "./provider";
 import { buildGroupingContribution } from "./root-contributions";
 
 const ThemedPlus = withUnistyles(Plus, (theme) => ({ color: theme.colors.foregroundMuted }));
+const ThemedActivity = withUnistyles(Activity, (theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
 const ThemedFolderPlus = withUnistyles(FolderPlus, (theme) => ({
   color: theme.colors.foregroundMuted,
 }));
@@ -61,6 +66,10 @@ function PlusIcon({ size }: CommandCenterIconProps) {
 
 function AddProjectIcon({ size }: CommandCenterIconProps) {
   return <ThemedFolderPlus size={size} strokeWidth={2.2} />;
+}
+
+function OperationsIcon({ size }: CommandCenterIconProps) {
+  return <ThemedActivity size={size} strokeWidth={2.2} />;
 }
 
 function SettingsIcon({ size }: CommandCenterIconProps) {
@@ -99,6 +108,7 @@ export function CommandCenterRootActions() {
   const openAddProject = useOpenAddProject();
   const settingsRoute = useMemo<Href>(() => buildSettingsRoute(), []);
   const homeRoute = useMemo<Href>(() => buildOpenProjectRoute(), []);
+  const operationsRoute = useMemo<Href>(() => buildOperationsRoute(), []);
   const sessionsRoute = useMemo<Href>(() => buildSessionsRoute(), []);
   const schedulesRoute = useMemo<Href>(() => buildSchedulesRoute(), []);
   const setShortcutsDialogOpen = useKeyboardShortcutsStore((state) => state.setShortcutsDialogOpen);
@@ -153,10 +163,28 @@ export function CommandCenterRootActions() {
         },
       },
       {
-        id: "home",
+        id: "operations",
         group: "actions",
         groupRank: 0,
         rank: 2,
+        keywords: ["operations", "agents", "working", "attention", "idle", "activity"],
+        visibility: "always",
+        run: () => {
+          clearCommandCenterFocusRestoreElement();
+          router.push(operationsRoute);
+        },
+        presentation: {
+          kind: "action",
+          title: t("operations.title"),
+          sectionTitle: t("shell.commandCenter.actions"),
+          icon: OperationsIcon,
+        },
+      },
+      {
+        id: "home",
+        group: "actions",
+        groupRank: 0,
+        rank: 3,
         keywords: ["home", "start", "import", "session", "pair", "device", "providers"],
         visibility: "query",
         run: () => {
@@ -174,7 +202,7 @@ export function CommandCenterRootActions() {
         id: "history",
         group: "actions",
         groupRank: 0,
-        rank: 3,
+        rank: 4,
         keywords: ["history", "sessions", "recent"],
         visibility: "always",
         run: () => {
@@ -192,7 +220,7 @@ export function CommandCenterRootActions() {
         id: "schedules",
         group: "actions",
         groupRank: 0,
-        rank: 4,
+        rank: 5,
         keywords: ["schedules", "scheduled", "automation", "recurring"],
         visibility: "always",
         run: () => {
@@ -210,7 +238,7 @@ export function CommandCenterRootActions() {
         id: "settings",
         group: "actions",
         groupRank: 0,
-        rank: 5,
+        rank: 6,
         keywords: ["settings", "preferences", "config", "configuration"],
         visibility: "always",
         run: () => {
@@ -234,7 +262,7 @@ export function CommandCenterRootActions() {
         id: "keyboard-shortcuts",
         group: "actions",
         groupRank: 0,
-        rank: 6,
+        rank: 7,
         keywords: ["keyboard", "shortcuts", "keys", "hotkeys"],
         visibility: "always",
         run: () => setShortcutsDialogOpen(true),
@@ -269,6 +297,7 @@ export function CommandCenterRootActions() {
     homeRoute,
     keyboardActionDispatcher,
     openAddProject,
+    operationsRoute,
     overrides,
     schedulesRoute,
     sessionsRoute,

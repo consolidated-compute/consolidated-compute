@@ -254,6 +254,50 @@ export const ptBR: TranslationResources = {
       clearSearch: "Limpar busca",
     },
   },
+  operations: {
+    title: "Operações",
+    empty: "Nenhum agente ativo",
+    emptyDescription: "Os agentes gerenciados aparecerão aqui quando o trabalho começar",
+    untitledAgent: "Agente sem título",
+    otherWork: "Outros trabalhos",
+    unavailableWorkspace: "Workspace indisponível",
+    lastKnown: "Último estado conhecido",
+    actions: {
+      refresh: "Atualizar",
+      openAgent: "Abrir {{agent}}",
+      openWorkspace: "Abrir workspace {{workspace}}",
+    },
+    summary: {
+      working: "Trabalhando",
+      attention: "Atenção",
+      idle: "Ocioso",
+      accessibility: "Trabalhando {{working}}, atenção {{attention}}, ocioso {{idle}}",
+    },
+    states: {
+      running: "Trabalhando",
+      needs_input: "Precisa de entrada",
+      attention: "Atenção",
+      failed: "Falhou",
+      done: "Ocioso",
+    },
+    availability: {
+      allUnavailable: "Todos os hosts estão indisponíveis",
+      partial: "Alguns dados de host estão indisponíveis",
+      updating: "Atualizando Operações",
+      refreshFailed: "Não foi possível atualizar Operações",
+      hostDataLastKnown:
+        "Não foi possível atualizar os dados de {{host}}; exibindo os últimos dados conhecidos",
+      hostDataUnavailable: "Não foi possível carregar os dados de {{host}}",
+      hostLastKnown: "{{host}} está indisponível; exibindo os últimos dados conhecidos",
+      hostUnavailable: "{{host}} está indisponível",
+      noData: "Não há dados de agentes em cache",
+    },
+    relationship: {
+      crossWorkspace: "Filho de {{parent}} em outro workspace",
+      missing: "O agente pai {{parent}} está indisponível",
+      cycle: "Relação pai inválida",
+    },
+  },
   agentList: {
     fallbackTitle: "Nova sessão",
     dateSections: {
