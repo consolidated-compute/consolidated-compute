@@ -7,6 +7,7 @@ import type { AggregatedAgent } from "@/hooks/use-aggregated-agents";
 import type { ProjectSummary } from "@/utils/projects";
 import type { ProviderSubagentDescriptorPayload } from "@getpaseo/protocol/messages";
 import { buildSubagentRowPresentationData } from "@/subagents/track-presentation";
+import type { OperationsForgeContext } from "./forge-context";
 import {
   buildHostMap,
   buildKnownWorkspaceMap,
@@ -99,7 +100,9 @@ export interface OperationsWorkspace {
   workspaceId: string | null;
   name: string;
   title: string | null;
+  workspaceDirectory: string;
   currentBranch: string | null;
+  forgeContext: OperationsForgeContext;
   isLastKnown: boolean;
   liveMostUrgentState: WorkspaceStateBucket | null;
   lastActivityAt: Date;

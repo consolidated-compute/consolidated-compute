@@ -6,9 +6,13 @@ export interface WorkspaceSummary {
   id: string;
   name: string;
   title?: string;
+  workspaceDirectory: string;
   workspaceKind: WorkspaceDescriptor["workspaceKind"];
   status: WorkspaceDescriptor["status"];
   currentBranch: string | null;
+  forge?: WorkspaceDescriptor["forge"];
+  /** Forge-neutral runtime facts carried by the legacy-named wire field. */
+  forgeRuntime?: WorkspaceDescriptor["githubRuntime"];
   archivingAt?: string;
 }
 
@@ -136,9 +140,12 @@ function toWorkspaceSummary(workspace: WorkspaceDescriptor): WorkspaceSummary {
     id: workspace.id,
     name: workspace.name,
     ...(workspace.title ? { title: workspace.title } : {}),
+    workspaceDirectory: workspace.workspaceDirectory,
     workspaceKind: workspace.workspaceKind,
     status: workspace.status,
     currentBranch: currentBranch && currentBranch !== "HEAD" ? currentBranch : null,
+    forge: workspace.forge,
+    forgeRuntime: workspace.githubRuntime,
     ...(workspace.archivingAt ? { archivingAt: workspace.archivingAt } : {}),
   };
 }

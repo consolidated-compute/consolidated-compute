@@ -20,7 +20,12 @@ function descriptor(
   };
 }
 
-function workspace(id: string, projectId: string, root: string): WorkspaceDescriptor {
+function workspace(
+  id: string,
+  projectId: string,
+  root: string,
+  overrides: Partial<WorkspaceDescriptor> = {},
+): WorkspaceDescriptor {
   return {
     id,
     projectId,
@@ -36,6 +41,7 @@ function workspace(id: string, projectId: string, root: string): WorkspaceDescri
     archivingAt: null,
     diffStat: null,
     scripts: [],
+    ...overrides,
   };
 }
 
@@ -118,5 +124,60 @@ describe("buildProjects", () => {
     expect(getProjectSummaryForHostProject(project ? [project] : [], "host-a", "prj_a")).toBe(
       project,
     );
+  });
+
+  test("preserves each directory-backed forge snapshot in workspace summaries", () => {
+    const forgeRuntime = {
+      featuresEnabled: true,
+      pullRequest: {
+        number: 17,
+        url: "https://gitlab.example/acme/app/-/merge_requests/17",
+        title: "Keep forge context",
+        state: "open",
+        baseRefName: "main",
+        headRefName: "feature/forge-context",
+        isMerged: false,
+        checksStatus: "pending" as const,
+        reviewDecision: "pending" as const,
+      },
+      error: null,
+    };
+    const result = buildProjects({
+      hosts: [
+        {
+          serverId: "host-a",
+          serverName: "Host A",
+          isOnline: true,
+          projects: [descriptor("prj_a", "local-a", "/a/app")],
+          workspaces: [
+            workspace("ws-a", "prj_a", "/a/app", {
+              workspaceDirectory: "/a/app",
+              forge: "gitlab",
+              githubRuntime: forgeRuntime,
+            }),
+            workspace("ws-alias", "prj_a", "/a/app", {
+              workspaceDirectory: "/a/app",
+              forge: "gitlab",
+              githubRuntime: forgeRuntime,
+            }),
+          ],
+        },
+      ],
+    });
+
+    expect(result.projects[0]?.hosts[0]?.workspaces).toEqual([
+      expect.objectContaining({
+        id: "ws-a",
+        workspaceDirectory: "/a/app",
+        forge: "gitlab",
+        forgeRuntime,
+      }),
+      expect.objectContaining({
+        id: "ws-alias",
+        workspaceDirectory: "/a/app",
+        forge: "gitlab",
+        forgeRuntime,
+      }),
+    ]);
   });
 });

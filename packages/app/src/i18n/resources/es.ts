@@ -264,6 +264,14 @@ export const es: TranslationResources = {
     otherWork: "Otro trabajo",
     unavailableWorkspace: "Espacio de trabajo no disponible",
     lastKnown: "Último estado conocido",
+    forge: {
+      factsUnknown: "Estado de la solicitud de cambio desconocido",
+      statusUnknown: "Estado desconocido",
+      checksUnknown: "Comprobaciones desconocidas",
+      noChecks: "Sin comprobaciones",
+      reviewPending: "Revisión pendiente",
+      reviewUnknown: "Revisión desconocida",
+    },
     actions: {
       refresh: "Actualizar",
       openAgent: "Abrir {{agent}}",

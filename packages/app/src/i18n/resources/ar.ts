@@ -261,6 +261,14 @@ export const ar: TranslationResources = {
     otherWork: "أعمال أخرى",
     unavailableWorkspace: "مساحة عمل غير متاحة",
     lastKnown: "آخر حالة معروفة",
+    forge: {
+      factsUnknown: "حالة طلب التغيير غير معروفة",
+      statusUnknown: "الحالة غير معروفة",
+      checksUnknown: "حالة الفحوصات غير معروفة",
+      noChecks: "لا توجد فحوصات",
+      reviewPending: "المراجعة معلقة",
+      reviewUnknown: "حالة المراجعة غير معروفة",
+    },
     actions: {
       refresh: "تحديث",
       openAgent: "فتح {{agent}}",

@@ -31,7 +31,10 @@ export interface WorkspaceDraft {
   workspaceId: string | null;
   name: string;
   title: string | null;
+  workspaceDirectory: string;
   currentBranch: string | null;
+  forge: WorkspaceSummary["forge"];
+  forgeRuntime: WorkspaceSummary["forgeRuntime"];
   agents: AgentDraft[];
 }
 
@@ -128,7 +131,10 @@ function fallbackLocation(agent: AggregatedAgent): {
         workspaceId: agent.workspaceId,
         name: placement?.workspaceName?.trim() || "Unavailable workspace",
         title: null,
+        workspaceDirectory: placement?.checkout.cwd ?? agent.cwd,
         currentBranch: placement?.checkout.currentBranch ?? null,
+        forge: undefined,
+        forgeRuntime: undefined,
       },
     };
   }
@@ -143,7 +149,10 @@ function fallbackLocation(agent: AggregatedAgent): {
       workspaceId: null,
       name: "Other work",
       title: null,
+      workspaceDirectory: placement?.checkout.cwd ?? agent.cwd,
       currentBranch: placement?.checkout.currentBranch ?? null,
+      forge: undefined,
+      forgeRuntime: undefined,
     },
   };
 }
@@ -180,7 +189,10 @@ export function getOrCreateLocation(input: {
         workspaceId: knownWorkspace.workspace.id,
         name: knownWorkspace.workspace.name,
         title: knownWorkspace.workspace.title ?? null,
+        workspaceDirectory: knownWorkspace.workspace.workspaceDirectory,
         currentBranch: knownWorkspace.workspace.currentBranch,
+        forge: knownWorkspace.workspace.forge,
+        forgeRuntime: knownWorkspace.workspace.forgeRuntime,
       }
     : fallback!.workspace;
   let workspace = project.workspaces.get(workspaceShape.key);

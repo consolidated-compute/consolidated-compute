@@ -264,6 +264,14 @@ export const ptBR: TranslationResources = {
     otherWork: "Outros trabalhos",
     unavailableWorkspace: "Workspace indisponível",
     lastKnown: "Último estado conhecido",
+    forge: {
+      factsUnknown: "Status da solicitação de alteração desconhecido",
+      statusUnknown: "Status desconhecido",
+      checksUnknown: "Verificações desconhecidas",
+      noChecks: "Sem verificações",
+      reviewPending: "Revisão pendente",
+      reviewUnknown: "Revisão desconhecida",
+    },
     actions: {
       refresh: "Atualizar",
       openAgent: "Abrir {{agent}}",

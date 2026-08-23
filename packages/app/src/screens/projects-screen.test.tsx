@@ -214,6 +214,7 @@ function workspaceSummary(overrides: Partial<WorkspaceSummary> = {}): WorkspaceS
   return {
     id: "ws-1",
     name: "main",
+    workspaceDirectory: "/repo/main",
     workspaceKind: "directory",
     status: "done",
     currentBranch: "main",

@@ -9,6 +9,7 @@ import type {
   OperationsSummary,
   OperationsWorkspace,
 } from "./model";
+import { selectOperationsForgeContext } from "./forge-context";
 import {
   compareText,
   operationsAgentKey,
@@ -234,6 +235,7 @@ function buildWorkspace(draft: WorkspaceDraft, parentByChild: ReadonlyMap<string
   const roots = draft.agents.filter((agent) => !parentByChild.has(agent.key));
   roots.sort(compareAgentDrafts);
   const agents = roots.map(toAgentNode);
+  const isLastKnown = draft.agents.every((agent) => agent.isLastKnown);
   return {
     key: draft.key,
     kind: draft.kind,
@@ -242,8 +244,13 @@ function buildWorkspace(draft: WorkspaceDraft, parentByChild: ReadonlyMap<string
     workspaceId: draft.workspaceId,
     name: draft.name,
     title: draft.title,
+    workspaceDirectory: draft.workspaceDirectory,
     currentBranch: draft.currentBranch,
-    isLastKnown: draft.agents.every((agent) => agent.isLastKnown),
+    forgeContext: selectOperationsForgeContext({
+      workspace: draft,
+      isLastKnown,
+    }),
+    isLastKnown,
     ...aggregateNodes(agents),
     agents,
   } satisfies OperationsWorkspace;
