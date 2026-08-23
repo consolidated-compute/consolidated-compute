@@ -324,6 +324,27 @@ describe("buildOperationsModel", () => {
     expect(allNodes.find((node) => node.agentId === "stale-running")?.isLastKnown).toBe(true);
   });
 
+  it("preserves directory workspace state separately from live agent urgency", () => {
+    const knownWorkspace = workspace("main", "Main");
+    knownWorkspace.status = "failed";
+    const model = buildOperationsModel({
+      hosts: [host("alpha")],
+      projects: [
+        project({
+          viewKey: "project-view",
+          name: "acme/app",
+          hosts: [{ serverId: "alpha", workspaces: [knownWorkspace] }],
+        }),
+      ],
+      agents: [agent({ id: "idle", serverId: "alpha", workspaceId: "main" })],
+    });
+
+    expect(model.projects[0]?.workspaces[0]).toMatchObject({
+      directoryState: "failed",
+      liveMostUrgentState: "done",
+    });
+  });
+
   it("keeps fallback work visible and breaks malformed parent cycles deterministically", () => {
     const model = buildOperationsModel({
       hosts: [host("alpha"), host("beta")],

@@ -102,6 +102,7 @@ export interface OperationsWorkspace {
   title: string | null;
   workspaceDirectory: string;
   currentBranch: string | null;
+  directoryState: WorkspaceStateBucket | null;
   forgeContext: OperationsForgeContext;
   isLastKnown: boolean;
   liveMostUrgentState: WorkspaceStateBucket | null;

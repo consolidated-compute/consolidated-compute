@@ -246,6 +246,7 @@ function buildWorkspace(draft: WorkspaceDraft, parentByChild: ReadonlyMap<string
     title: draft.title,
     workspaceDirectory: draft.workspaceDirectory,
     currentBranch: draft.currentBranch,
+    directoryState: draft.directoryState,
     forgeContext: selectOperationsForgeContext({
       workspace: draft,
       isLastKnown,

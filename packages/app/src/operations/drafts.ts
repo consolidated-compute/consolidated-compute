@@ -33,6 +33,7 @@ export interface WorkspaceDraft {
   title: string | null;
   workspaceDirectory: string;
   currentBranch: string | null;
+  directoryState: WorkspaceStateBucket | null;
   forge: WorkspaceSummary["forge"];
   forgeRuntime: WorkspaceSummary["forgeRuntime"];
   agents: AgentDraft[];
@@ -133,6 +134,7 @@ function fallbackLocation(agent: AggregatedAgent): {
         title: null,
         workspaceDirectory: placement?.checkout.cwd ?? agent.cwd,
         currentBranch: placement?.checkout.currentBranch ?? null,
+        directoryState: null,
         forge: undefined,
         forgeRuntime: undefined,
       },
@@ -151,6 +153,7 @@ function fallbackLocation(agent: AggregatedAgent): {
       title: null,
       workspaceDirectory: placement?.checkout.cwd ?? agent.cwd,
       currentBranch: placement?.checkout.currentBranch ?? null,
+      directoryState: null,
       forge: undefined,
       forgeRuntime: undefined,
     },
@@ -191,6 +194,7 @@ export function getOrCreateLocation(input: {
         title: knownWorkspace.workspace.title ?? null,
         workspaceDirectory: knownWorkspace.workspace.workspaceDirectory,
         currentBranch: knownWorkspace.workspace.currentBranch,
+        directoryState: knownWorkspace.workspace.status,
         forge: knownWorkspace.workspace.forge,
         forgeRuntime: knownWorkspace.workspace.forgeRuntime,
       }
