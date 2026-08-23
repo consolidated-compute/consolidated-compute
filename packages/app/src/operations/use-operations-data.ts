@@ -151,7 +151,9 @@ export function useOperationsData(): OperationsData {
         const requests: Promise<unknown>[] = [runtime.refreshDirectories(serverId)];
         const client = runtime.getClient(serverId);
         if (client && providerSubagentSupport.get(serverId) === true) {
-          requests.push(refreshProviderSubagentActivity(client, serverId));
+          // The snapshot helper records its own provider-specific error state. Keep the generic
+          // manual-refresh failure reserved for the managed agent directory.
+          requests.push(refreshProviderSubagentActivity(client, serverId).catch(() => undefined));
         }
         return requests;
       }),
