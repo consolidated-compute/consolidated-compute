@@ -668,7 +668,7 @@ export const ru: TranslationResources = {
         files: "Файлы",
         pullRequest: "PR",
         terminalProfilesMenu: "Профили терминала",
-        editTerminalProfiles: "Изменить профили…",
+        editTerminalProfiles: "Изменить профили",
       },
       sidePanel: {
         open: "Открыть боковую панель",
@@ -1718,6 +1718,8 @@ export const ru: TranslationResources = {
       updateRequired: "Обновите хост, чтобы включить ретранслятор из Paseo Desktop.",
       unavailable: "Данные для сопряжения недоступны.",
       hint: "Отсканируйте этот QR-код с помощью Paseo на телефоне или скопируйте ссылку ниже.",
+      securityWarning:
+        "Обращайтесь с этой ссылкой для сопряжения как с паролем. Любой, у кого она есть, может получить доступ к этому демону.",
       qrUnavailable: "QR-код недоступен.",
       qrAccessibility: "QR-код сопряжения",
       retry: "Повторить попытку",
