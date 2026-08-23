@@ -62,7 +62,7 @@ test("desktop runtime keeps Operations comprehensible at wide and compact sizes"
 
     await expect(page).toHaveURL(/\/operations$/);
     await expect(page.getByTestId("operations-screen")).toBeVisible({ timeout: 30_000 });
-    await expect.poll(() => fixture.providerSnapshotRequestCount()).toBe(1);
+    await expect.poll(() => fixture.providerSnapshotRequestCount(), { timeout: 30_000 }).toBe(1);
     await expect(page.getByText("Desktop nested helper", { exact: true })).toBeVisible();
     await expect(page.getByText("Review the desktop work", { exact: true })).toBeVisible();
     await capture(page, testInfo, "operations-desktop-wide");

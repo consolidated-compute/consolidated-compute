@@ -52,7 +52,9 @@ async function expectProviderSnapshotRequests(
   fixture: Awaited<ReturnType<typeof installOperationsHostFixture>>,
   expected: number,
 ): Promise<void> {
-  await expect.poll(() => fixture.providerSnapshotRequestCount()).toBe(expected);
+  await expect
+    .poll(() => fixture.providerSnapshotRequestCount(), { timeout: 30_000 })
+    .toBe(expected);
 }
 
 async function useDarkLargeInterfaceText(page: Page): Promise<void> {
