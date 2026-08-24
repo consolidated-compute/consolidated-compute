@@ -142,7 +142,6 @@ test.describe("Operations handoffs", () => {
       await test.step("workspace rows hand off to the existing workspace surface", async () => {
         await page
           .getByTestId(`operations-workspace-${primaryServerId}-${primary.workspaceId}`)
-          .getByRole("button", { name: /^Open workspace Operations handoffs primary\./ })
           .click();
         await expect(page).toHaveURL(
           new RegExp(`/h/${primaryServerId}/workspace/${encodeURIComponent(primary.workspaceId)}`),

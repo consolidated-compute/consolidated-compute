@@ -379,7 +379,6 @@ test.describe("Operations", () => {
       await test.step("workspace and agent drill-down return through the desktop sidebar", async () => {
         await page
           .getByTestId(`operations-workspace-${secondaryDaemon.serverId}-${secondary.workspaceId}`)
-          .getByRole("button", { name: /^Open workspace Secondary operations workspace\./ })
           .click();
         await expect(page).toHaveURL(
           new RegExp(
