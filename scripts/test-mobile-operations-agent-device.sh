@@ -2,9 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-STATE_DIR="${PASEO_MOBILE_E2E_STATE_DIR:-${REPO_ROOT}/.dev/operations-agent-device-e2e}"
-ARTIFACTS_DIR="${PASEO_MOBILE_E2E_ARTIFACTS_DIR:-${REPO_ROOT}/.dev/operations-agent-device-artifacts}"
-METRO_PORT="${PASEO_MOBILE_E2E_METRO_PORT:-8082}"
+MATRIX_SURFACE="${PASEO_MOBILE_E2E_MATRIX_SURFACE:-operations}"
 PLATFORM="${PASEO_MOBILE_E2E_PLATFORM:-ios}"
 DEVICE="${PASEO_MOBILE_E2E_DEVICE:-}"
 APP_ID="${PASEO_MOBILE_E2E_APP_ID:-sh.paseo.debug}"
@@ -15,6 +13,27 @@ METRO_PID=0
 METRO_LOG_PATH=""
 FIXTURE_PID=0
 RESET_DEVICE_SETTINGS=0
+
+case "${MATRIX_SURFACE}" in
+  operations)
+    DEFAULT_STATE_DIR="${REPO_ROOT}/.dev/operations-agent-device-e2e"
+    DEFAULT_ARTIFACTS_DIR="${REPO_ROOT}/.dev/operations-agent-device-artifacts"
+    DEFAULT_METRO_PORT=8082
+    ;;
+  visual)
+    DEFAULT_STATE_DIR="${REPO_ROOT}/.dev/visual-agent-device-e2e"
+    DEFAULT_ARTIFACTS_DIR="${REPO_ROOT}/.dev/visual-agent-device-artifacts"
+    DEFAULT_METRO_PORT=8083
+    ;;
+  *)
+    echo "PASEO_MOBILE_E2E_MATRIX_SURFACE must be operations or visual (received ${MATRIX_SURFACE})." >&2
+    exit 2
+    ;;
+esac
+
+STATE_DIR="${PASEO_MOBILE_E2E_STATE_DIR:-${DEFAULT_STATE_DIR}}"
+ARTIFACTS_DIR="${PASEO_MOBILE_E2E_ARTIFACTS_DIR:-${DEFAULT_ARTIFACTS_DIR}}"
+METRO_PORT="${PASEO_MOBILE_E2E_METRO_PORT:-${DEFAULT_METRO_PORT}}"
 
 case "${PLATFORM}" in
   ios | android) ;;
@@ -35,6 +54,8 @@ cleanup() {
     wait "${FIXTURE_PID}" >/dev/null 2>&1 || true
   fi
   if [[ "${RESET_DEVICE_SETTINGS}" -eq 1 ]]; then
+    AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" settings animations on \
+      >/dev/null 2>&1 || true
     if [[ "${PLATFORM}" == "ios" ]]; then
       xcrun simctl ui booted content_size large >/dev/null 2>&1 || true
       xcrun simctl ui booted appearance light >/dev/null 2>&1 || true
@@ -139,7 +160,7 @@ if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
     );
   ' "http://${DEVICE_HOST}:${METRO_PORT}")"
   export EXPO_PUBLIC_LOCAL_DAEMON="${DEVICE_HOST}:${PRIMARY_PORT}"
-  SUITE_PATH="${REPO_ROOT}/packages/app/e2e/mobile/operations-agent-device/operations-matrix.${PLATFORM}.ad"
+  SUITE_PATH="${REPO_ROOT}/packages/app/e2e/mobile/${MATRIX_SURFACE}-agent-device/${MATRIX_SURFACE}-matrix.${PLATFORM}.ad"
 fi
 
 METRO_RESULT="$({

@@ -376,6 +376,7 @@ function VisualWorkspace({
           accessibilityRole="button"
           onPress={openWorkspace}
           style={interactiveWorkspaceHeaderStyle}
+          testID={`visual-workspace-open-${workspace.serverId}-${workspace.workspaceId}`}
         >
           {content}
         </Pressable>

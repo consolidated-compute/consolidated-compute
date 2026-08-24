@@ -1,4 +1,4 @@
-name: Mobile Operations
+name: Mobile Operations and Visual
 
 on:
   workflow_dispatch:
@@ -17,6 +17,7 @@ on:
       - "packages/app/native-release-version.js"
       - "packages/app/plugins/**"
       - "packages/app/e2e/mobile/operations-agent-device/operations-matrix.*.ad"
+      - "packages/app/e2e/mobile/visual-agent-device/visual-matrix.*.ad"
       - "packages/app/e2e/support/helpers/operations-*.ts"
       - "packages/app/src/components/headers/menu-header.tsx"
       - "packages/app/src/components/left-sidebar.tsx"
@@ -38,7 +39,7 @@ env:
 
 jobs:
   validate:
-    name: validate mobile Operations
+    name: validate mobile Operations and Visual
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -50,11 +51,11 @@ jobs:
           node --test scripts/ci-workflow.test.mjs
 
   ios:
-    name: operations (iOS)
+    name: operations + visual (iOS)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: validate
     runs-on: macos-15
-    timeout-minutes: 75
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -125,29 +126,42 @@ jobs:
           path: .dev/mobile-build-cache/ios/ConsolidatedComputeDebug.app
           key: ${{ steps.ios-app-cache.outputs.cache-primary-key }}
 
-      - name: Run the iOS Operations matrix
+      - name: Run the iOS Operations and Visual matrices
         env:
           PASEO_MOBILE_E2E_PLATFORM: ios
           PASEO_MOBILE_E2E_DEVICE: ${{ env.IOS_UDID }}
-          PASEO_MOBILE_E2E_ARTIFACTS_DIR: ${{ runner.temp }}/mobile-operations-ios
-          PASEO_MOBILE_E2E_JUNIT_PATH: ${{ runner.temp }}/mobile-operations-ios/junit.xml
-        run: npm run test:e2e:mobile:operations
+          EVIDENCE_ROOT: ${{ runner.temp }}/mobile-operations-visual-ios
+        run: |
+          set +e
+          PASEO_MOBILE_E2E_ARTIFACTS_DIR="$EVIDENCE_ROOT/operations" \
+            PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/operations/junit.xml" \
+            npm run test:e2e:mobile:operations
+          operations_status=$?
+          PASEO_MOBILE_E2E_ARTIFACTS_DIR="$EVIDENCE_ROOT/visual" \
+            PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/visual/junit.xml" \
+            npm run test:e2e:mobile:visual
+          visual_status=$?
+          set -e
+          if [[ "$operations_status" -ne 0 || "$visual_status" -ne 0 ]]; then
+            echo "Native matrix failed: operations=$operations_status visual=$visual_status" >&2
+            exit 1
+          fi
 
       - name: Upload iOS evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: mobile-operations-ios
-          path: ${{ runner.temp }}/mobile-operations-ios
+          name: mobile-operations-visual-ios
+          path: ${{ runner.temp }}/mobile-operations-visual-ios
           if-no-files-found: warn
           retention-days: 14
 
   android:
-    name: operations (Android)
+    name: operations + visual (Android)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: validate
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -196,12 +210,11 @@ jobs:
           path: .dev/mobile-build-cache/android/app-debug.apk
           key: ${{ steps.android-app-cache.outputs.cache-primary-key }}
 
-      - name: Run the Android Operations matrix
+      - name: Run the Android Operations and Visual matrices
         uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2.34.0
         env:
           PASEO_MOBILE_E2E_PLATFORM: android
-          PASEO_MOBILE_E2E_ARTIFACTS_DIR: ${{ runner.temp }}/mobile-operations-android
-          PASEO_MOBILE_E2E_JUNIT_PATH: ${{ runner.temp }}/mobile-operations-android/junit.xml
+          EVIDENCE_ROOT: ${{ runner.temp }}/mobile-operations-visual-android
         with:
           api-level: 35
           arch: x86_64
@@ -211,13 +224,28 @@ jobs:
           disable-animations: true
           script: |
             adb install -r .dev/mobile-build-cache/android/app-debug.apk
-            NODE_OPTIONS=--max-old-space-size=2048 npm run test:e2e:mobile:operations
+            set +e
+            NODE_OPTIONS=--max-old-space-size=2048 \
+              PASEO_MOBILE_E2E_ARTIFACTS_DIR="$EVIDENCE_ROOT/operations" \
+              PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/operations/junit.xml" \
+              npm run test:e2e:mobile:operations
+            operations_status=$?
+            NODE_OPTIONS=--max-old-space-size=2048 \
+              PASEO_MOBILE_E2E_ARTIFACTS_DIR="$EVIDENCE_ROOT/visual" \
+              PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/visual/junit.xml" \
+              npm run test:e2e:mobile:visual
+            visual_status=$?
+            set -e
+            if [[ "$operations_status" -ne 0 || "$visual_status" -ne 0 ]]; then
+              echo "Native matrix failed: operations=$operations_status visual=$visual_status" >&2
+              exit 1
+            fi
 
       - name: Upload Android evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: mobile-operations-android
-          path: ${{ runner.temp }}/mobile-operations-android
+          name: mobile-operations-visual-android
+          path: ${{ runner.temp }}/mobile-operations-visual-android
           if-no-files-found: warn
           retention-days: 14
