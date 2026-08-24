@@ -1,10 +1,12 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { finished } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
+import { promisify } from "node:util";
 import { chromium, type Browser, type Page } from "playwright";
 import { waitForMetro, warmMetro } from "../../../app/e2e/support/global-setup";
 
@@ -14,8 +16,10 @@ const rootDir = path.resolve(desktopDir, "../..");
 const appDir = path.join(rootDir, "packages", "app");
 const require = createRequire(path.join(desktopDir, "package.json"));
 const electronPath = require("electron") as string;
+const execFileAsync = promisify(execFile);
 
 export interface RealElectronRenderer {
+  origin: string;
   page: Page;
   stop(): Promise<void>;
 }
@@ -101,14 +105,51 @@ async function waitForAppTarget(
   throw new Error(`Timed out waiting for the Electron renderer target; see ${logPath}`);
 }
 
-function stopProcess(child: ChildProcess): void {
-  if (!child.pid || child.exitCode !== null) return;
+function hasExited(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
+
+function isProcessTreeRunning(child: ChildProcess): boolean {
+  if (!child.pid) return !hasExited(child);
+  if (process.platform === "win32") return !hasExited(child);
   try {
-    if (process.platform === "win32") child.kill("SIGTERM");
-    else process.kill(-child.pid, "SIGTERM");
+    process.kill(-child.pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+async function signalProcessTree(child: ChildProcess, force: boolean): Promise<void> {
+  if (!isProcessTreeRunning(child)) return;
+  if (!child.pid) throw new Error("Cannot stop a child process without a pid");
+  try {
+    if (process.platform === "win32") {
+      await execFileAsync("taskkill", ["/pid", String(child.pid), "/t", ...(force ? ["/f"] : [])]);
+    } else {
+      process.kill(-child.pid, force ? "SIGKILL" : "SIGTERM");
+    }
   } catch {
     // The process may exit between the liveness check and signal delivery.
   }
+}
+
+async function waitForProcessTreeExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessTreeRunning(child)) return true;
+    await delay(100);
+  }
+  return !isProcessTreeRunning(child);
+}
+
+async function stopProcessTree(child: ChildProcess, label: string): Promise<void> {
+  if (!isProcessTreeRunning(child)) return;
+  await signalProcessTree(child, false);
+  if (await waitForProcessTreeExit(child, 5_000)) return;
+  await signalProcessTree(child, true);
+  if (await waitForProcessTreeExit(child, 5_000)) return;
+  throw new Error(`${label} did not exit after forced termination`);
 }
 
 export async function startRealElectronRenderer(input: {
@@ -119,6 +160,7 @@ export async function startRealElectronRenderer(input: {
   mkdirSync(input.artifactDir, { recursive: true });
   const runtimeDir = mkdtempSync(path.join(os.tmpdir(), "paseo-operations-electron-"));
   const [expoPort, cdpPort] = await Promise.all([reservePort(), reservePort()]);
+  const origin = `http://localhost:${expoPort}`;
   const logPath = path.join(input.artifactDir, "real-electron.log");
   const log = createWriteStream(logPath, { flags: "a" });
   const listen = `127.0.0.1:${input.daemonPort}`;
@@ -132,7 +174,7 @@ export async function startRealElectronRenderer(input: {
     PASEO_VOICE_MODE_ENABLED: "0",
     PASEO_NODE_ENV: "development",
     EXPO_PORT: String(expoPort),
-    EXPO_DEV_URL: `http://127.0.0.1:${expoPort}`,
+    EXPO_DEV_URL: origin,
     PASEO_ELECTRON_REMOTE_DEBUGGING_PORT: String(cdpPort),
     PASEO_ELECTRON_USER_DATA_DIR: path.join(runtimeDir, "user-data"),
     PASEO_ELECTRON_FLAGS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${cdpPort}`,
@@ -159,6 +201,35 @@ export async function startRealElectronRenderer(input: {
 
   let child: ChildProcess | null = null;
   let browser: Browser | null = null;
+  let cleanupPromise: Promise<void> | null = null;
+  const cleanupRuntime = (): Promise<void> => {
+    cleanupPromise ??= (async () => {
+      const processes = [
+        { child, label: "Electron" },
+        { child: metro, label: "Electron Metro" },
+      ].filter((entry): entry is { child: ChildProcess; label: string } => entry.child !== null);
+      const results = await Promise.allSettled(
+        processes.map((entry) => stopProcessTree(entry.child, entry.label)),
+      );
+      for (const entry of processes) {
+        entry.child.stdout?.unpipe(log);
+        entry.child.stderr?.unpipe(log);
+      }
+      log.end();
+      await finished(log).catch(() => undefined);
+      const failures = results
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => result.reason);
+      if (failures.length > 0) {
+        throw new AggregateError(
+          failures,
+          `Failed to stop real Electron test processes; see ${logPath}`,
+        );
+      }
+      rmSync(runtimeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    })();
+    return cleanupPromise;
+  };
   try {
     await waitForMetro(expoPort, {
       label: "real Electron Metro",
@@ -192,22 +263,23 @@ export async function startRealElectronRenderer(input: {
       timeout: START_TIMEOUT_MS,
     });
     return {
+      origin,
       page,
       stop: async () => {
         await browser?.close().catch(() => undefined);
-        if (child) stopProcess(child);
-        stopProcess(metro);
-        await delay(1_000);
-        log.end();
-        rmSync(runtimeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+        await cleanupRuntime();
       },
     };
   } catch (error) {
     await browser?.close().catch(() => undefined);
-    if (child) stopProcess(child);
-    stopProcess(metro);
-    log.end();
-    rmSync(runtimeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    try {
+      await cleanupRuntime();
+    } catch (cleanupError) {
+      const startupMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(`Real Electron failed to start (${startupMessage}) and clean up`, {
+        cause: cleanupError,
+      });
+    }
     throw error;
   }
 }

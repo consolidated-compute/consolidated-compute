@@ -1,5 +1,6 @@
 import path from "node:path";
 import { readFileSync } from "node:fs";
+import type { MutableDaemonConfig, MutableDaemonConfigPatch } from "@getpaseo/protocol/messages";
 import type { TerminalActivity } from "@getpaseo/protocol/terminal-activity";
 import { connectDaemonClient } from "./daemon-client-loader";
 import { withProjectOwnership } from "./project-ownership";
@@ -30,6 +31,10 @@ interface SeedProjectDescriptor {
 export interface SeedDaemonClient {
   connect(): Promise<void>;
   close(): Promise<void>;
+  getDaemonConfig(): Promise<{ requestId: string; config: MutableDaemonConfig }>;
+  patchDaemonConfig(
+    config: MutableDaemonConfigPatch,
+  ): Promise<{ requestId: string; config: MutableDaemonConfig }>;
   addProject(cwd: string): Promise<{
     project: {
       projectId: string;

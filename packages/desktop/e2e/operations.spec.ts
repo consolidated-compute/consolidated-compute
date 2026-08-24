@@ -9,6 +9,7 @@ import {
   seedOperationsRuntimeScenario,
 } from "../../app/e2e/support/helpers/operations-runtime-scenario";
 import { openSettingsSection } from "../../app/e2e/support/helpers/settings";
+import type { SeedDaemonClient } from "../../app/e2e/support/helpers/seed-client";
 import { startRealElectronRenderer } from "./support/real-electron";
 import { installDesktopRuntime } from "./support/runtime";
 
@@ -71,6 +72,37 @@ async function useDarkLargeInterfaceText(page: Page): Promise<void> {
   await page.locator('[data-testid="sidebar-operations"]:visible').click();
   await expect(page).toHaveURL(/\/operations$/, { timeout: 10_000 });
   await closeCompactSidebar(page);
+}
+
+async function allowRendererOrigin(
+  clients: SeedDaemonClient[],
+  origin: string,
+): Promise<() => Promise<void>> {
+  const patched: Array<{ client: SeedDaemonClient; allowedOrigins: string[] }> = [];
+  try {
+    for (const client of clients) {
+      const { config } = await client.getDaemonConfig();
+      const allowedOrigins = config.cors?.allowedOrigins ?? [];
+      await client.patchDaemonConfig({
+        cors: { allowedOrigins: Array.from(new Set([...allowedOrigins, origin])) },
+      });
+      patched.push({ client, allowedOrigins });
+    }
+  } catch (error) {
+    await Promise.allSettled(
+      patched.map(({ client, allowedOrigins }) =>
+        client.patchDaemonConfig({ cors: { allowedOrigins } }),
+      ),
+    );
+    throw error;
+  }
+  return async () => {
+    await Promise.allSettled(
+      patched.map(({ client, allowedOrigins }) =>
+        client.patchDaemonConfig({ cors: { allowedOrigins } }),
+      ),
+    );
+  };
 }
 
 test("desktop runtime proves the 15-node Operations and Visual contract", async ({
@@ -175,6 +207,7 @@ test("real Electron retains the 15-node Visual contract", async ({
     artifactDir: testInfo.outputPath("real-electron"),
   });
   let scenario: Awaited<ReturnType<typeof seedOperationsRuntimeScenario>> | null = null;
+  let restoreCorsOrigins: (() => Promise<void>) | null = null;
 
   try {
     const page = electron.page;
@@ -185,6 +218,10 @@ test("real Electron retains the 15-node Visual contract", async ({
       primaryHostLabel: "Electron primary host",
       secondaryHostLabel: "Electron secondary host",
     });
+    restoreCorsOrigins = await allowRendererOrigin(
+      [scenario.primary.client, scenario.secondary.client],
+      electron.origin,
+    );
     const nowIso = new Date().toISOString();
     const hosts = [
       buildSeededHost({
@@ -249,6 +286,7 @@ test("real Electron retains the 15-node Visual contract", async ({
       .toBe(true);
     await capture(page, testInfo, "visual-electron-dark-large-text-compact");
   } finally {
+    await restoreCorsOrigins?.();
     await scenario?.cleanup();
     await electron.stop();
   }
