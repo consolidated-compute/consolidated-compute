@@ -8,6 +8,19 @@ const ciWorkflowPath = new URL(".github/workflows/ci.yml", repoRoot);
 const dockerWorkflowPath = new URL(".github/workflows/docker.yml", repoRoot);
 const nixWorkflowPath = new URL(".github/workflows/nix.yml", repoRoot);
 const mobileOperationsWorkflowPath = new URL(".github/workflows/mobile-operations.yml", repoRoot);
+const genericMobileRunnerPath = new URL("scripts/test-mobile-agent-device.sh", repoRoot);
+const operationsMobileRunnerPath = new URL(
+  "scripts/test-mobile-operations-agent-device.sh",
+  repoRoot,
+);
+const iosOperationsReplayPath = new URL(
+  "packages/app/e2e/mobile/operations-agent-device/operations-matrix.ios.ad",
+  repoRoot,
+);
+const androidOperationsReplayPath = new URL(
+  "packages/app/e2e/mobile/operations-agent-device/operations-matrix.android.ad",
+  repoRoot,
+);
 const upstreamReleaseMonitorPath = new URL(
   ".github/workflows/upstream-release-monitor.yml",
   repoRoot,
@@ -129,6 +142,51 @@ test("change gating allows superseded workflow runs to cancel", () => {
   }
 });
 
+test("mobile Operations keeps native device jobs off pull requests", () => {
+  const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
+  const jobs = jobBlocks(source);
+  const validation = jobs.get("validate")?.join("\n") ?? "";
+
+  assert.match(validation, /bash -n scripts\/test-mobile-agent-device\.sh/);
+  assert.match(validation, /bash -n scripts\/test-mobile-operations-agent-device\.sh/);
+  assert.match(validation, /node --test scripts\/ci-workflow\.test\.mjs/);
+  assert.doesNotMatch(validation, /setup-node|npm ci|expo|gradle|xcodebuild|agent-device test/);
+
+  for (const jobId of ["ios", "android"]) {
+    const job = jobs.get(jobId)?.join("\n") ?? "";
+    assert.match(
+      job,
+      /^    if: github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'$/m,
+    );
+    assert.match(job, /^    needs: validate$/m);
+  }
+});
+
+test("mobile Operations stays isolated from the upstream runner", () => {
+  const genericRunner = readFileSync(genericMobileRunnerPath, "utf8");
+  const operationsRunner = readFileSync(operationsMobileRunnerPath, "utf8");
+
+  assert.doesNotMatch(
+    genericRunner,
+    /OPERATIONS_FIXTURE|PASEO_MOBILE_E2E_PLATFORM|operations-agent-device/,
+  );
+  assert.match(operationsRunner, /PASEO_MOBILE_E2E_OPERATIONS_FIXTURE:-1/);
+  assert.match(operationsRunner, /PASEO_MOBILE_E2E_PLATFORM/);
+  assert.match(operationsRunner, /operations-agent-device/);
+});
+
+test("mobile Operations replays keep one cross-platform contract", () => {
+  const iosReplay = readFileSync(iosOperationsReplayPath, "utf8");
+  const androidReplay = readFileSync(androidOperationsReplayPath, "utf8");
+  const normalizePlatform = (source) =>
+    source.replace(/^context platform=(ios|android)/, "context platform=native");
+
+  assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
+  assert.match(iosReplay, /settings permission reset notifications/);
+  assert.match(iosReplay, /alert wait 45000\nalert dismiss/);
+  assert.match(iosReplay, /wait "id=\\"menu-button\\"" 45000/);
+});
+
 test("mobile Operations reuses native development apps", () => {
   const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
 
@@ -149,7 +207,7 @@ test("mobile Operations bounds Android replay resources", () => {
 
   assert.match(source, /ram-size: 2048M/);
   assert.match(source, /heap-size: 512M/);
-  assert.match(source, /NODE_OPTIONS=--max-old-space-size=2048 npm run test:e2e:mobile/);
+  assert.match(source, /NODE_OPTIONS=--max-old-space-size=2048 npm run test:e2e:mobile:operations/);
 });
 
 test("fork delivery and write-back jobs stay quarantined", () => {

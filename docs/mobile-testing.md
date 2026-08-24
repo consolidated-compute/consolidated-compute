@@ -43,12 +43,10 @@ PASEO_MOBILE_E2E_METRO_PORT=62093 npm run test:e2e:mobile
 The Operations matrix owns its state. This command starts two private daemons, seeds the browser fixture's managed and provider-native hierarchy, clears app state, uses large system text, and writes light, dark, rotation, and resume screenshots into the attempt artifact directory:
 
 ```bash
-PASEO_MOBILE_E2E_PLATFORM=ios \
-PASEO_MOBILE_E2E_OPERATIONS_FIXTURE=1 \
-npm run test:e2e:mobile
+PASEO_MOBILE_E2E_PLATFORM=ios npm run test:e2e:mobile:operations
 ```
 
-Use `android` for the Android run. `.github/workflows/mobile-operations.yml` runs both platforms for relevant pull requests and on its weekday schedule, then retains passing screenshots, timings, JUnit output, logs, and failure diagnostics. CI caches the built development-client `.app` and APK by native inputs; JavaScript-only changes reuse the binaries and still compile the current Metro bundle before replay.
+Use `android` for the Android run. `.github/workflows/mobile-operations.yml` runs the device matrix on its weekday schedule or by manual dispatch, then retains passing screenshots, timings, JUnit output, logs, and failure diagnostics. Pull requests only validate the workflow and replay contracts; the normal app and browser checks own change-time coverage. The scheduled matrix caches the built development-client `.app` and APK by native inputs; JavaScript-only changes reuse the binaries and still compile the current Metro bundle before replay.
 
 When replay diverges, read its ranked selector suggestions. Edit the script deliberately and rerun it from the beginning. `--update` is retained for compatibility but no longer rewrites scripts.
 
