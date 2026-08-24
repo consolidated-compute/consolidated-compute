@@ -61,7 +61,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .dev/mobile-build-cache/ios/ConsolidatedComputeDebug.app
-          key: mobile-operations-ios-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/mobile-operations.yml', 'package.json', 'package-lock.json', 'packages/app/package.json', 'packages/app/app.config.js', 'packages/app/native-release-version.js', 'packages/app/plugins/**', 'packages/app/assets/images/**', 'packages/expo-two-way-audio/package.json', 'packages/expo-two-way-audio/expo-module.config.json', 'packages/expo-two-way-audio/ios/**', 'patches/**') }}
+          key: mobile-operations-ios-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package.json', 'package-lock.json', 'packages/app/package.json', 'packages/app/app.config.js', 'packages/app/native-release-version.js', 'packages/app/plugins/**', 'packages/app/assets/images/**', 'packages/expo-two-way-audio/package.json', 'packages/expo-two-way-audio/expo-module.config.json', 'packages/expo-two-way-audio/ios/**', 'patches/**') }}
 
       - name: Select and boot an iPhone simulator
         shell: bash
@@ -153,7 +153,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .dev/mobile-build-cache/android/app-debug.apk
-          key: mobile-operations-android-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/workflows/mobile-operations.yml', 'package.json', 'package-lock.json', 'packages/app/package.json', 'packages/app/app.config.js', 'packages/app/native-release-version.js', 'packages/app/plugins/**', 'packages/app/assets/images/**', 'packages/expo-two-way-audio/package.json', 'packages/expo-two-way-audio/expo-module.config.json', 'packages/expo-two-way-audio/android/**', 'patches/**') }}
+          key: mobile-operations-android-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package.json', 'package-lock.json', 'packages/app/package.json', 'packages/app/app.config.js', 'packages/app/native-release-version.js', 'packages/app/plugins/**', 'packages/app/assets/images/**', 'packages/expo-two-way-audio/package.json', 'packages/expo-two-way-audio/expo-module.config.json', 'packages/expo-two-way-audio/android/**', 'patches/**') }}
 
       - name: Enable KVM
         run: |
@@ -191,10 +191,12 @@ jobs:
           api-level: 35
           arch: x86_64
           profile: pixel_6
+          ram-size: 2048M
+          heap-size: 512M
           disable-animations: true
           script: |
             adb install -r .dev/mobile-build-cache/android/app-debug.apk
-            npm run test:e2e:mobile
+            NODE_OPTIONS=--max-old-space-size=2048 npm run test:e2e:mobile
 
       - name: Upload Android evidence
         if: ${{ always() }}

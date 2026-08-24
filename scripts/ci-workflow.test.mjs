@@ -141,6 +141,15 @@ test("mobile Operations reuses native development apps", () => {
   assert.match(source, /-PreactNativeArchitectures=x86_64/);
   assert.match(source, /packages\/expo-two-way-audio\/ios\/\*\*/);
   assert.match(source, /packages\/expo-two-way-audio\/android\/\*\*/);
+  assert.doesNotMatch(source, /hashFiles\('\.github\/workflows\/mobile-operations\.yml'/);
+});
+
+test("mobile Operations bounds Android replay resources", () => {
+  const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
+
+  assert.match(source, /ram-size: 2048M/);
+  assert.match(source, /heap-size: 512M/);
+  assert.match(source, /NODE_OPTIONS=--max-old-space-size=2048 npm run test:e2e:mobile/);
 });
 
 test("fork delivery and write-back jobs stay quarantined", () => {
