@@ -70,7 +70,7 @@ if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
 
   FIXTURE_LINE=""
   for _ in $(seq 1 300); do
-    FIXTURE_LINE="$(rg -m 1 '^PASEO_MOBILE_OPERATIONS_FIXTURE=' "${FIXTURE_LOG}" || true)"
+    FIXTURE_LINE="$(grep -m 1 '^PASEO_MOBILE_OPERATIONS_FIXTURE=' "${FIXTURE_LOG}" || true)"
     if [[ -n "${FIXTURE_LINE}" ]]; then
       break
     fi
