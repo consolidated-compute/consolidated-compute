@@ -47,8 +47,10 @@ jobs:
       - name: Install dependencies
         run: node scripts/npm-retry.mjs ci
 
-      - name: Build the daemon stack
-        run: npm run build:server
+      - name: Build the daemon stack and native app module
+        run: |
+          npm run build:server
+          npm run build --workspace=@getpaseo/expo-two-way-audio
 
       - name: Select and boot an iPhone simulator
         shell: bash
@@ -77,8 +79,9 @@ jobs:
         env:
           APP_VARIANT: development
         run: |
-          npx expo prebuild --platform ios --clean --non-interactive
-          npx expo run:ios --device "$IOS_UDID" --configuration Debug --no-bundler
+          CI=1 npx expo prebuild --platform ios --clean
+          # Expo CLI 54 forces Metro on when Debug is explicit; Debug is already the default.
+          npx expo run:ios --device "$IOS_UDID" --no-bundler
 
       - name: Run the iOS Operations matrix
         env:
@@ -113,8 +116,10 @@ jobs:
       - name: Install dependencies
         run: node scripts/npm-retry.mjs ci
 
-      - name: Build the daemon stack
-        run: npm run build:server
+      - name: Build the daemon stack and native app module
+        run: |
+          npm run build:server
+          npm run build --workspace=@getpaseo/expo-two-way-audio
 
       - name: Enable KVM
         run: |
@@ -130,12 +135,9 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: |
-            cd packages/app
-            APP_VARIANT=development npx expo prebuild --platform android --clean --non-interactive
-            cd android
-            ./gradlew assembleDebug
-            adb install -r app/build/outputs/apk/debug/app-debug.apk
-            cd ../../..
+            cd packages/app && CI=1 APP_VARIANT=development npx expo prebuild --platform android --clean
+            cd packages/app/android && ./gradlew assembleDebug
+            adb install -r packages/app/android/app/build/outputs/apk/debug/app-debug.apk
             PASEO_MOBILE_E2E_PLATFORM=android \
               PASEO_MOBILE_E2E_OPERATIONS_FIXTURE=1 \
               PASEO_MOBILE_E2E_ARTIFACTS_DIR="$RUNNER_TEMP/mobile-operations-android" \
