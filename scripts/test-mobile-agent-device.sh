@@ -12,6 +12,7 @@ OPERATIONS_FIXTURE="${PASEO_MOBILE_E2E_OPERATIONS_FIXTURE:-0}"
 SUITE_PATH="${PASEO_MOBILE_E2E_SUITE:-${REPO_ROOT}/packages/app/e2e/mobile/agent-device}"
 AGENT_DEVICE_BIN="${REPO_ROOT}/node_modules/.bin/agent-device"
 METRO_PID=0
+METRO_LOG_PATH=""
 FIXTURE_PID=0
 RESET_DEVICE_SETTINGS=0
 
@@ -41,6 +42,9 @@ cleanup() {
       adb shell settings put system font_scale 1.0 >/dev/null 2>&1 || true
       adb shell cmd uimode night no >/dev/null 2>&1 || true
     fi
+  fi
+  if [[ -n "${METRO_LOG_PATH}" && -f "${METRO_LOG_PATH}" ]]; then
+    cp "${METRO_LOG_PATH}" "${ARTIFACTS_DIR}/metro.log" >/dev/null 2>&1 || true
   fi
   AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" daemon stop --clean >/dev/null 2>&1 || true
   if [[ "${METRO_PID}" -gt 0 ]]; then
@@ -147,14 +151,29 @@ METRO_RESULT="$({
     --json
 })"
 printf '%s\n' "${METRO_RESULT}"
-METRO_PID="$(printf '%s' "${METRO_RESULT}" | node -e '
+METRO_VALUES="$(printf '%s' "${METRO_RESULT}" | node -e '
   let input = "";
   process.stdin.on("data", (chunk) => { input += chunk; });
   process.stdin.on("end", () => {
     const result = JSON.parse(input);
-    process.stdout.write(String(result.data?.started ? result.data.pid : 0));
+    const platform = process.argv[1];
+    const runtime = platform === "ios" ? result.data?.iosRuntime : result.data?.androidRuntime;
+    const bundleUrl = new URL(runtime?.bundleUrl);
+    bundleUrl.hostname = "127.0.0.1";
+    process.stdout.write([
+      String(result.data?.started ? result.data.pid : 0),
+      result.data?.logPath ?? "",
+      bundleUrl.toString(),
+    ].join("\t"));
   });
-')"
+' "${PLATFORM}")"
+IFS=$'\t' read -r METRO_PID METRO_LOG_PATH METRO_PREWARM_URL <<<"${METRO_VALUES}"
+
+# Compile the platform bundle before opening the development client. Cold Expo
+# bundles can take longer than the first UI assertion on hosted runners.
+curl --fail --show-error --silent --retry 2 --retry-all-errors --max-time 300 \
+  --output /dev/null \
+  "${METRO_PREWARM_URL}"
 
 BOOT_ARGS=(--platform "${PLATFORM}")
 if [[ -n "${DEVICE}" ]]; then
@@ -195,7 +214,7 @@ AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" test \
   "${SUITE_PATH}" \
   --platform "${PLATFORM}" \
   --metro-port "${METRO_PORT}" \
-  --timeout 180000 \
+  --timeout 600000 \
   --fail-fast \
   "${REPORTER_ARGS[@]}" \
   --artifacts-dir "${ARTIFACTS_DIR}"

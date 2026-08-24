@@ -1,4 +1,4 @@
-context platform=android timeout=180000 retries=1
+context platform=android timeout=600000 retries=1
 env APP_ID=sh.paseo.debug
 
 open "${APP_ID}"
