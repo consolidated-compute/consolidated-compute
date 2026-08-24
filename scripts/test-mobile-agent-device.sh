@@ -158,7 +158,11 @@ METRO_PID="$(printf '%s' "${METRO_RESULT}" | node -e '
 
 BOOT_ARGS=(--platform "${PLATFORM}")
 if [[ -n "${DEVICE}" ]]; then
-  BOOT_ARGS+=(--device "${DEVICE}")
+  if [[ "${PLATFORM}" == "ios" ]]; then
+    BOOT_ARGS+=(--udid "${DEVICE}")
+  else
+    BOOT_ARGS+=(--device "${DEVICE}")
+  fi
 fi
 AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" boot "${BOOT_ARGS[@]}"
 
