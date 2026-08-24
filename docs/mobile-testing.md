@@ -2,7 +2,12 @@
 
 ## Agent Device
 
-Agent Device `.ad` scripts are the primary mobile E2E format. An agent discovers a working flow interactively, saves the successful commands, then the replay runner executes the same typed plan locally or in CI.
+Agent Device `.ad` scripts are the primary mobile E2E format. An agent discovers a working flow interactively, saves the successful commands, then the replay runner executes the same typed plan locally or in CI. The workspace dependency pins the runner version; install the repository dependencies and verify it:
+
+```bash
+npm ci
+npx agent-device --version
+```
 
 Record a flow while driving the app normally:
 
@@ -25,7 +30,7 @@ Run the Paseo mobile suite:
 npm run test:e2e:mobile
 ```
 
-The runner uses an isolated Agent Device state directory, verifies or starts Metro for this checkout, prewarms the iOS runner, discovers each script's platform from its `context` header, and cleans its sessions, runner lease, daemon, and any Metro process it started. Attempt results, timings, logs, and failure artifacts go under `.dev/agent-device-artifacts`.
+The runner uses an isolated Agent Device state directory, verifies or starts Metro for this checkout, prepares the selected platform, and cleans its sessions, runner lease, daemon, and any Metro process it started. It defaults to iOS. Set `PASEO_MOBILE_E2E_PLATFORM=android` when an Android emulator is already running. Attempt results, timings, logs, and failure artifacts go under `.dev/agent-device-artifacts`.
 
 Set `PASEO_MOBILE_E2E_METRO_PORT` when this worktree already has Metro on a non-default port:
 
@@ -34,6 +39,14 @@ PASEO_MOBILE_E2E_METRO_PORT=62093 npm run test:e2e:mobile
 ```
 
 [native-terminal-basic.ios.ad](../packages/app/e2e/mobile/agent-device/native-terminal-basic.ios.ad) and [native-terminal-basic.android.ad](../packages/app/e2e/mobile/agent-device/native-terminal-basic.android.ad) are the smallest examples. Each opens a fresh terminal, types a command at zero delay, submits it, and asserts its distinct output. The app must be connected to a daemon with an active workspace.
+
+The Operations matrix owns its state. This command starts two private daemons, seeds the browser fixture's managed and provider-native hierarchy, clears app state, uses large system text, and writes light, dark, rotation, and resume screenshots into the attempt artifact directory:
+
+```bash
+PASEO_MOBILE_E2E_PLATFORM=ios npm run test:e2e:mobile:operations
+```
+
+Use `android` for the Android run. The Operations runner uses its own Agent Device state and artifact directories under `.dev/operations-agent-device-*` and defaults Metro to port `8082`, so it does not stop or overwrite a normal mobile run. Choose another unused `PASEO_MOBILE_E2E_METRO_PORT` when needed; the fixture daemon endpoint is compiled into the bundle, so this runner always starts a fresh Metro process. `.github/workflows/mobile-operations.yml` runs the device matrix on its weekday schedule or by manual dispatch, then retains passing screenshots, timings, JUnit output, logs, and failure diagnostics. Pull requests only validate the workflow and replay contracts; the normal app and browser checks own change-time coverage. The scheduled matrix caches the built development-client `.app` and APK by native inputs; JavaScript-only changes reuse the binaries and still compile the current Metro bundle before replay.
 
 When replay diverges, read its ranked selector suggestions. Edit the script deliberately and rerun it from the beginning. `--update` is retained for compatibility but no longer rewrites scripts.
 

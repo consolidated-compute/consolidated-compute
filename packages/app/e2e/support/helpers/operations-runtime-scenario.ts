@@ -6,6 +6,12 @@ import {
   installOperationsHostFixture,
   type OperationsHostFixture,
 } from "./operations-host-fixture";
+import {
+  OPERATIONS_DUPLICATE_PROVIDER_SUBAGENT_ID,
+  OPERATIONS_PRIMARY_PROVIDER_SUBAGENTS,
+  OPERATIONS_SECONDARY_PROVIDER_SUBAGENTS,
+  type OperationsProviderSubagentSeed,
+} from "./operations-scenario-data";
 import { seedWorkspace, type SeededWorkspace } from "./seed-client";
 import { getServerId } from "./server-id";
 import {
@@ -40,10 +46,7 @@ export interface OperationsRuntimeScenario {
 }
 
 function providerSubagent(
-  input: Pick<
-    ProviderSubagentDescriptorPayload,
-    "id" | "parentAgentId" | "provider" | "description" | "status" | "subtitle"
-  >,
+  input: OperationsProviderSubagentSeed & { parentAgentId: string },
   now: string,
 ): ProviderSubagentDescriptorPayload {
   return {
@@ -134,104 +137,18 @@ export async function seedOperationsRuntimeScenario(
     }
 
     const now = new Date().toISOString();
-    const duplicateProviderSubagentId = "duplicate-provider-child";
+    const duplicateProviderSubagentId = OPERATIONS_DUPLICATE_PROVIDER_SUBAGENT_ID;
     const primaryFixture = await installOperationsHostFixture(page, {
       port: getE2EDaemonPort(),
-      providerSubagents: [
-        providerSubagent(
-          {
-            id: duplicateProviderSubagentId,
-            parentAgentId: sameWorkspace.parent.id,
-            provider: "codex",
-            description: "Review the primary host changes",
-            status: "failed",
-            subtitle: "Primary host native child",
-          },
-          now,
-        ),
-        providerSubagent(
-          {
-            id: "primary-running-provider",
-            parentAgentId: sameWorkspace.parent.id,
-            provider: "codex",
-            description: "Coordinate active primary work",
-            status: "running",
-            subtitle: "Live provider child",
-          },
-          now,
-        ),
-        providerSubagent(
-          {
-            id: "primary-completed-provider",
-            parentAgentId: sameWorkspace.parent.id,
-            provider: "claude",
-            description: "Completed primary analysis",
-            status: "completed",
-            subtitle: "Finished provider child",
-          },
-          now,
-        ),
-        providerSubagent(
-          {
-            id: "primary-canceled-provider",
-            parentAgentId: sameWorkspace.parent.id,
-            provider: "codex",
-            description: "Canceled primary exploration",
-            status: "canceled",
-            subtitle: "Stopped provider child",
-          },
-          now,
-        ),
-      ],
+      providerSubagents: OPERATIONS_PRIMARY_PROVIDER_SUBAGENTS.map((seed) =>
+        providerSubagent({ ...seed, parentAgentId: sameWorkspace.parent.id }, now),
+      ),
     });
     const secondaryFixture = await installOperationsHostFixture(page, {
       port: secondaryDaemon.port,
-      providerSubagents: [
-        providerSubagent(
-          {
-            id: duplicateProviderSubagentId,
-            parentAgentId: secondaryAgent.id,
-            provider: "claude",
-            description: "Inspect the secondary host",
-            status: "completed",
-            subtitle: "Secondary host native child",
-          },
-          now,
-        ),
-        providerSubagent(
-          {
-            id: "secondary-running-provider",
-            parentAgentId: secondaryAgent.id,
-            provider: "claude",
-            description: "Coordinate active secondary work",
-            status: "running",
-            subtitle: "Live provider child",
-          },
-          now,
-        ),
-        providerSubagent(
-          {
-            id: "secondary-completed-provider",
-            parentAgentId: secondaryAgent.id,
-            provider: "codex",
-            description: "Completed secondary analysis",
-            status: "completed",
-            subtitle: "Finished provider child",
-          },
-          now,
-        ),
-        providerSubagent(
-          {
-            id: "secondary-failed-provider",
-            parentAgentId: secondaryAgent.id,
-            provider: "claude",
-            description: "Failed secondary verification",
-            status: "failed",
-            subtitle: "Failed provider child",
-          },
-          now,
-        ),
-      ],
+      providerSubagents: OPERATIONS_SECONDARY_PROVIDER_SUBAGENTS.map((seed) =>
+        providerSubagent({ ...seed, parentAgentId: secondaryAgent.id }, now),
+      ),
     });
 
     const seededSecondary = secondary;

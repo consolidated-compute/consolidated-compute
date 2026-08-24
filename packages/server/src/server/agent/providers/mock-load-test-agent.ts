@@ -168,6 +168,59 @@ interface AgentStreamStressRequest {
 
 type SteeringReplayShape = "claude" | "codex";
 
+const MOCK_PROVIDER_SUBAGENT_PROVIDERS = ["mock", "claude", "codex"] as const;
+const MOCK_PROVIDER_SUBAGENT_STATUSES = ["running", "completed", "failed", "canceled"] as const;
+
+interface MockProviderSubagent {
+  id: string;
+  provider: (typeof MOCK_PROVIDER_SUBAGENT_PROVIDERS)[number];
+  title?: string | null;
+  description?: string | null;
+  status: (typeof MOCK_PROVIDER_SUBAGENT_STATUSES)[number];
+  subtitle?: string | null;
+}
+
+function includesLiteral<const Values extends readonly string[]>(
+  values: Values,
+  value: string,
+): value is Values[number] {
+  return values.includes(value as Values[number]);
+}
+
+function parseMockProviderSubagents(value: unknown): MockProviderSubagent[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.flatMap((entry): MockProviderSubagent[] => {
+    if (typeof entry !== "object" || entry === null) return [];
+    const candidate = entry as Record<string, unknown>;
+    if (typeof candidate.id !== "string" || candidate.id.trim().length === 0) return [];
+    if (
+      typeof candidate.provider !== "string" ||
+      !includesLiteral(MOCK_PROVIDER_SUBAGENT_PROVIDERS, candidate.provider)
+    ) {
+      return [];
+    }
+    if (
+      typeof candidate.status !== "string" ||
+      !includesLiteral(MOCK_PROVIDER_SUBAGENT_STATUSES, candidate.status)
+    ) {
+      return [];
+    }
+    const nullableString = (field: unknown): string | null | undefined =>
+      typeof field === "string" || field === null ? field : undefined;
+    return [
+      {
+        id: candidate.id.trim(),
+        provider: candidate.provider,
+        status: candidate.status,
+        title: nullableString(candidate.title),
+        description: nullableString(candidate.description),
+        subtitle: nullableString(candidate.subtitle),
+      },
+    ];
+  });
+}
+
 interface MockQuestionOption {
   label: string;
   description?: string;
@@ -662,6 +715,8 @@ export class MockLoadTestAgentSession implements AgentSession {
   private readonly streamingAssistantResponse: string | null;
   private readonly streamingAssistantIntervalMs: number;
   private readonly rewindError: string | null;
+  private readonly configuredProviderSubagents: MockProviderSubagent[];
+  private didEmitConfiguredProviderSubagents = false;
   private remainingPromptRejections: number;
   private remainingSteerFailures: number;
 
@@ -690,6 +745,9 @@ export class MockLoadTestAgentSession implements AgentSession {
       typeof options.config.featureValues?.mockRewindError === "string"
         ? options.config.featureValues.mockRewindError
         : null;
+    this.configuredProviderSubagents = parseMockProviderSubagents(
+      options.config.featureValues?.mockProviderSubagents,
+    );
     const requestedPromptRejections = options.config.featureValues?.mockPromptRejections;
     this.remainingPromptRejections =
       typeof requestedPromptRejections === "number" &&
@@ -746,6 +804,7 @@ export class MockLoadTestAgentSession implements AgentSession {
       turnStarted: false,
     };
     this.activeTurn = turn;
+    this.emitConfiguredProviderSubagents();
     const largePayload = parseLargeAgentStreamPayloadPrompt(prompt);
     const stress = parseAgentStreamStressPrompt(prompt);
     const questionPrompt = parseMockQuestionPrompt(prompt);
@@ -1515,6 +1574,25 @@ export class MockLoadTestAgentSession implements AgentSession {
       turnId,
       item,
     });
+  }
+
+  private emitConfiguredProviderSubagents(): void {
+    if (this.didEmitConfiguredProviderSubagents) return;
+    this.didEmitConfiguredProviderSubagents = true;
+    for (const subagent of this.configuredProviderSubagents) {
+      this.emit({
+        type: "provider_subagent",
+        provider: subagent.provider,
+        event: {
+          type: "upsert",
+          id: subagent.id,
+          title: subagent.title,
+          description: subagent.description,
+          status: subagent.status,
+          subtitle: subagent.subtitle,
+        },
+      });
+    }
   }
 
   private emit(event: AgentStreamEvent): void {

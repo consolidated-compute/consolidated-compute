@@ -158,6 +158,48 @@ describe("MockLoadTestAgentClient", () => {
     await session.interrupt();
   });
 
+  test("emits configured provider subagents once for deterministic UI fixtures", async () => {
+    const client = new MockLoadTestAgentClient();
+    const session = await client.createSession({
+      provider: "mock",
+      cwd: process.cwd(),
+      model: "ten-second-stream",
+      featureValues: {
+        mockProviderSubagents: [
+          {
+            id: "review-child",
+            provider: "codex",
+            description: "Review the native matrix",
+            status: "failed",
+            subtitle: "Native provider child",
+          },
+        ],
+      },
+    });
+    const events: AgentStreamEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    await session.startTurn("Keep the fixture active.");
+    await session.interrupt();
+    await session.startTurn("Start a second turn.");
+
+    expect(events.filter((event) => event.type === "provider_subagent")).toEqual([
+      {
+        type: "provider_subagent",
+        provider: "codex",
+        event: {
+          type: "upsert",
+          id: "review-child",
+          title: undefined,
+          description: "Review the native matrix",
+          status: "failed",
+          subtitle: "Native provider child",
+        },
+      },
+    ]);
+    await session.interrupt();
+  });
+
   test("can place the provider echo beyond a bounded timeline tail", async () => {
     const client = new MockLoadTestAgentClient();
     const session = await client.createSession({
