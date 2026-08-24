@@ -2,9 +2,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-STATE_DIR="${PASEO_MOBILE_E2E_STATE_DIR:-${REPO_ROOT}/.dev/agent-device-e2e}"
-ARTIFACTS_DIR="${PASEO_MOBILE_E2E_ARTIFACTS_DIR:-${REPO_ROOT}/.dev/agent-device-artifacts}"
-METRO_PORT="${PASEO_MOBILE_E2E_METRO_PORT:-8081}"
+STATE_DIR="${PASEO_MOBILE_E2E_STATE_DIR:-${REPO_ROOT}/.dev/operations-agent-device-e2e}"
+ARTIFACTS_DIR="${PASEO_MOBILE_E2E_ARTIFACTS_DIR:-${REPO_ROOT}/.dev/operations-agent-device-artifacts}"
+METRO_PORT="${PASEO_MOBILE_E2E_METRO_PORT:-8082}"
 PLATFORM="${PASEO_MOBILE_E2E_PLATFORM:-ios}"
 DEVICE="${PASEO_MOBILE_E2E_DEVICE:-}"
 APP_ID="${PASEO_MOBILE_E2E_APP_ID:-sh.paseo.debug}"

@@ -173,6 +173,9 @@ test("mobile Operations stays isolated from the upstream runner", () => {
   assert.match(operationsRunner, /PASEO_MOBILE_E2E_OPERATIONS_FIXTURE:-1/);
   assert.match(operationsRunner, /PASEO_MOBILE_E2E_PLATFORM/);
   assert.match(operationsRunner, /operations-agent-device/);
+  assert.match(operationsRunner, /\.dev\/operations-agent-device-e2e/);
+  assert.match(operationsRunner, /\.dev\/operations-agent-device-artifacts/);
+  assert.match(operationsRunner, /PASEO_MOBILE_E2E_METRO_PORT:-8082/);
   assert.match(operationsRunner, /metro prepare[\s\S]*--no-reuse-existing/);
 });
 
