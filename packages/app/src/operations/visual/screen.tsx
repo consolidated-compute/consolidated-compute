@@ -1,6 +1,19 @@
 import { useIsFocused } from "@react-navigation/native";
-import { ChevronRight, RefreshCw } from "lucide-react-native";
-import { useCallback, useMemo, useState, type ReactElement } from "react";
+import {
+  Activity,
+  Bell,
+  CheckCircle2,
+  ChevronRight,
+  ExternalLink,
+  GitBranch,
+  MessageCircleQuestion,
+  Network,
+  RefreshCcw,
+  RefreshCw,
+  Unlink,
+  XCircle,
+} from "lucide-react-native";
+import { Fragment, useCallback, useMemo, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Pressable,
@@ -12,27 +25,34 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
+import Animated, { type SharedValue, useAnimatedStyle } from "react-native-reanimated";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { getProviderIcon, type ProviderIconProps } from "@/components/provider-icons";
 import { MenuHeader } from "@/components/headers/menu-header";
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { getStatusDotColor } from "@/utils/status-dot-color";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
-import { resolveOperationsAvailability, shouldShowUnavailableHostsAlert } from "../screen-state";
+import { OperationsAvailabilityAlerts } from "../availability-alerts";
+import { resolveOperationsAvailability } from "../screen-state";
 import { useOperationsData } from "../use-operations-data";
 import {
   buildVisualTopology,
   type VisualNode,
   type VisualProjectRegion,
   type VisualRect,
+  type VisualRelationship,
   type VisualTopology,
   type VisualWorkspaceRegion,
 } from "./topology";
+import {
+  resolveVisualRelationshipPresentation,
+  resolveVisualStatePresentation,
+} from "./presentation";
 import { fitVisualRectToWidth, resolveVisualLayoutMode } from "./viewport";
+import { useVisualWorkingClock } from "./working-clock";
 
 function ProviderGlyph({ provider, size, color }: ProviderIconProps & { provider: string }) {
   const ProviderIcon = getProviderIcon(provider);
@@ -49,20 +69,126 @@ const ThemedChevronRight = withUnistyles(ChevronRight, (theme) => ({
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner, (theme) => ({
   color: theme.colors.foregroundMuted,
 }));
+const ThemedNeedsInputGlyph = withUnistyles(MessageCircleQuestion, (theme) => ({
+  color: getStatusDotColor({ theme, bucket: "needs_input" }) ?? theme.colors.foreground,
+}));
+const ThemedFailedGlyph = withUnistyles(XCircle, (theme) => ({
+  color: getStatusDotColor({ theme, bucket: "failed" }) ?? theme.colors.foreground,
+}));
+const ThemedWorkingGlyph = withUnistyles(Activity, (theme) => ({
+  color: getStatusDotColor({ theme, bucket: "running" }) ?? theme.colors.foreground,
+}));
+const ThemedAttentionGlyph = withUnistyles(Bell, (theme) => ({
+  color: getStatusDotColor({ theme, bucket: "attention" }) ?? theme.colors.foreground,
+}));
+const ThemedDoneGlyph = withUnistyles(CheckCircle2, (theme) => ({
+  color: theme.colors.foregroundExtraMuted,
+}));
+const ThemedNestedGlyph = withUnistyles(GitBranch, (theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
+const ThemedProviderRelationshipGlyph = withUnistyles(Network, (theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
+const ThemedCrossWorkspaceGlyph = withUnistyles(ExternalLink, (theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
+const ThemedMissingGlyph = withUnistyles(Unlink, (theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
+const ThemedCycleGlyph = withUnistyles(RefreshCcw, (theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
 
-function statusDotStyle(state: VisualNode["state"]): StyleProp<ViewStyle> {
+function StaticStateGlyph({ state }: { state: VisualNode["state"] }): ReactElement {
   switch (state) {
     case "needs_input":
-      return [styles.statusDot, styles.statusDotNeedsInput];
+      return <ThemedNeedsInputGlyph size={15} />;
     case "failed":
-      return [styles.statusDot, styles.statusDotFailed];
+      return <ThemedFailedGlyph size={15} />;
     case "running":
-      return [styles.statusDot, styles.statusDotRunning];
+      return <ThemedWorkingGlyph size={15} />;
     case "attention":
-      return [styles.statusDot, styles.statusDotAttention];
+      return <ThemedAttentionGlyph size={15} />;
     case "done":
-      return [styles.statusDot, styles.statusDotDone];
+      return <ThemedDoneGlyph size={15} />;
   }
+}
+
+function AnimatedWorkingGlyph({ phase }: { phase: SharedValue<number> }): ReactElement {
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: 0.55 + phase.value * 0.45,
+    transform: [{ scale: 0.92 + phase.value * 0.08 }],
+  }));
+  return (
+    <Animated.View style={animatedStyle} testID="visual-working-animation">
+      <ThemedWorkingGlyph size={15} />
+    </Animated.View>
+  );
+}
+
+function VisualStateGlyph({
+  state,
+  canAnimate = false,
+  phase = null,
+  testID,
+}: {
+  state: VisualNode["state"];
+  canAnimate?: boolean;
+  phase?: SharedValue<number> | null;
+  testID: string;
+}): ReactElement {
+  return (
+    <View
+      accessible={false}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={styles.semanticGlyph}
+      testID={testID}
+    >
+      {state === "running" && canAnimate && phase ? (
+        <AnimatedWorkingGlyph phase={phase} />
+      ) : (
+        <StaticStateGlyph state={state} />
+      )}
+    </View>
+  );
+}
+
+function VisualRelationshipGlyph({
+  relationship,
+}: {
+  relationship: VisualRelationship;
+}): ReactElement {
+  const { icon } = resolveVisualRelationshipPresentation(relationship.kind);
+  let glyph: ReactElement;
+  switch (icon) {
+    case "nested":
+      glyph = <ThemedNestedGlyph size={13} />;
+      break;
+    case "provider":
+      glyph = <ThemedProviderRelationshipGlyph size={13} />;
+      break;
+    case "cross_workspace":
+      glyph = <ThemedCrossWorkspaceGlyph size={13} />;
+      break;
+    case "missing":
+      glyph = <ThemedMissingGlyph size={13} />;
+      break;
+    case "cycle":
+      glyph = <ThemedCycleGlyph size={13} />;
+      break;
+  }
+  return (
+    <View
+      accessible={false}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={styles.semanticGlyph}
+    >
+      {glyph}
+    </View>
+  );
 }
 
 function positionedRect(rect: VisualRect): ViewStyle {
@@ -76,22 +202,27 @@ function positionedRect(rect: VisualRect): ViewStyle {
 
 function interactiveNodeStyle(
   rect: VisualRect,
-  state: PressableStateCallbackType & { hovered?: boolean },
+  node: VisualNode,
+  state: PressableStateCallbackType & { hovered?: boolean; focused?: boolean },
 ): StyleProp<ViewStyle> {
   return [
     styles.node,
     positionedRect(rect),
+    node.isLastKnown && styles.nodeLastKnown,
+    resolveVisualStatePresentation(node).emphasis === "urgent" && styles.nodeUrgent,
     state.hovered && styles.nodeHovered,
+    state.focused && styles.nodeFocused,
     state.pressed && styles.pressed,
   ];
 }
 
 function interactiveWorkspaceHeaderStyle(
-  state: PressableStateCallbackType & { hovered?: boolean },
+  state: PressableStateCallbackType & { hovered?: boolean; focused?: boolean },
 ): StyleProp<ViewStyle> {
   return [
     styles.workspaceHeader,
     state.hovered && styles.workspaceHeaderHovered,
+    state.focused && styles.workspaceHeaderFocused,
     state.pressed && styles.pressed,
   ];
 }
@@ -114,6 +245,13 @@ function displayWorkspaceName(
     return t("operations.otherWork");
   }
   return workspace.title;
+}
+
+function displayVisualState(
+  state: VisualNode["state"],
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
+  return state === "done" ? t("visual.states.done") : t(`operations.states.${state}`);
 }
 
 function VisualProject({
@@ -150,7 +288,7 @@ function VisualWorkspace({
   const { t } = useTranslation();
   const title = displayWorkspaceName(workspace, t);
   const state = workspace.directoryState ?? workspace.liveMostUrgentState ?? "done";
-  const stateLabel = t(`operations.states.${state}`);
+  const stateLabel = displayVisualState(state, t);
   const metadata = [
     workspace.serverName,
     stateLabel,
@@ -160,7 +298,7 @@ function VisualWorkspace({
     .join(" · ");
   const content = (
     <>
-      <View style={statusDotStyle(state)} testID={`visual-workspace-state-${state}`} />
+      <VisualStateGlyph state={state} testID={`visual-workspace-state-${state}`} />
       <View style={styles.workspaceHeaderBody}>
         <Text numberOfLines={1} style={styles.workspaceTitle}>
           {title}
@@ -172,11 +310,16 @@ function VisualWorkspace({
       {workspace.workspaceId ? <ThemedChevronRight size={14} /> : null}
     </>
   );
-  const accessibilityLabel = t("visual.workspaceRegion", {
-    workspace: title,
-    host: workspace.serverName,
-    state: stateLabel,
-  });
+  const accessibilityLabel = [
+    t("visual.workspaceRegion", {
+      workspace: title,
+      host: workspace.serverName,
+      state: stateLabel,
+    }),
+    workspace.isLastKnown ? t("operations.lastKnown") : null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(". ");
   const openWorkspace = useCallback(() => {
     if (!workspace.workspaceId) return;
     navigateToWorkspace({ serverId: workspace.serverId, workspaceId: workspace.workspaceId });
@@ -184,7 +327,11 @@ function VisualWorkspace({
 
   return (
     <View
-      style={[styles.workspace, positionedRect(rect)]}
+      style={[
+        styles.workspace,
+        positionedRect(rect),
+        workspace.isLastKnown && styles.workspaceLastKnown,
+      ]}
       testID={`visual-workspace-${workspace.serverId}-${workspace.workspaceId ?? workspace.kind}`}
     >
       {workspace.workspaceId ? (
@@ -205,27 +352,79 @@ function VisualWorkspace({
   );
 }
 
-function NodeContent({ node }: { node: VisualNode }): ReactElement {
+function visualRelationshipLabel(
+  relationship: VisualRelationship | undefined,
+  t: ReturnType<typeof useTranslation>["t"],
+): string | null {
+  if (!relationship) return null;
+  const { labelKey } = resolveVisualRelationshipPresentation(relationship.kind);
+  return t(labelKey, { parent: relationship.targetTitle });
+}
+
+function NodeContent({
+  node,
+  relationship,
+  workingPhase,
+  workingMotionActive,
+}: {
+  node: VisualNode;
+  relationship: VisualRelationship | undefined;
+  workingPhase: SharedValue<number>;
+  workingMotionActive: boolean;
+}): ReactElement {
   const { t } = useTranslation();
-  const stateLabel = t(`operations.states.${node.state}`);
+  const stateLabel = displayVisualState(node.state, t);
   const kindLabel =
     node.kind === "managed" ? t("visual.managedAgent") : t("operations.providerSubagent");
-  const metadata = [stateLabel, kindLabel, node.isLastKnown ? t("operations.lastKnown") : null]
+  const metadata = [
+    String(node.provider),
+    kindLabel,
+    node.isLastKnown ? t("operations.lastKnown") : null,
+  ]
     .filter((part): part is string => Boolean(part))
     .join(" · ");
+  const relationshipLabel = visualRelationshipLabel(relationship, t);
+  const statePresentation = resolveVisualStatePresentation(node);
   return (
     <>
       <View style={styles.nodeLeading}>
-        <View style={statusDotStyle(node.state)} testID={`visual-node-state-${node.state}`} />
         <ThemedProviderGlyph provider={node.provider} />
       </View>
       <View style={styles.nodeBody}>
         <Text numberOfLines={1} style={styles.nodeTitle}>
           {node.title}
         </Text>
-        <Text numberOfLines={1} style={styles.nodeMeta}>
-          {metadata}
-        </Text>
+        <View style={styles.nodeStateRow}>
+          <VisualStateGlyph
+            state={node.state}
+            canAnimate={node.canAnimate && workingMotionActive}
+            phase={workingPhase}
+            testID={`visual-node-state-${node.state}`}
+          />
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.nodeState,
+              statePresentation.emphasis === "urgent" && styles.nodeStateUrgent,
+            ]}
+          >
+            {stateLabel}
+          </Text>
+          <Text numberOfLines={1} style={styles.nodeMeta}>
+            {metadata}
+          </Text>
+        </View>
+        {relationship && relationshipLabel ? (
+          <View
+            style={styles.relationshipRow}
+            testID={`visual-node-relationship-${relationship.kind}`}
+          >
+            <VisualRelationshipGlyph relationship={relationship} />
+            <Text numberOfLines={1} style={styles.relationshipText}>
+              {relationshipLabel}
+            </Text>
+          </View>
+        ) : null}
       </View>
       {node.kind === "managed" ? <ThemedChevronRight size={14} /> : null}
     </>
@@ -236,14 +435,32 @@ function VisualComputeNode({
   node,
   rect,
   workspace,
+  relationship,
+  workingPhase,
+  workingMotionActive,
 }: {
   node: VisualNode;
   rect: VisualRect;
   workspace: VisualWorkspaceRegion | undefined;
+  relationship: VisualRelationship | undefined;
+  workingPhase: SharedValue<number>;
+  workingMotionActive: boolean;
 }): ReactElement {
   const { t } = useTranslation();
-  const stateLabel = t(`operations.states.${node.state}`);
-  const lastKnown = node.isLastKnown ? `. ${t("operations.lastKnown")}` : "";
+  const stateLabel = displayVisualState(node.state, t);
+  const relationshipLabel = visualRelationshipLabel(relationship, t);
+  const workspaceName = workspace ? displayWorkspaceName(workspace, t) : null;
+  const accessibilityLabel = [
+    node.kind === "managed" ? t("operations.actions.openAgent", { agent: node.title }) : node.title,
+    String(node.provider),
+    stateLabel,
+    workspaceName,
+    workspace?.serverName ?? node.serverId,
+    relationshipLabel,
+    node.isLastKnown ? t("operations.lastKnown") : null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(". ");
   const managedAgentId = node.kind === "managed" ? node.agentId : "";
   const openAgent = useCallback(() => {
     if (!managedAgentId) return;
@@ -255,33 +472,49 @@ function VisualComputeNode({
     });
   }, [managedAgentId, node.serverId, workspace?.workspaceId]);
   const nodeStyle = useCallback(
-    (state: PressableStateCallbackType & { hovered?: boolean }) =>
-      interactiveNodeStyle(rect, state),
-    [rect],
+    (state: PressableStateCallbackType & { hovered?: boolean; focused?: boolean }) =>
+      interactiveNodeStyle(rect, node, state),
+    [node, rect],
   );
 
   if (node.kind === "provider") {
     return (
       <View
         accessible
-        accessibilityLabel={`${node.title}. ${t("operations.providerSubagent")}. ${stateLabel}${lastKnown}`}
-        style={[styles.node, styles.providerNode, positionedRect(rect)]}
+        accessibilityLabel={accessibilityLabel}
+        style={[
+          styles.node,
+          styles.providerNode,
+          positionedRect(rect),
+          node.isLastKnown && styles.nodeLastKnown,
+          resolveVisualStatePresentation(node).emphasis === "urgent" && styles.nodeUrgent,
+        ]}
         testID={`visual-provider-subagent-${node.serverId}-${node.parentAgentId}-${node.subagentId}`}
       >
-        <NodeContent node={node} />
+        <NodeContent
+          node={node}
+          relationship={relationship}
+          workingPhase={workingPhase}
+          workingMotionActive={workingMotionActive}
+        />
       </View>
     );
   }
 
   return (
     <Pressable
-      accessibilityLabel={`${t("operations.actions.openAgent", { agent: node.title })}. ${stateLabel}${lastKnown}`}
+      accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
       onPress={openAgent}
       style={nodeStyle}
       testID={`visual-agent-${node.serverId}-${node.agentId}`}
     >
-      <NodeContent node={node} />
+      <NodeContent
+        node={node}
+        relationship={relationship}
+        workingPhase={workingPhase}
+        workingMotionActive={workingMotionActive}
+      />
     </Pressable>
   );
 }
@@ -300,10 +533,28 @@ function VisualScene({
   topology: VisualTopology;
   viewportWidth: number;
 }): ReactElement {
-  const workspaceByKey = useMemo(
-    () => new Map(topology.workspaces.map((workspace) => [workspace.key, workspace] as const)),
-    [topology.workspaces],
-  );
+  const workingClock = useVisualWorkingClock(topology.nodes);
+  const { workspacesByProject, nodesByWorkspace, relationshipBySource } = useMemo(() => {
+    const nextWorkspacesByProject = new Map<string, VisualWorkspaceRegion[]>();
+    for (const workspace of topology.workspaces) {
+      const group = nextWorkspacesByProject.get(workspace.projectKey) ?? [];
+      group.push(workspace);
+      nextWorkspacesByProject.set(workspace.projectKey, group);
+    }
+    const nextNodesByWorkspace = new Map<string, VisualNode[]>();
+    for (const node of topology.nodes) {
+      const group = nextNodesByWorkspace.get(node.workspaceRegionKey) ?? [];
+      group.push(node);
+      nextNodesByWorkspace.set(node.workspaceRegionKey, group);
+    }
+    return {
+      workspacesByProject: nextWorkspacesByProject,
+      nodesByWorkspace: nextNodesByWorkspace,
+      relationshipBySource: new Map(
+        topology.relationships.map((relationship) => [relationship.sourceNodeKey, relationship]),
+      ),
+    };
+  }, [topology.nodes, topology.relationships, topology.workspaces]);
   return (
     <View
       style={[
@@ -313,26 +564,28 @@ function VisualScene({
       testID={`visual-layout-${topology.mode}`}
     >
       {topology.projects.map((project) => (
-        <VisualProject
-          key={project.key}
-          project={project}
-          rect={fitRect(project.rect, topology, viewportWidth)}
-        />
-      ))}
-      {topology.workspaces.map((workspace) => (
-        <VisualWorkspace
-          key={workspace.key}
-          workspace={workspace}
-          rect={fitRect(workspace.rect, topology, viewportWidth)}
-        />
-      ))}
-      {topology.nodes.map((node) => (
-        <VisualComputeNode
-          key={node.key}
-          node={node}
-          rect={fitRect(node.rect, topology, viewportWidth)}
-          workspace={workspaceByKey.get(node.workspaceRegionKey)}
-        />
+        <Fragment key={project.key}>
+          <VisualProject project={project} rect={fitRect(project.rect, topology, viewportWidth)} />
+          {(workspacesByProject.get(project.projectKey) ?? []).map((workspace) => (
+            <Fragment key={workspace.key}>
+              <VisualWorkspace
+                workspace={workspace}
+                rect={fitRect(workspace.rect, topology, viewportWidth)}
+              />
+              {(nodesByWorkspace.get(workspace.key) ?? []).map((node) => (
+                <VisualComputeNode
+                  key={node.key}
+                  node={node}
+                  rect={fitRect(node.rect, topology, viewportWidth)}
+                  relationship={relationshipBySource.get(node.key)}
+                  workspace={workspace}
+                  workingPhase={workingClock.phase}
+                  workingMotionActive={workingClock.isActive}
+                />
+              ))}
+            </Fragment>
+          ))}
+        </Fragment>
       ))}
     </View>
   );
@@ -425,48 +678,15 @@ function VisualScreenContent(): ReactElement {
     );
   }
 
-  const showUpdating = operations.isRevalidating || availability.isPartiallyLoading;
-  const showUnavailable = shouldShowUnavailableHostsAlert(availability);
-  const showProviderUnavailable = availability.providerSubagentIssueHosts.length > 0;
   return (
     <View style={styles.container} testID="visual-screen">
       <MenuHeader title={t("visual.title")} rightContent={headerAction} />
-      {didManualRefreshFail || showUpdating || showUnavailable || showProviderUnavailable ? (
-        <View style={styles.statusAlerts}>
-          {didManualRefreshFail ? (
-            <Alert
-              variant="error"
-              title={t("visual.availability.refreshFailed")}
-              testID="visual-refresh-failed"
-            />
-          ) : null}
-          {showUpdating ? (
-            <Alert
-              variant="info"
-              title={t("visual.availability.updating")}
-              testID="visual-revalidating"
-            />
-          ) : null}
-          {showUnavailable ? (
-            <Alert
-              variant={availability.areAllHostsUnavailable ? "error" : "warning"}
-              title={t(
-                availability.areAllHostsUnavailable
-                  ? "operations.availability.allUnavailable"
-                  : "operations.availability.partial",
-              )}
-              testID="visual-partial-hosts"
-            />
-          ) : null}
-          {showProviderUnavailable ? (
-            <Alert
-              variant="warning"
-              title={t("operations.availability.providerSubagentsPartial")}
-              testID="visual-provider-subagents-partial"
-            />
-          ) : null}
-        </View>
-      ) : null}
+      <OperationsAvailabilityAlerts
+        availability={availability}
+        isRevalidating={operations.isRevalidating}
+        didManualRefreshFail={didManualRefreshFail}
+        surface="visual"
+      />
       {body}
     </View>
   );
@@ -512,6 +732,9 @@ const styles = StyleSheet.create((theme) => ({
     borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface2,
   },
+  workspaceLastKnown: {
+    opacity: 0.68,
+  },
   workspaceHeader: {
     minHeight: 48,
     flexDirection: "row",
@@ -521,6 +744,11 @@ const styles = StyleSheet.create((theme) => ({
     paddingVertical: theme.spacing[2],
   },
   workspaceHeaderHovered: {
+    backgroundColor: theme.colors.surface3,
+  },
+  workspaceHeaderFocused: {
+    borderWidth: theme.borderWidth[2],
+    borderColor: theme.colors.accent,
     backgroundColor: theme.colors.surface3,
   },
   workspaceHeaderBody: {
@@ -555,18 +783,27 @@ const styles = StyleSheet.create((theme) => ({
   providerNode: {
     borderStyle: "dashed",
   },
+  nodeLastKnown: {
+    opacity: 0.64,
+  },
+  nodeUrgent: {
+    borderWidth: theme.borderWidth[2],
+  },
   nodeHovered: {
     borderColor: theme.colors.borderAccent,
+    backgroundColor: theme.colors.surface4,
+  },
+  nodeFocused: {
+    borderWidth: theme.borderWidth[2],
+    borderColor: theme.colors.accent,
     backgroundColor: theme.colors.surface4,
   },
   pressed: {
     opacity: 0.8,
   },
   nodeLeading: {
-    width: 30,
-    flexDirection: "row",
+    width: theme.iconSize.md,
     alignItems: "center",
-    gap: theme.spacing[2],
   },
   nodeBody: {
     flex: 1,
@@ -578,40 +815,43 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.base,
     fontWeight: theme.fontWeight.normal,
   },
+  nodeStateRow: {
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
+  },
+  nodeState: {
+    flexShrink: 0,
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.normal,
+  },
+  nodeStateUrgent: {
+    fontWeight: theme.fontWeight.medium,
+  },
   nodeMeta: {
+    flexShrink: 1,
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,
   },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: theme.borderRadius.full,
+  relationshipRow: {
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
   },
-  statusDotNeedsInput: {
-    backgroundColor: getStatusDotColor({ theme, bucket: "needs_input" }) ?? undefined,
+  relationshipText: {
+    flexShrink: 1,
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
   },
-  statusDotFailed: {
-    backgroundColor: getStatusDotColor({ theme, bucket: "failed" }) ?? undefined,
-  },
-  statusDotRunning: {
-    backgroundColor: getStatusDotColor({ theme, bucket: "running" }) ?? undefined,
-  },
-  statusDotAttention: {
-    backgroundColor: getStatusDotColor({ theme, bucket: "attention" }) ?? undefined,
-  },
-  statusDotDone: {
-    backgroundColor:
-      getStatusDotColor({ theme, bucket: "done", showDoneAsInactive: true }) ??
-      theme.colors.foregroundExtraMuted,
-  },
-  statusAlerts: {
-    width: "100%",
-    paddingHorizontal: {
-      xs: theme.spacing[3],
-      md: theme.spacing[6],
-    },
-    paddingTop: theme.spacing[4],
-    gap: theme.spacing[3],
+  semanticGlyph: {
+    width: 15,
+    height: 15,
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
   },
   centered: {
     flex: 1,

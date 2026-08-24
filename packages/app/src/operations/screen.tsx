@@ -5,16 +5,12 @@ import { useTranslation } from "react-i18next";
 import { ScrollView, Text, View } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
 import { MenuHeader } from "@/components/headers/menu-header";
-import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
-import type { OperationsHostFacts, OperationsSummary } from "./model";
+import { OperationsAvailabilityAlerts } from "./availability-alerts";
+import type { OperationsSummary } from "./model";
 import { OperationsProjectRows } from "./rows";
-import {
-  resolveOperationsAvailability,
-  shouldShowUnavailableHostsAlert,
-  type OperationsAvailability,
-} from "./screen-state";
+import { resolveOperationsAvailability } from "./screen-state";
 import { useOperationsData } from "./use-operations-data";
 
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner, (theme) => ({
@@ -62,140 +58,6 @@ function Summary({ summary }: { summary: OperationsSummary }) {
         value={summary.idle}
         testID="operations-summary-idle"
       />
-    </View>
-  );
-}
-
-function hostIssueText(
-  host: OperationsHostFacts,
-  t: ReturnType<typeof useTranslation>["t"],
-): string {
-  if (host.state.kind !== "offline" && host.state.kind !== "error") return "";
-  if (host.state.kind === "error") {
-    return t(
-      host.state.hasLoadedDirectory
-        ? "operations.availability.hostDataLastKnown"
-        : "operations.availability.hostDataUnavailable",
-      { host: host.serverName },
-    );
-  }
-  if (host.state.hasLoadedDirectory) {
-    return t("operations.availability.hostLastKnown", { host: host.serverName });
-  }
-  return t("operations.availability.hostUnavailable", { host: host.serverName });
-}
-
-function AvailabilityAlert({
-  hosts,
-  areAllHostsUnavailable,
-}: {
-  hosts: readonly OperationsHostFacts[];
-  areAllHostsUnavailable: boolean;
-}): ReactElement | null {
-  const { t } = useTranslation();
-  if (hosts.length === 0) return null;
-  const description = hosts.map((host) => hostIssueText(host, t)).join("\n");
-  return (
-    <Alert
-      variant={areAllHostsUnavailable ? "error" : "warning"}
-      title={t(
-        areAllHostsUnavailable
-          ? "operations.availability.allUnavailable"
-          : "operations.availability.partial",
-      )}
-      description={description}
-      testID={
-        areAllHostsUnavailable ? "operations-all-hosts-unavailable" : "operations-partial-hosts"
-      }
-    />
-  );
-}
-
-function providerSubagentIssueText(
-  host: OperationsHostFacts,
-  t: ReturnType<typeof useTranslation>["t"],
-): string {
-  const state = host.providerSubagentActivity;
-  if (state?.kind === "unsupported") {
-    return t("operations.availability.providerSubagentsUnsupported", {
-      host: host.serverName,
-    });
-  }
-  if (state?.kind === "error") {
-    return t(
-      state.hasSnapshot
-        ? "operations.availability.providerSubagentsLastKnown"
-        : "operations.availability.providerSubagentsUnavailable",
-      { host: host.serverName },
-    );
-  }
-  return "";
-}
-
-function ProviderSubagentAvailabilityAlert({
-  hosts,
-}: {
-  hosts: readonly OperationsHostFacts[];
-}): ReactElement | null {
-  const { t } = useTranslation();
-  if (hosts.length === 0) return null;
-  return (
-    <Alert
-      variant="warning"
-      title={t("operations.availability.providerSubagentsPartial")}
-      description={hosts.map((host) => providerSubagentIssueText(host, t)).join("\n")}
-      testID="operations-provider-subagents-partial"
-    />
-  );
-}
-
-function OperationsStatusAlerts({
-  availability,
-  isRevalidating,
-  didManualRefreshFail,
-}: {
-  availability: OperationsAvailability;
-  isRevalidating: boolean;
-  didManualRefreshFail: boolean;
-}): ReactElement | null {
-  const { t } = useTranslation();
-  const showUpdating = isRevalidating || availability.isPartiallyLoading;
-  const showAvailability = shouldShowUnavailableHostsAlert(availability);
-  const showProviderSubagentAvailability = availability.providerSubagentIssueHosts.length > 0;
-  if (
-    !didManualRefreshFail &&
-    !showUpdating &&
-    !showAvailability &&
-    !showProviderSubagentAvailability
-  ) {
-    return null;
-  }
-
-  return (
-    <View style={styles.statusAlerts}>
-      {didManualRefreshFail ? (
-        <Alert
-          variant="error"
-          title={t("operations.availability.refreshFailed")}
-          testID="operations-refresh-failed"
-        />
-      ) : null}
-      {showUpdating ? (
-        <Alert
-          variant="info"
-          title={t("operations.availability.updating")}
-          testID="operations-revalidating"
-        />
-      ) : null}
-      {showAvailability ? (
-        <AvailabilityAlert
-          hosts={availability.unavailableHosts}
-          areAllHostsUnavailable={availability.areAllHostsUnavailable}
-        />
-      ) : null}
-      {showProviderSubagentAvailability ? (
-        <ProviderSubagentAvailabilityAlert hosts={availability.providerSubagentIssueHosts} />
-      ) : null}
     </View>
   );
 }
@@ -277,10 +139,11 @@ function OperationsScreenContent(): ReactElement {
   return (
     <View style={styles.container} testID="operations-screen">
       <MenuHeader title={t("operations.title")} rightContent={headerAction} />
-      <OperationsStatusAlerts
+      <OperationsAvailabilityAlerts
         availability={availability}
         isRevalidating={operations.isRevalidating}
         didManualRefreshFail={didManualRefreshFail}
+        surface="operations"
       />
       {body}
     </View>
@@ -306,17 +169,6 @@ const styles = StyleSheet.create((theme) => ({
     },
     paddingVertical: theme.spacing[4],
     gap: theme.spacing[4],
-  },
-  statusAlerts: {
-    width: "100%",
-    maxWidth: 960,
-    alignSelf: "center",
-    paddingHorizontal: {
-      xs: theme.spacing[3],
-      md: theme.spacing[6],
-    },
-    paddingTop: theme.spacing[4],
-    gap: theme.spacing[3],
   },
   summary: {
     flexDirection: "row",

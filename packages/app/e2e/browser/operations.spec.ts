@@ -84,14 +84,21 @@ test.describe("Operations", () => {
         workspaceId: workspace.workspaceId,
         title: "Managed work from older daemon",
         modeId: "load-test",
-        model: "ten-second-stream",
+        model: "five-minute-stream",
+        initialPrompt: "stay running",
       });
+      await workspace.client.waitForAgentUpsert(
+        agent.id,
+        (snapshot) => snapshot.status === "running",
+        15_000,
+      );
       const fixture = await installOperationsHostFixture(page, {
         port: getE2EDaemonPort(),
         providerSubagents: [],
         providerSubagentActivitySupported: false,
       });
 
+      await page.emulateMedia({ reducedMotion: "reduce" });
       await gotoAppShell(page);
       const panel = await openCommandCenter(page);
       await panel.getByTestId("command-center-input").fill("Operations");
@@ -100,6 +107,18 @@ test.describe("Operations", () => {
       await expect(page.getByTestId("operations-screen")).toBeVisible({ timeout: 30_000 });
       await expect(page.getByTestId(`operations-agent-${serverId}-${agent.id}`)).toBeVisible();
       await expect(page.getByTestId("operations-provider-subagents-partial")).toBeVisible();
+      expect(fixture.providerSnapshotRequestCount()).toBe(0);
+
+      await page.locator('[data-testid="sidebar-visual"]:visible').click();
+      await expect(page.getByTestId("visual-screen")).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByTestId(`visual-agent-${serverId}-${agent.id}`)).toBeVisible();
+      await expect(page.getByTestId(`visual-agent-${serverId}-${agent.id}`)).toContainText(
+        "Working",
+      );
+      await expect(page.getByTestId("visual-working-animation")).toHaveCount(0);
+      await expect(page.getByTestId("visual-provider-subagents-partial")).toContainText(
+        "requires a host update to show provider subagents",
+      );
       expect(fixture.providerSnapshotRequestCount()).toBe(0);
     } finally {
       await workspace.cleanup();
@@ -295,15 +314,26 @@ test.describe("Operations", () => {
           page.getByTestId(`visual-agent-${primaryServerId}-${reviewAgent.id}`),
         ).toContainText("Attention");
         await expect(
+          page.getByTestId(`visual-agent-${primaryServerId}-${sameWorkspace.child.id}`),
+        ).toContainText("Child of Primary parent");
+        await expect(
+          page.getByTestId(`visual-agent-${primaryServerId}-${crossWorkspace.child.id}`),
+        ).toContainText("Child of Release parent in another workspace");
+        await expect(
           page.getByTestId(
             `visual-provider-subagent-${primaryServerId}-${sameWorkspace.parent.id}-${duplicateProviderSubagentId}`,
           ),
         ).toContainText("Failed");
         await expect(
           page.getByTestId(
+            `visual-provider-subagent-${primaryServerId}-${sameWorkspace.parent.id}-${duplicateProviderSubagentId}`,
+          ),
+        ).toContainText("Provider child of Primary parent");
+        await expect(
+          page.getByTestId(
             `visual-provider-subagent-${secondaryDaemon.serverId}-${secondaryAgent.id}-${duplicateProviderSubagentId}`,
           ),
-        ).toContainText("Idle");
+        ).toContainText("Done");
         await capture(page, testInfo, "visual-wide");
 
         await reloadWithoutResettingHosts(page);
@@ -327,7 +357,13 @@ test.describe("Operations", () => {
         const visualAgent = page.getByTestId(
           `visual-agent-${secondaryDaemon.serverId}-${secondaryAgent.id}`,
         );
+        await expect(visualAgent).toHaveAccessibleName(
+          "Open Secondary host worker. mock. Working. Secondary operations workspace. Secondary operations host",
+        );
+        await expect(visualAgent.getByTestId("visual-node-state-running")).toBeVisible();
+        await expect(visualAgent.getByTestId("visual-working-animation")).toBeVisible();
         await visualAgent.focus();
+        await expect(visualAgent).toHaveCSS("border-top-width", "2px");
         await visualAgent.press("Enter");
         await expect(page).toHaveURL(
           new RegExp(
@@ -337,6 +373,7 @@ test.describe("Operations", () => {
         );
         await page.locator('[data-testid="sidebar-operations"]:visible').click();
         await expect(page).toHaveURL(/\/operations$/);
+        await expect(page.getByTestId("visual-working-animation")).toHaveCount(0);
       });
 
       await test.step("workspace and agent drill-down return through the desktop sidebar", async () => {
@@ -472,6 +509,17 @@ test.describe("Operations", () => {
         await expect(page.getByTestId("operations-refresh-failed")).toBeVisible({
           timeout: 30_000,
         });
+
+        await page.getByRole("button", { name: "Open menu", exact: true }).click();
+        await page.locator('[data-testid="sidebar-visual"]:visible').click();
+        await expect(page.getByTestId("sidebar-close")).not.toBeVisible();
+        await expect(page.getByTestId("visual-partial-hosts")).toContainText(
+          "Secondary operations host is unavailable; showing last-known data",
+          { timeout: 30_000 },
+        );
+        await expect(
+          page.getByTestId(`visual-agent-${secondaryDaemon.serverId}-${secondaryAgent.id}`),
+        ).toContainText("Last known");
       });
     } finally {
       await secondary.cleanup().catch(() => undefined);

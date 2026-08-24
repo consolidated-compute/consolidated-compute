@@ -259,6 +259,13 @@ export const es: TranslationResources = {
     projectRegion: "Proyecto {{project}}",
     workspaceRegion: "{{workspace}} en {{host}}. {{state}}",
     managedAgent: "Agente gestionado",
+    states: {
+      done: "Completado",
+    },
+    relationship: {
+      nested: "Hijo de {{parent}}",
+      provider: "Subagente del proveedor de {{parent}}",
+    },
     availability: {
       updating: "Actualizando Visual",
       refreshFailed: "No se pudo actualizar Visual",

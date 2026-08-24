@@ -6,6 +6,7 @@ import type {
   OperationsProviderSubagentNode,
   OperationsWorkspaceKind,
 } from "../model";
+import { resolveVisualStatePresentation } from "./presentation";
 
 export type VisualLayoutMode = "compact" | "wide";
 
@@ -115,7 +116,7 @@ const LAYOUT_CONFIG: Record<VisualLayoutMode, LayoutConfig> = {
     workspaceHeaderHeight: 56,
     nodeColumns: 1,
     nodeGap: 12,
-    nodeHeight: 68,
+    nodeHeight: 96,
   },
   wide: {
     scenePadding: 20,
@@ -129,7 +130,7 @@ const LAYOUT_CONFIG: Record<VisualLayoutMode, LayoutConfig> = {
     workspaceHeaderHeight: 56,
     nodeColumns: 2,
     nodeGap: 12,
-    nodeHeight: 68,
+    nodeHeight: 96,
   },
 };
 
@@ -195,10 +196,6 @@ export function visualProviderNodeKey(
   return identity("provider", serverId, parentAgentId, subagentId);
 }
 
-function canAnimate(state: WorkspaceStateBucket, isLastKnown: boolean): boolean {
-  return state === "running" && !isLastKnown;
-}
-
 function workspaceHeight(nodeCount: number, config: LayoutConfig): number {
   const rows = Math.ceil(nodeCount / config.nodeColumns);
   const nodeHeight = rows * config.nodeHeight + Math.max(0, rows - 1) * config.nodeGap;
@@ -246,7 +243,10 @@ export function buildVisualTopology(
       provider: node.provider,
       state: node.state,
       isLastKnown: node.isLastKnown,
-      canAnimate: canAnimate(node.state, node.isLastKnown),
+      canAnimate: resolveVisualStatePresentation({
+        state: node.state,
+        isLastKnown: node.isLastKnown,
+      }).canAnimate,
       depth,
     });
 
@@ -273,7 +273,10 @@ export function buildVisualTopology(
         provider: provider.provider,
         state: provider.state,
         isLastKnown: provider.isLastKnown,
-        canAnimate: canAnimate(provider.state, provider.isLastKnown),
+        canAnimate: resolveVisualStatePresentation({
+          state: provider.state,
+          isLastKnown: provider.isLastKnown,
+        }).canAnimate,
         depth: depth + 1,
       });
       providerRelationshipSources.push({
@@ -307,7 +310,6 @@ export function buildVisualTopology(
           )) {
             collectManagedNode(node, key, 0, nodes);
           }
-          nodes.sort((left, right) => compareIdentity(left.key, right.key));
           return {
             key,
             workspaceKey: workspace.key,
@@ -457,7 +459,7 @@ export function buildVisualTopology(
     bounds: { width: boundsWidth, height: boundsHeight },
     projects: projects.sort((left, right) => compareIdentity(left.key, right.key)),
     workspaces: workspaces.sort((left, right) => compareIdentity(left.key, right.key)),
-    nodes: nodes.sort((left, right) => compareIdentity(left.key, right.key)),
+    nodes,
     relationships: relationships.sort((left, right) => compareIdentity(left.key, right.key)),
   };
 }

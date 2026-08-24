@@ -400,6 +400,28 @@ describe("buildVisualTopology", () => {
     expect(new Set(topology.relationships.map((relationship) => relationship.key)).size).toBe(6);
   });
 
+  it("orders each parent before provider-native and managed descendants", () => {
+    const workspaceKey = "alpha\0main";
+    const parent = managedNode("alpha", "z-parent", workspaceKey);
+    const child = managedNode("alpha", "a-child", workspaceKey, {
+      parent: parentRelationship(parent, "nested"),
+    });
+    parent.children = [child];
+    parent.providerSubagents = [providerNode(parent, "b-provider")];
+
+    const topology = buildVisualTopology(
+      model([operationsProject("project", [operationsWorkspace("alpha", "main", [parent])])]),
+      "compact",
+    );
+
+    expect(topology.nodes.map((node) => node.title)).toEqual([
+      "Agent z-parent",
+      "Provider b-provider",
+      "Agent a-child",
+    ]);
+    expect(topology.nodes.map((node) => node.depth)).toEqual([0, 1, 1]);
+  });
+
   it("allows motion only for live running nodes", () => {
     const workspaceKey = "alpha\0main";
     const live = managedNode("alpha", "live", workspaceKey, { state: "running" });

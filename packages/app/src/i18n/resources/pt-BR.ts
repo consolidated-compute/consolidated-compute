@@ -259,6 +259,13 @@ export const ptBR: TranslationResources = {
     projectRegion: "Projeto {{project}}",
     workspaceRegion: "{{workspace}} em {{host}}. {{state}}",
     managedAgent: "Agente gerenciado",
+    states: {
+      done: "Concluído",
+    },
+    relationship: {
+      nested: "Filho de {{parent}}",
+      provider: "Subagente do provedor de {{parent}}",
+    },
     availability: {
       updating: "Atualizando Visual",
       refreshFailed: "Não foi possível atualizar Visual",
