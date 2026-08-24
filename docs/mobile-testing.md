@@ -48,7 +48,7 @@ PASEO_MOBILE_E2E_OPERATIONS_FIXTURE=1 \
 npm run test:e2e:mobile
 ```
 
-Use `android` for the Android run. `.github/workflows/mobile-operations.yml` runs both platforms for relevant pull requests and on its weekday schedule, then retains passing screenshots, timings, JUnit output, logs, and failure diagnostics.
+Use `android` for the Android run. `.github/workflows/mobile-operations.yml` runs both platforms for relevant pull requests and on its weekday schedule, then retains passing screenshots, timings, JUnit output, logs, and failure diagnostics. CI caches the built development-client `.app` and APK by native inputs; JavaScript-only changes reuse the binaries and still compile the current Metro bundle before replay.
 
 When replay diverges, read its ranked selector suggestions. Edit the script deliberately and rerun it from the beginning. `--update` is retained for compatibility but no longer rewrites scripts.
 

@@ -7,6 +7,7 @@ const repoRoot = new URL("../", import.meta.url);
 const ciWorkflowPath = new URL(".github/workflows/ci.yml", repoRoot);
 const dockerWorkflowPath = new URL(".github/workflows/docker.yml", repoRoot);
 const nixWorkflowPath = new URL(".github/workflows/nix.yml", repoRoot);
+const mobileOperationsWorkflowPath = new URL(".github/workflows/mobile-operations.yml", repoRoot);
 const upstreamReleaseMonitorPath = new URL(
   ".github/workflows/upstream-release-monitor.yml",
   repoRoot,
@@ -126,6 +127,20 @@ test("change gating allows superseded workflow runs to cancel", () => {
       "always() keeps jobs alive after concurrency cancellation; use !cancelled() for fail-open gating",
     );
   }
+});
+
+test("mobile Operations reuses native development apps", () => {
+  const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
+
+  assert.match(source, /actions\/cache\/restore@[a-f0-9]{40}/);
+  assert.match(source, /actions\/cache\/save@[a-f0-9]{40}/);
+  assert.match(source, /steps\.ios-app-cache\.outputs\.cache-hit != 'true'/);
+  assert.match(source, /steps\.android-app-cache\.outputs\.cache-hit != 'true'/);
+  assert.match(source, /simctl install.*mobile-build-cache\/ios/);
+  assert.match(source, /adb install -r \.dev\/mobile-build-cache\/android\/app-debug\.apk/);
+  assert.match(source, /-PreactNativeArchitectures=x86_64/);
+  assert.match(source, /packages\/expo-two-way-audio\/ios\/\*\*/);
+  assert.match(source, /packages\/expo-two-way-audio\/android\/\*\*/);
 });
 
 test("fork delivery and write-back jobs stay quarantined", () => {
