@@ -199,13 +199,17 @@ export async function startRealElectronRenderer(input: {
       const failures = results
         .filter((result): result is PromiseRejectedResult => result.status === "rejected")
         .map((result) => result.reason);
+      try {
+        rmSync(runtimeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      } catch (error) {
+        failures.push(error);
+      }
       if (failures.length > 0) {
         throw new AggregateError(
           failures,
-          `Failed to stop real Electron test processes; see ${logPath}`,
+          `Failed to clean up the real Electron test runtime; see ${logPath}`,
         );
       }
-      rmSync(runtimeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     })();
     return cleanupPromise;
   };
