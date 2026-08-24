@@ -256,8 +256,6 @@ export const ja: TranslationResources = {
   },
   visual: {
     title: "ビジュアル",
-    canvasAccessibility:
-      "プロジェクト{{projects}}件、ワークスペース{{workspaces}}件、コンピュートノード{{nodes}}件",
     projectRegion: "プロジェクト {{project}}",
     workspaceRegion: "{{host}} 上の {{workspace}}。{{state}}",
     managedAgent: "管理対象エージェント",

@@ -255,8 +255,6 @@ export const ru: TranslationResources = {
   },
   visual: {
     title: "Визуализация",
-    canvasAccessibility:
-      "Проектов: {{projects}}, рабочих пространств: {{workspaces}}, вычислительных узлов: {{nodes}}",
     projectRegion: "Проект {{project}}",
     workspaceRegion: "{{workspace}} на {{host}}. {{state}}",
     managedAgent: "Управляемый агент",

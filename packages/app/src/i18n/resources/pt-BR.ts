@@ -256,8 +256,6 @@ export const ptBR: TranslationResources = {
   },
   visual: {
     title: "Visual",
-    canvasAccessibility:
-      "{{projects}} projetos, {{workspaces}} espaços de trabalho, {{nodes}} nós de computação",
     projectRegion: "Projeto {{project}}",
     workspaceRegion: "{{workspace}} em {{host}}. {{state}}",
     managedAgent: "Agente gerenciado",

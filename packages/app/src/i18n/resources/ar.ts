@@ -253,7 +253,6 @@ export const ar: TranslationResources = {
   },
   visual: {
     title: "التصور",
-    canvasAccessibility: "{{projects}} مشاريع، {{workspaces}} مساحات عمل، {{nodes}} عقد حوسبة",
     projectRegion: "المشروع {{project}}",
     workspaceRegion: "{{workspace}} على {{host}}. {{state}}",
     managedAgent: "وكيل مُدار",

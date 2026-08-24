@@ -265,6 +265,24 @@ describe("buildVisualTopology", () => {
     }
   });
 
+  it("keeps nodes below two-line workspace headers at the maximum interface size", () => {
+    const workspaceKey = "alpha\0main";
+    for (const mode of ["compact", "wide"] as const) {
+      const topology = buildVisualTopology(
+        model([
+          operationsProject("project", [
+            operationsWorkspace("alpha", "main", [managedNode("alpha", "agent", workspaceKey)]),
+          ]),
+        ]),
+        mode,
+      );
+      const workspace = topology.workspaces[0]!;
+      const node = topology.nodes[0]!;
+
+      expect(node.rect.y - workspace.rect.y).toBeGreaterThanOrEqual(68);
+    }
+  });
+
   it("qualifies workspace, managed-agent, and provider identities across hosts", () => {
     const alphaWorkspace = "alpha\0main";
     const betaWorkspace = "beta\0main";

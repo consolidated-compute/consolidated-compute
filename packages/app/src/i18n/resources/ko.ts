@@ -254,8 +254,6 @@ export const ko: TranslationResources = {
   },
   visual: {
     title: "비주얼",
-    canvasAccessibility:
-      "프로젝트 {{projects}}개, 워크스페이스 {{workspaces}}개, 컴퓨트 노드 {{nodes}}개",
     projectRegion: "프로젝트 {{project}}",
     workspaceRegion: "{{host}}의 {{workspace}}. {{state}}",
     managedAgent: "관리형 에이전트",

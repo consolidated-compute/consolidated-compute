@@ -253,7 +253,6 @@ export const zhCN: TranslationResources = {
   },
   visual: {
     title: "可视化",
-    canvasAccessibility: "{{projects}} 个项目，{{workspaces}} 个工作区，{{nodes}} 个计算节点",
     projectRegion: "项目 {{project}}",
     workspaceRegion: "{{host}} 上的 {{workspace}}。{{state}}",
     managedAgent: "托管智能体",

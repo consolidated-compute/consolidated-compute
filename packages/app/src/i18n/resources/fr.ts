@@ -257,8 +257,6 @@ export const fr: TranslationResources = {
   },
   visual: {
     title: "Visuel",
-    canvasAccessibility:
-      "{{projects}} projets, {{workspaces}} espaces de travail, {{nodes}} nœuds de calcul",
     projectRegion: "Projet {{project}}",
     workspaceRegion: "{{workspace}} sur {{host}}. {{state}}",
     managedAgent: "Agent géré",

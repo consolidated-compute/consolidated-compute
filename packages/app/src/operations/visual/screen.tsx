@@ -299,19 +299,12 @@ function VisualScene({
   topology: VisualTopology;
   viewportWidth: number;
 }): ReactElement {
-  const { t } = useTranslation();
   const workspaceByKey = useMemo(
     () => new Map(topology.workspaces.map((workspace) => [workspace.key, workspace] as const)),
     [topology.workspaces],
   );
   return (
     <View
-      accessible
-      accessibilityLabel={t("visual.canvasAccessibility", {
-        projects: topology.projects.length,
-        workspaces: topology.workspaces.length,
-        nodes: topology.nodes.length,
-      })}
       style={[styles.scene, { width: viewportWidth, height: topology.bounds.height }]}
       testID={`visual-layout-${topology.mode}`}
     >

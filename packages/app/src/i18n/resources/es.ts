@@ -256,8 +256,6 @@ export const es: TranslationResources = {
   },
   visual: {
     title: "Visual",
-    canvasAccessibility:
-      "{{projects}} proyectos, {{workspaces}} espacios de trabajo, {{nodes}} nodos de cómputo",
     projectRegion: "Proyecto {{project}}",
     workspaceRegion: "{{workspace}} en {{host}}. {{state}}",
     managedAgent: "Agente gestionado",

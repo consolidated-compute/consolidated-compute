@@ -416,6 +416,32 @@ test.describe("Operations", () => {
           ),
         ).toBeVisible();
         await capture(page, testInfo, "operations-dark-large-text-compact");
+
+        await page.getByRole("button", { name: "Open menu", exact: true }).click();
+        await page.locator('[data-testid="sidebar-visual"]:visible').click();
+        await expect(page.getByTestId("sidebar-close")).not.toBeVisible();
+        await expect(page.getByTestId("visual-layout-compact")).toBeVisible({ timeout: 30_000 });
+        const largeTextWorkspace = page.getByTestId(
+          `visual-workspace-${secondaryDaemon.serverId}-${secondary.workspaceId}`,
+        );
+        const largeTextWorkspaceHeader = largeTextWorkspace.getByRole("button", {
+          name: /^Secondary operations workspace on /,
+        });
+        const largeTextAgent = page.getByTestId(
+          `visual-agent-${secondaryDaemon.serverId}-${secondaryAgent.id}`,
+        );
+        const largeTextHeaderBox = await largeTextWorkspaceHeader.boundingBox();
+        const largeTextAgentBox = await largeTextAgent.boundingBox();
+        expect(largeTextHeaderBox).not.toBeNull();
+        expect(largeTextAgentBox).not.toBeNull();
+        expect(largeTextAgentBox!.y).toBeGreaterThanOrEqual(
+          largeTextHeaderBox!.y + largeTextHeaderBox!.height,
+        );
+        await capture(page, testInfo, "visual-dark-large-text-compact");
+
+        await page.getByRole("button", { name: "Open menu", exact: true }).click();
+        await page.locator('[data-testid="sidebar-operations"]:visible').click();
+        await expect(page.getByTestId("operations-screen")).toBeVisible({ timeout: 30_000 });
       });
 
       await test.step("an online directory failure keeps cached host data visible", async () => {

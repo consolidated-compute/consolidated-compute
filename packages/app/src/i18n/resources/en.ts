@@ -251,8 +251,6 @@ export const en = {
   },
   visual: {
     title: "Visual",
-    canvasAccessibility:
-      "{{projects}} projects, {{workspaces}} workspaces, {{nodes}} compute nodes",
     projectRegion: "Project {{project}}",
     workspaceRegion: "{{workspace}} on {{host}}. {{state}}",
     managedAgent: "Managed agent",
