@@ -18,6 +18,7 @@ import { MenuHeader } from "@/components/headers/menu-header";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { getStatusDotColor } from "@/utils/status-dot-color";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
@@ -65,12 +66,12 @@ function statusDotStyle(state: VisualNode["state"]): StyleProp<ViewStyle> {
 }
 
 function positionedRect(rect: VisualRect): ViewStyle {
-  return {
+  return inlineUnistylesStyle({
     left: rect.x,
     top: rect.y,
     width: rect.width,
     height: rect.height,
-  };
+  });
 }
 
 function interactiveNodeStyle(
@@ -305,7 +306,10 @@ function VisualScene({
   );
   return (
     <View
-      style={[styles.scene, { width: viewportWidth, height: topology.bounds.height }]}
+      style={[
+        styles.scene,
+        inlineUnistylesStyle({ width: viewportWidth, height: topology.bounds.height }),
+      ]}
       testID={`visual-layout-${topology.mode}`}
     >
       {topology.projects.map((project) => (
@@ -410,7 +414,7 @@ function VisualScreenContent(): ReactElement {
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} testID="visual-scroll">
         <View
           onLayout={measureViewport}
-          style={[styles.viewport, { minHeight: topology.bounds.height }]}
+          style={[styles.viewport, inlineUnistylesStyle({ minHeight: topology.bounds.height })]}
           testID="visual-viewport"
         >
           {viewportWidth > 0 ? (
