@@ -173,6 +173,7 @@ test("mobile Operations stays isolated from the upstream runner", () => {
   assert.match(operationsRunner, /PASEO_MOBILE_E2E_OPERATIONS_FIXTURE:-1/);
   assert.match(operationsRunner, /PASEO_MOBILE_E2E_PLATFORM/);
   assert.match(operationsRunner, /operations-agent-device/);
+  assert.match(operationsRunner, /metro prepare[\s\S]*--no-reuse-existing/);
 });
 
 test("mobile Operations replays keep one cross-platform contract", () => {

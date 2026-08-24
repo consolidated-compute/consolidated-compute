@@ -148,6 +148,7 @@ METRO_RESULT="$({
     --kind expo \
     --port "${METRO_PORT}" \
     --public-base-url "http://${DEVICE_HOST}:${METRO_PORT}" \
+    --no-reuse-existing \
     --json
 })"
 printf '%s\n' "${METRO_RESULT}"
