@@ -10,6 +10,7 @@ import {
   History,
   Home,
   Keyboard,
+  Network,
   Plus,
   Settings,
 } from "lucide-react-native";
@@ -29,6 +30,7 @@ import {
   buildSchedulesRoute,
   buildSessionsRoute,
   buildSettingsRoute,
+  buildVisualRoute,
 } from "@/utils/host-routes";
 import { getShortcutOs } from "@/utils/shortcut-platform";
 import type { CommandCenterContribution, CommandCenterIconProps } from "./contributions";
@@ -37,6 +39,9 @@ import { buildGroupingContribution } from "./root-contributions";
 
 const ThemedPlus = withUnistyles(Plus, (theme) => ({ color: theme.colors.foregroundMuted }));
 const ThemedActivity = withUnistyles(Activity, (theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
+const ThemedNetwork = withUnistyles(Network, (theme) => ({
   color: theme.colors.foregroundMuted,
 }));
 const ThemedFolderPlus = withUnistyles(FolderPlus, (theme) => ({
@@ -70,6 +75,10 @@ function AddProjectIcon({ size }: CommandCenterIconProps) {
 
 function OperationsIcon({ size }: CommandCenterIconProps) {
   return <ThemedActivity size={size} strokeWidth={2.2} />;
+}
+
+function VisualIcon({ size }: CommandCenterIconProps) {
+  return <ThemedNetwork size={size} strokeWidth={2.2} />;
 }
 
 function SettingsIcon({ size }: CommandCenterIconProps) {
@@ -109,6 +118,7 @@ export function CommandCenterRootActions() {
   const settingsRoute = useMemo<Href>(() => buildSettingsRoute(), []);
   const homeRoute = useMemo<Href>(() => buildOpenProjectRoute(), []);
   const operationsRoute = useMemo<Href>(() => buildOperationsRoute(), []);
+  const visualRoute = useMemo<Href>(() => buildVisualRoute(), []);
   const sessionsRoute = useMemo<Href>(() => buildSessionsRoute(), []);
   const schedulesRoute = useMemo<Href>(() => buildSchedulesRoute(), []);
   const setShortcutsDialogOpen = useKeyboardShortcutsStore((state) => state.setShortcutsDialogOpen);
@@ -181,10 +191,28 @@ export function CommandCenterRootActions() {
         },
       },
       {
-        id: "home",
+        id: "visual",
         group: "actions",
         groupRank: 0,
         rank: 3,
+        keywords: ["visual", "topology", "map", "agents", "workspaces", "projects"],
+        visibility: "always",
+        run: () => {
+          clearCommandCenterFocusRestoreElement();
+          router.push(visualRoute);
+        },
+        presentation: {
+          kind: "action",
+          title: t("visual.title"),
+          sectionTitle: t("shell.commandCenter.actions"),
+          icon: VisualIcon,
+        },
+      },
+      {
+        id: "home",
+        group: "actions",
+        groupRank: 0,
+        rank: 4,
         keywords: ["home", "start", "import", "session", "pair", "device", "providers"],
         visibility: "query",
         run: () => {
@@ -202,7 +230,7 @@ export function CommandCenterRootActions() {
         id: "history",
         group: "actions",
         groupRank: 0,
-        rank: 4,
+        rank: 5,
         keywords: ["history", "sessions", "recent"],
         visibility: "always",
         run: () => {
@@ -220,7 +248,7 @@ export function CommandCenterRootActions() {
         id: "schedules",
         group: "actions",
         groupRank: 0,
-        rank: 5,
+        rank: 6,
         keywords: ["schedules", "scheduled", "automation", "recurring"],
         visibility: "always",
         run: () => {
@@ -238,7 +266,7 @@ export function CommandCenterRootActions() {
         id: "settings",
         group: "actions",
         groupRank: 0,
-        rank: 6,
+        rank: 7,
         keywords: ["settings", "preferences", "config", "configuration"],
         visibility: "always",
         run: () => {
@@ -262,7 +290,7 @@ export function CommandCenterRootActions() {
         id: "keyboard-shortcuts",
         group: "actions",
         groupRank: 0,
-        rank: 7,
+        rank: 8,
         keywords: ["keyboard", "shortcuts", "keys", "hotkeys"],
         visibility: "always",
         run: () => setShortcutsDialogOpen(true),
@@ -307,6 +335,7 @@ export function CommandCenterRootActions() {
     shortcutPlatform,
     shortcutsAvailable,
     t,
+    visualRoute,
   ]);
 
   useCommandCenterActions({ sourceId: "root", enabled: true, actions });

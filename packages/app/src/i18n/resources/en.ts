@@ -249,6 +249,16 @@ export const en = {
       clearSearch: "Clear search",
     },
   },
+  visual: {
+    title: "Visual",
+    projectRegion: "Project {{project}}",
+    workspaceRegion: "{{workspace}} on {{host}}. {{state}}",
+    managedAgent: "Managed agent",
+    availability: {
+      updating: "Updating Visual",
+      refreshFailed: "Could not refresh Visual",
+    },
+  },
   operations: {
     title: "Operations",
     empty: "No active agents",

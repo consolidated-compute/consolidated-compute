@@ -253,6 +253,16 @@ export const ru: TranslationResources = {
       clearSearch: "Очистить поиск",
     },
   },
+  visual: {
+    title: "Визуализация",
+    projectRegion: "Проект {{project}}",
+    workspaceRegion: "{{workspace}} на {{host}}. {{state}}",
+    managedAgent: "Управляемый агент",
+    availability: {
+      updating: "Обновление визуализации",
+      refreshFailed: "Не удалось обновить визуализацию",
+    },
+  },
   operations: {
     title: "Операции",
     empty: "Нет активных агентов",

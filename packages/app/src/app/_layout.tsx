@@ -853,6 +853,7 @@ function AppWithSidebar({ children }: { children: ReactNode }) {
     (pathname === "/open-project" ||
       pathname === "/new" ||
       pathname === "/operations" ||
+      pathname === "/visual" ||
       pathname === "/sessions" ||
       pathname === "/schedules" ||
       routeHasKnownHost);
@@ -882,6 +883,7 @@ function RootStack() {
         <Stack.Screen name="new" />
         <Stack.Screen name="open-project" />
         <Stack.Screen name="operations" />
+        <Stack.Screen name="visual" />
         <Stack.Screen name="sessions" />
         <Stack.Screen name="schedules" />
         <Stack.Screen name="pair-scan" />

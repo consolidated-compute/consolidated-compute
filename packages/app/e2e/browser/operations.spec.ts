@@ -42,7 +42,7 @@ async function expectSummaryTotal(page: Page, expected: number): Promise<void> {
 async function reloadWithoutResettingHosts(page: Page): Promise<void> {
   await page.evaluate(() => {
     const nonce = localStorage.getItem("@paseo:e2e-seed-nonce");
-    if (!nonce) throw new Error("Expected an e2e seed nonce before reloading Operations.");
+    if (!nonce) throw new Error("Expected an e2e seed nonce before reloading a global route.");
     localStorage.setItem("@paseo:e2e-disable-default-seed-once", nonce);
   });
   await page.reload();
@@ -270,6 +270,75 @@ test.describe("Operations", () => {
         await capture(page, testInfo, "operations-wide");
       });
 
+      await test.step("Visual reuses the focused global model and full working width", async () => {
+        const panel = await openCommandCenter(page);
+        await panel.getByTestId("command-center-input").fill("Visual");
+        await panel.getByRole("button", { name: "Visual", exact: true }).click();
+        await expect(page).toHaveURL(/\/visual$/);
+        await expect(page.getByTestId("visual-screen")).toBeVisible({ timeout: 30_000 });
+        await expect(page.getByTestId("visual-layout-wide")).toBeVisible({ timeout: 30_000 });
+        await expectProviderSnapshotRequests(primaryFixture, 3);
+        await expectProviderSnapshotRequests(secondaryFixture, 3);
+
+        const viewportBox = await page.getByTestId("visual-viewport").boundingBox();
+        const sceneBox = await page.getByTestId("visual-layout-wide").boundingBox();
+        expect(viewportBox).not.toBeNull();
+        expect(sceneBox).not.toBeNull();
+        expect(sceneBox!.width).toBeCloseTo(viewportBox!.width, 0);
+        await expect(
+          page.getByTestId(`visual-workspace-${primaryServerId}-${primary.workspaceId}`),
+        ).toContainText("Primary operations host");
+        await expect(
+          page.getByTestId(`visual-workspace-${secondaryDaemon.serverId}-${secondary.workspaceId}`),
+        ).toContainText("Secondary operations host");
+        await expect(
+          page.getByTestId(`visual-agent-${primaryServerId}-${reviewAgent.id}`),
+        ).toContainText("Attention");
+        await expect(
+          page.getByTestId(
+            `visual-provider-subagent-${primaryServerId}-${sameWorkspace.parent.id}-${duplicateProviderSubagentId}`,
+          ),
+        ).toContainText("Failed");
+        await expect(
+          page.getByTestId(
+            `visual-provider-subagent-${secondaryDaemon.serverId}-${secondaryAgent.id}-${duplicateProviderSubagentId}`,
+          ),
+        ).toContainText("Idle");
+        await capture(page, testInfo, "visual-wide");
+
+        await reloadWithoutResettingHosts(page);
+        await expect(page).toHaveURL(/\/visual$/);
+        await expect(page.getByTestId("visual-layout-wide")).toBeVisible({ timeout: 30_000 });
+
+        await page
+          .getByTestId(`visual-workspace-${secondaryDaemon.serverId}-${secondary.workspaceId}`)
+          .getByRole("button", { name: /^Secondary operations workspace on / })
+          .click();
+        await expect(page).toHaveURL(
+          new RegExp(
+            `/h/${secondaryDaemon.serverId}/workspace/${encodeURIComponent(secondary.workspaceId)}`,
+          ),
+          { timeout: 30_000 },
+        );
+        await page.locator('[data-testid="sidebar-visual"]:visible').click();
+        await expect(page).toHaveURL(/\/visual$/);
+        await expect(page.getByTestId("visual-layout-wide")).toBeVisible({ timeout: 30_000 });
+
+        const visualAgent = page.getByTestId(
+          `visual-agent-${secondaryDaemon.serverId}-${secondaryAgent.id}`,
+        );
+        await visualAgent.focus();
+        await visualAgent.press("Enter");
+        await expect(page).toHaveURL(
+          new RegExp(
+            `/h/${secondaryDaemon.serverId}/workspace/${encodeURIComponent(secondary.workspaceId)}`,
+          ),
+          { timeout: 30_000 },
+        );
+        await page.locator('[data-testid="sidebar-operations"]:visible').click();
+        await expect(page).toHaveURL(/\/operations$/);
+      });
+
       await test.step("workspace and agent drill-down return through the desktop sidebar", async () => {
         await page
           .getByTestId(`operations-workspace-${secondaryDaemon.serverId}-${secondary.workspaceId}`)
@@ -315,6 +384,25 @@ test.describe("Operations", () => {
         await expectSummaryTotal(page, 8);
         await expect(page.getByTestId("operations-refresh")).toBeVisible();
         await capture(page, testInfo, "operations-compact");
+
+        await page.getByRole("button", { name: "Open menu", exact: true }).click();
+        await page.locator('[data-testid="sidebar-visual"]:visible').click();
+        await expect(page).toHaveURL(/\/visual$/);
+        await expect(page.getByTestId("sidebar-close")).not.toBeVisible();
+        await expect(page.getByTestId("visual-layout-compact")).toBeVisible({ timeout: 30_000 });
+        await expect(
+          page.getByTestId(`visual-agent-${secondaryDaemon.serverId}-${secondaryAgent.id}`),
+        ).toBeVisible();
+        const compactViewportBox = await page.getByTestId("visual-viewport").boundingBox();
+        const compactSceneBox = await page.getByTestId("visual-layout-compact").boundingBox();
+        expect(compactViewportBox).not.toBeNull();
+        expect(compactSceneBox).not.toBeNull();
+        expect(compactSceneBox!.width).toBeCloseTo(compactViewportBox!.width, 0);
+        await capture(page, testInfo, "visual-compact");
+
+        await page.getByRole("button", { name: "Open menu", exact: true }).click();
+        await page.locator('[data-testid="sidebar-operations"]:visible').click();
+        await expect(page).toHaveURL(/\/operations$/);
       });
 
       await test.step("dark theme and large interface text preserve the compact hierarchy", async () => {
@@ -328,6 +416,32 @@ test.describe("Operations", () => {
           ),
         ).toBeVisible();
         await capture(page, testInfo, "operations-dark-large-text-compact");
+
+        await page.getByRole("button", { name: "Open menu", exact: true }).click();
+        await page.locator('[data-testid="sidebar-visual"]:visible').click();
+        await expect(page.getByTestId("sidebar-close")).not.toBeVisible();
+        await expect(page.getByTestId("visual-layout-compact")).toBeVisible({ timeout: 30_000 });
+        const largeTextWorkspace = page.getByTestId(
+          `visual-workspace-${secondaryDaemon.serverId}-${secondary.workspaceId}`,
+        );
+        const largeTextWorkspaceHeader = largeTextWorkspace.getByRole("button", {
+          name: /^Secondary operations workspace on /,
+        });
+        const largeTextAgent = page.getByTestId(
+          `visual-agent-${secondaryDaemon.serverId}-${secondaryAgent.id}`,
+        );
+        const largeTextHeaderBox = await largeTextWorkspaceHeader.boundingBox();
+        const largeTextAgentBox = await largeTextAgent.boundingBox();
+        expect(largeTextHeaderBox).not.toBeNull();
+        expect(largeTextAgentBox).not.toBeNull();
+        expect(largeTextAgentBox!.y).toBeGreaterThanOrEqual(
+          largeTextHeaderBox!.y + largeTextHeaderBox!.height,
+        );
+        await capture(page, testInfo, "visual-dark-large-text-compact");
+
+        await page.getByRole("button", { name: "Open menu", exact: true }).click();
+        await page.locator('[data-testid="sidebar-operations"]:visible').click();
+        await expect(page.getByTestId("operations-screen")).toBeVisible({ timeout: 30_000 });
       });
 
       await test.step("an online directory failure keeps cached host data visible", async () => {

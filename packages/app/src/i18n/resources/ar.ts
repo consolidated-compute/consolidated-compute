@@ -251,6 +251,16 @@ export const ar: TranslationResources = {
       clearSearch: "مسح البحث",
     },
   },
+  visual: {
+    title: "التصور",
+    projectRegion: "المشروع {{project}}",
+    workspaceRegion: "{{workspace}} على {{host}}. {{state}}",
+    managedAgent: "وكيل مُدار",
+    availability: {
+      updating: "جارٍ تحديث التصور",
+      refreshFailed: "تعذر تحديث التصور",
+    },
+  },
   operations: {
     title: "العمليات",
     empty: "لا يوجد وكلاء نشطون",

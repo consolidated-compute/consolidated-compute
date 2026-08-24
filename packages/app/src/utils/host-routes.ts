@@ -432,6 +432,10 @@ export function buildOperationsRoute() {
   return "/operations" as const;
 }
 
+export function buildVisualRoute() {
+  return "/visual" as const;
+}
+
 export function buildOpenProjectRoute() {
   return "/open-project" as const;
 }

@@ -251,6 +251,16 @@ export const zhCN: TranslationResources = {
       clearSearch: "清除搜索",
     },
   },
+  visual: {
+    title: "可视化",
+    projectRegion: "项目 {{project}}",
+    workspaceRegion: "{{host}} 上的 {{workspace}}。{{state}}",
+    managedAgent: "托管智能体",
+    availability: {
+      updating: "正在更新可视化",
+      refreshFailed: "无法刷新可视化",
+    },
+  },
   operations: {
     title: "运行中心",
     empty: "没有活跃的 Agent",

@@ -252,6 +252,16 @@ export const ko: TranslationResources = {
       clearSearch: "검색 지우기",
     },
   },
+  visual: {
+    title: "비주얼",
+    projectRegion: "프로젝트 {{project}}",
+    workspaceRegion: "{{host}}의 {{workspace}}. {{state}}",
+    managedAgent: "관리형 에이전트",
+    availability: {
+      updating: "비주얼 업데이트 중",
+      refreshFailed: "비주얼을 새로 고칠 수 없습니다",
+    },
+  },
   operations: {
     title: "운영",
     empty: "활성 에이전트 없음",
