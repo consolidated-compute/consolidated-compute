@@ -19,6 +19,7 @@ import {
   Pressable,
   ScrollView,
   Text,
+  useWindowDimensions,
   View,
   type LayoutChangeEvent,
   type PressableStateCallbackType,
@@ -599,6 +600,7 @@ export function VisualScreen(): ReactElement {
 
 function VisualScreenContent(): ReactElement {
   const { t } = useTranslation();
+  const { fontScale } = useWindowDimensions();
   const operations = useOperationsData();
   const availability = useMemo(() => resolveOperationsAvailability(operations), [operations]);
   const [viewportWidth, setViewportWidth] = useState(0);
@@ -607,8 +609,8 @@ function VisualScreenContent(): ReactElement {
   const isRefreshing = isManualRefresh || operations.isRevalidating;
   const layoutMode = resolveVisualLayoutMode(viewportWidth);
   const topology = useMemo(
-    () => buildVisualTopology(operations, layoutMode),
-    [layoutMode, operations],
+    () => buildVisualTopology(operations, layoutMode, fontScale),
+    [fontScale, layoutMode, operations],
   );
   const measureViewport = useCallback((event: LayoutChangeEvent) => {
     const nextWidth = Math.round(event.nativeEvent.layout.width);

@@ -134,6 +134,17 @@ const LAYOUT_CONFIG: Record<VisualLayoutMode, LayoutConfig> = {
   },
 };
 
+function resolveLayoutConfig(mode: VisualLayoutMode, fontScale: number): LayoutConfig {
+  const normalizedFontScale = Number.isFinite(fontScale) ? Math.max(1, fontScale) : 1;
+  const config = LAYOUT_CONFIG[mode];
+  return {
+    ...config,
+    projectHeaderHeight: Math.ceil(config.projectHeaderHeight * normalizedFontScale),
+    workspaceHeaderHeight: Math.ceil(config.workspaceHeaderHeight * normalizedFontScale),
+    nodeHeight: Math.ceil(config.nodeHeight * normalizedFontScale),
+  };
+}
+
 type VisualNodeDraft = Omit<VisualManagedNode, "rect"> | Omit<VisualProviderNode, "rect">;
 
 interface WorkspaceLayoutDraft {
@@ -214,8 +225,9 @@ function projectHeight(workspaces: readonly WorkspaceLayoutDraft[], config: Layo
 export function buildVisualTopology(
   model: Pick<OperationsModel, "projects">,
   mode: VisualLayoutMode,
+  fontScale = 1,
 ): VisualTopology {
-  const config = LAYOUT_CONFIG[mode];
+  const config = resolveLayoutConfig(mode, fontScale);
   const seenManaged = new Set<string>();
   const seenProvider = new Set<string>();
   const managedNodeKeyByOperationsKey = new Map<string, string>();

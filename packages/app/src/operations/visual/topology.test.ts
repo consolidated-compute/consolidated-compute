@@ -283,6 +283,39 @@ describe("buildVisualTopology", () => {
     }
   });
 
+  it("expands text-bearing geometry for native Dynamic Type", () => {
+    const workspaceKey = "alpha\0main";
+    const parent = managedNode("alpha", "parent", workspaceKey);
+    const child = managedNode("alpha", "child", workspaceKey, {
+      parent: parentRelationship(parent, "nested"),
+    });
+    parent.children = [child];
+    const visualModel = model([
+      operationsProject("project", [operationsWorkspace("alpha", "main", [parent])]),
+    ]);
+
+    for (const mode of ["compact", "wide"] as const) {
+      const defaultTopology = buildVisualTopology(visualModel, mode);
+      const scaledTopology = buildVisualTopology(visualModel, mode, 2);
+      const defaultNode = defaultTopology.nodes[0]!;
+      const scaledNode = scaledTopology.nodes[0]!;
+      const scaledWorkspace = scaledTopology.workspaces[0]!;
+      const scaledProject = scaledTopology.projects[0]!;
+
+      expect(scaledNode.rect.height).toBe(defaultNode.rect.height * 2);
+      expect(scaledNode.rect.y - scaledWorkspace.rect.y).toBeGreaterThan(
+        defaultNode.rect.y - defaultTopology.workspaces[0]!.rect.y,
+      );
+      expect(scaledWorkspace.rect.y - scaledProject.rect.y).toBeGreaterThan(
+        defaultTopology.workspaces[0]!.rect.y - defaultTopology.projects[0]!.rect.y,
+      );
+      for (const node of scaledTopology.nodes) {
+        expect(contains(scaledWorkspace.rect, node.rect)).toBe(true);
+      }
+      expect(overlaps(scaledTopology.nodes[0]!.rect, scaledTopology.nodes[1]!.rect)).toBe(false);
+    }
+  });
+
   it("qualifies workspace, managed-agent, and provider identities across hosts", () => {
     const alphaWorkspace = "alpha\0main";
     const betaWorkspace = "beta\0main";
