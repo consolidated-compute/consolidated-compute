@@ -126,6 +126,14 @@ if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
   export AD_VAR_SECONDARY_AGENT_ID="${SECONDARY_AGENT_ID}"
   export AD_VAR_SECONDARY_PROVIDER_SUBAGENT_ID="${SECONDARY_PROVIDER_SUBAGENT_ID}"
   export AD_VAR_APP_ID="${APP_ID}"
+  export AD_VAR_METRO_HOST="${DEVICE_HOST}"
+  export AD_VAR_METRO_PORT="${METRO_PORT}"
+  export AD_VAR_DEV_CLIENT_URL="$(node -e '
+    const baseUrl = process.argv[1];
+    process.stdout.write(
+      `exp+voice-mobile://expo-development-client/?url=${encodeURIComponent(baseUrl)}`,
+    );
+  ' "http://${DEVICE_HOST}:${METRO_PORT}")"
   export EXPO_PUBLIC_LOCAL_DAEMON="${DEVICE_HOST}:${PRIMARY_PORT}"
   SUITE_PATH="${REPO_ROOT}/packages/app/e2e/mobile/agent-device/operations-matrix.${PLATFORM}.ad"
 fi

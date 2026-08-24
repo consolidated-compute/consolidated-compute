@@ -3,7 +3,7 @@ env APP_ID=sh.paseo.debug
 
 open "${APP_ID}"
 settings clear-app-state "${APP_ID}"
-open "${APP_ID}" --relaunch
+open "${APP_ID}" --relaunch --metro-host "${METRO_HOST}" --metro-port "${METRO_PORT}" --launch-url "${DEV_CLIENT_URL}"
 settings appearance light
 wait "id=\"menu-button\"" 45000
 
