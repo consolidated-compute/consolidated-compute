@@ -1,0 +1,82 @@
+context platform=ios timeout=180000 retries=1
+env APP_ID=sh.paseo.debug
+
+open "${APP_ID}"
+settings clear-app-state "${APP_ID}"
+open "${APP_ID}" --relaunch
+settings appearance light
+wait "id=\"menu-button\"" 45000
+
+press "id=\"menu-button\""
+wait "id=\"sidebar-settings\"" 10000
+press "id=\"sidebar-settings\""
+wait "id=\"settings-host-picker\"" 20000
+press "id=\"settings-host-picker\""
+wait "id=\"settings-add-host\"" 10000
+press "id=\"settings-add-host\""
+wait "id=\"add-host-method-direct\"" 10000
+press "id=\"add-host-method-direct\""
+wait "id=\"direct-host-input\"" 10000
+fill "id=\"direct-host-input\"" "${SECONDARY_HOST}"
+fill "id=\"direct-port-input\"" "${SECONDARY_PORT}"
+keyboard dismiss
+press "id=\"direct-host-submit\""
+wait "id=\"settings-host-picker\"" 30000
+
+back
+wait "id=\"menu-button\"" 20000
+press "id=\"menu-button\""
+wait "id=\"sidebar-operations\"" 10000
+press "id=\"sidebar-operations\""
+wait "id=\"operations-screen\"" 30000
+wait "id=\"operations-summary-working\"" 30000
+wait "id=\"operations-summary-attention\"" 10000
+wait "id=\"operations-summary-idle\"" 10000
+wait "id=\"operations-workspace-${PRIMARY_SERVER_ID}-${PRIMARY_WORKSPACE_ID}\"" 10000
+screenshot "${AD_ARTIFACTS}/operations-light.png" --scale 1
+
+orientation landscape-left
+wait "id=\"operations-screen\"" 10000
+wait "id=\"operations-summary-working\"" 10000
+screenshot "${AD_ARTIFACTS}/operations-landscape.png" --scale 1
+orientation portrait
+wait "id=\"operations-screen\"" 10000
+
+home
+open "${APP_ID}"
+wait "id=\"operations-screen\"" 30000
+wait "id=\"operations-summary-attention\"" 10000
+screenshot "${AD_ARTIFACTS}/operations-resumed.png" --scale 1
+
+press "id=\"operations-workspace-${PRIMARY_SERVER_ID}-${PRIMARY_WORKSPACE_ID}\""
+wait "id=\"workspace-header-title\"" 30000
+press "id=\"menu-button\""
+wait "id=\"sidebar-operations\"" 10000
+press "id=\"sidebar-operations\""
+wait "id=\"operations-screen\"" 30000
+
+press "id=\"operations-agent-${PRIMARY_SERVER_ID}-${PRIMARY_AGENT_ID}\""
+wait "id=\"workspace-tab-agent_${PRIMARY_AGENT_ID}\"" 30000
+press "id=\"menu-button\""
+wait "id=\"sidebar-operations\"" 10000
+press "id=\"sidebar-operations\""
+wait "id=\"operations-screen\"" 30000
+
+scroll down 0.7
+scroll down 0.7
+wait "id=\"operations-provider-subagent-${PRIMARY_SERVER_ID}-${PRIMARY_AGENT_ID}-${PRIMARY_PROVIDER_SUBAGENT_ID}\"" 20000
+screenshot "${AD_ARTIFACTS}/operations-primary-hierarchy.png" --scale 1
+
+scroll down 0.8
+scroll down 0.8
+scroll down 0.8
+wait "id=\"operations-workspace-${SECONDARY_SERVER_ID}-${SECONDARY_WORKSPACE_ID}\"" 20000
+wait "id=\"operations-agent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}\"" 10000
+wait "id=\"operations-provider-subagent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}-${SECONDARY_PROVIDER_SUBAGENT_ID}\"" 10000
+settings appearance dark
+wait "id=\"operations-screen\"" 10000
+screenshot "${AD_ARTIFACTS}/operations-dark-hierarchy.png" --scale 1
+
+press "id=\"operations-agent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}\""
+wait "id=\"workspace-tab-agent_${SECONDARY_AGENT_ID}\"" 30000
+close

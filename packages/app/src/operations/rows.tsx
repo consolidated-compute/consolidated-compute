@@ -282,6 +282,7 @@ export function OperationsWorkspaceRows({
     ? `${workspace.serverName} · ${workspace.currentBranch}`
     : workspace.serverName;
   const forgeParts = forgeContextParts(workspace, t);
+  const workspaceTestID = `operations-workspace-${workspace.serverId}-${workspace.workspaceId ?? workspace.kind}`;
   const accessibilityLabel = [
     t("operations.actions.openWorkspace", { workspace: title }),
     workspaceMeta,
@@ -316,16 +317,14 @@ export function OperationsWorkspaceRows({
   );
 
   return (
-    <View
-      style={styles.workspace}
-      testID={`operations-workspace-${workspace.serverId}-${workspace.workspaceId ?? workspace.kind}`}
-    >
+    <View style={styles.workspace} testID={workspace.workspaceId ? undefined : workspaceTestID}>
       {workspace.workspaceId ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={accessibilityLabel}
           onPress={openWorkspace}
           style={rowStyle}
+          testID={workspaceTestID}
         >
           {content}
         </Pressable>
