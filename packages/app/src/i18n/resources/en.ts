@@ -254,6 +254,13 @@ export const en = {
     projectRegion: "Project {{project}}",
     workspaceRegion: "{{workspace}} on {{host}}. {{state}}",
     managedAgent: "Managed agent",
+    states: {
+      done: "Done",
+    },
+    relationship: {
+      nested: "Child of {{parent}}",
+      provider: "Provider child of {{parent}}",
+    },
     availability: {
       updating: "Updating Visual",
       refreshFailed: "Could not refresh Visual",

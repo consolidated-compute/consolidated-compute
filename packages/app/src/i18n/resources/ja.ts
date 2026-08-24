@@ -259,6 +259,13 @@ export const ja: TranslationResources = {
     projectRegion: "プロジェクト {{project}}",
     workspaceRegion: "{{host}} 上の {{workspace}}。{{state}}",
     managedAgent: "管理対象エージェント",
+    states: {
+      done: "完了",
+    },
+    relationship: {
+      nested: "{{parent}} の子エージェント",
+      provider: "{{parent}} のプロバイダーサブエージェント",
+    },
     availability: {
       updating: "ビジュアルを更新中",
       refreshFailed: "ビジュアルを更新できませんでした",

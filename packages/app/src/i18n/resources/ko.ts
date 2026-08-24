@@ -257,6 +257,13 @@ export const ko: TranslationResources = {
     projectRegion: "프로젝트 {{project}}",
     workspaceRegion: "{{host}}의 {{workspace}}. {{state}}",
     managedAgent: "관리형 에이전트",
+    states: {
+      done: "완료",
+    },
+    relationship: {
+      nested: "{{parent}}의 하위 에이전트",
+      provider: "{{parent}}의 공급자 하위 에이전트",
+    },
     availability: {
       updating: "비주얼 업데이트 중",
       refreshFailed: "비주얼을 새로 고칠 수 없습니다",

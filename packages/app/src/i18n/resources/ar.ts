@@ -256,6 +256,13 @@ export const ar: TranslationResources = {
     projectRegion: "المشروع {{project}}",
     workspaceRegion: "{{workspace}} على {{host}}. {{state}}",
     managedAgent: "وكيل مُدار",
+    states: {
+      done: "مكتمل",
+    },
+    relationship: {
+      nested: "تابع لـ {{parent}}",
+      provider: "وكيل فرعي من المزوّد تابع لـ {{parent}}",
+    },
     availability: {
       updating: "جارٍ تحديث التصور",
       refreshFailed: "تعذر تحديث التصور",

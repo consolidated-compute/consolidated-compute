@@ -258,6 +258,13 @@ export const ru: TranslationResources = {
     projectRegion: "Проект {{project}}",
     workspaceRegion: "{{workspace}} на {{host}}. {{state}}",
     managedAgent: "Управляемый агент",
+    states: {
+      done: "Готово",
+    },
+    relationship: {
+      nested: "Дочерний агент: {{parent}}",
+      provider: "Подагент провайдера: {{parent}}",
+    },
     availability: {
       updating: "Обновление визуализации",
       refreshFailed: "Не удалось обновить визуализацию",

@@ -256,6 +256,13 @@ export const zhCN: TranslationResources = {
     projectRegion: "项目 {{project}}",
     workspaceRegion: "{{host}} 上的 {{workspace}}。{{state}}",
     managedAgent: "托管智能体",
+    states: {
+      done: "已完成",
+    },
+    relationship: {
+      nested: "{{parent}} 的子 Agent",
+      provider: "{{parent}} 的提供方子 Agent",
+    },
     availability: {
       updating: "正在更新可视化",
       refreshFailed: "无法刷新可视化",
