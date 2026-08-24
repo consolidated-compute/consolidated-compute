@@ -2,10 +2,12 @@ import { expect, test, type Page, type TestInfo } from "../../app/e2e/support/fi
 import { gotoAppShell } from "../../app/e2e/support/helpers/app";
 import { openCommandCenter } from "../../app/e2e/support/helpers/command-center";
 import { getE2EDaemonPort } from "../../app/e2e/support/helpers/daemon-port";
-import { installOperationsHostFixture } from "../../app/e2e/support/helpers/operations-host-fixture";
-import { seedWorkspace } from "../../app/e2e/support/helpers/seed-client";
-import { getServerId } from "../../app/e2e/support/helpers/server-id";
-import { seedParentWithSubagent } from "../../app/e2e/support/helpers/subagents";
+import { addConnectedHostAndReload } from "../../app/e2e/support/helpers/hosts";
+import {
+  OPERATIONS_RUNTIME_NODE_COUNT,
+  seedOperationsRuntimeScenario,
+} from "../../app/e2e/support/helpers/operations-runtime-scenario";
+import { openSettingsSection } from "../../app/e2e/support/helpers/settings";
 import { installDesktopRuntime } from "./support/runtime";
 
 const WIDE_VIEWPORT = { width: 1280, height: 900 };
@@ -17,62 +19,142 @@ async function capture(page: Page, testInfo: TestInfo, name: string): Promise<vo
   await testInfo.attach(name, { path: screenshot, contentType: "image/png" });
 }
 
-test("desktop runtime keeps Operations comprehensible at wide and compact sizes", async ({
+async function expectSummaryTotal(page: Page, expected: number): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const values = await Promise.all(
+          ["working", "attention", "idle"].map(async (bucket) => {
+            const text = await page.getByTestId(`operations-summary-${bucket}`).textContent();
+            return Number.parseInt(text ?? "0", 10);
+          }),
+        );
+        return values.reduce((total, value) => total + value, 0);
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(expected);
+}
+
+async function expectVisualNodeCount(page: Page, expected: number): Promise<void> {
+  await expect
+    .poll(async () => {
+      const managed = await page.locator('[data-testid^="visual-agent-"]').count();
+      const provider = await page.locator('[data-testid^="visual-provider-subagent-"]').count();
+      return managed + provider;
+    })
+    .toBe(expected);
+}
+
+async function closeCompactSidebar(page: Page): Promise<void> {
+  const close = page.getByTestId("sidebar-close");
+  await expect(close).not.toBeVisible({ timeout: 10_000 });
+}
+
+async function useDarkLargeInterfaceText(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Open menu", exact: true }).click();
+  await page.locator('[data-testid="sidebar-settings"]:visible').click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await openSettingsSection(page, "appearance");
+  await page.getByLabel(/^Theme:/).click();
+  await page.getByText("Dark", { exact: true }).click();
+  const interfaceSize = page.getByLabel("Interface font size");
+  await interfaceSize.fill("21");
+  await interfaceSize.press("Tab");
+  await expect(interfaceSize).toHaveValue("21");
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page).toHaveURL(/\/settings$/, { timeout: 10_000 });
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await page.getByRole("button", { name: "Open menu", exact: true }).click();
+  await page.locator('[data-testid="sidebar-operations"]:visible').click();
+  await expect(page).toHaveURL(/\/operations$/, { timeout: 10_000 });
+  await closeCompactSidebar(page);
+}
+
+test("desktop runtime proves the 15-node Operations and Visual contract", async ({
   page,
 }, testInfo) => {
-  const serverId = getServerId();
-  const workspace = await seedWorkspace({
-    repoPrefix: "desktop-operations-",
-    title: "Desktop operations workspace",
+  test.setTimeout(300_000);
+  const scenario = await seedOperationsRuntimeScenario(page, {
+    prefix: "desktop-operations",
+    primaryWorkspaceTitle: "Desktop primary workspace",
+    secondaryWorkspaceTitle: "Desktop secondary workspace",
+    primaryHostLabel: "Desktop primary host",
+    secondaryHostLabel: "Desktop secondary host",
   });
 
   try {
-    const related = await seedParentWithSubagent(workspace, {
-      parentTitle: "Desktop parent",
-      childTitle: "Desktop nested helper",
-    });
-    const fixture = await installOperationsHostFixture(page, {
-      port: getE2EDaemonPort(),
-      providerSubagents: [
-        {
-          id: "desktop-provider-child",
-          parentAgentId: related.parent.id,
-          provider: "codex",
-          title: "Desktop native reviewer",
-          description: "Review the desktop work",
-          status: "running",
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          toolCallId: "desktop-provider-call",
-          subtitle: "Provider-native child",
-        },
-      ],
-    });
     await installDesktopRuntime(page, {
-      serverId,
+      serverId: scenario.primaryServerId,
       daemonListen: `127.0.0.1:${getE2EDaemonPort()}`,
     });
-
     await page.setViewportSize(WIDE_VIEWPORT);
     await gotoAppShell(page);
-    expect(fixture.providerSnapshotRequestCount()).toBe(0);
+    expect(scenario.primaryFixture.providerSnapshotRequestCount()).toBe(0);
+    await addConnectedHostAndReload(page, {
+      serverId: scenario.secondaryDaemon.serverId,
+      label: scenario.secondaryHostLabel,
+      port: scenario.secondaryDaemon.port,
+      primaryLabel: scenario.primaryHostLabel,
+    });
+
     const panel = await openCommandCenter(page);
     await panel.getByTestId("command-center-input").fill("Operations");
     await panel.getByRole("button", { name: "Operations", exact: true }).click();
-
     await expect(page).toHaveURL(/\/operations$/);
     await expect(page.getByTestId("operations-screen")).toBeVisible({ timeout: 30_000 });
-    await expect.poll(() => fixture.providerSnapshotRequestCount(), { timeout: 30_000 }).toBe(1);
-    await expect(page.getByText("Desktop nested helper", { exact: true })).toBeVisible();
-    await expect(page.getByText("Review the desktop work", { exact: true })).toBeVisible();
+    await expectSummaryTotal(page, OPERATIONS_RUNTIME_NODE_COUNT);
+    await expect
+      .poll(() => scenario.primaryFixture.providerSnapshotRequestCount(), { timeout: 30_000 })
+      .toBe(1);
+    await expect
+      .poll(() => scenario.secondaryFixture.providerSnapshotRequestCount(), { timeout: 30_000 })
+      .toBe(1);
+    await expect(page.getByText("Nested helper", { exact: true })).toBeVisible();
+    await expect(page.getByText("Review the primary host changes", { exact: true })).toBeVisible();
     await capture(page, testInfo, "operations-desktop-wide");
 
+    await page.locator('[data-testid="sidebar-visual"]:visible').click();
+    await expect(page).toHaveURL(/\/visual$/);
+    await expect(page.getByTestId("visual-layout-wide")).toBeVisible({ timeout: 30_000 });
+    await expectVisualNodeCount(page, OPERATIONS_RUNTIME_NODE_COUNT);
+    await expect(
+      page.getByTestId(
+        `visual-agent-${scenario.secondaryDaemon.serverId}-${scenario.secondaryAgent.id}`,
+      ),
+    ).toHaveAccessibleName(
+      "Open Secondary host worker. mock. Working. Desktop secondary workspace. Desktop secondary host",
+    );
+    await capture(page, testInfo, "visual-desktop-wide");
+
     await page.setViewportSize(COMPACT_VIEWPORT);
-    await expect(page.getByTestId("operations-screen")).toBeVisible();
-    await expect(page.getByTestId("operations-refresh")).toBeVisible();
-    await expect(page.getByText("Desktop nested helper", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("visual-layout-compact")).toBeVisible({ timeout: 30_000 });
+    const compactOverflow = await page.getByTestId("visual-scroll").evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      clientWidth: element.clientWidth,
+      scrollHeight: element.scrollHeight,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(compactOverflow.scrollHeight).toBeGreaterThan(compactOverflow.clientHeight);
+    expect(compactOverflow.scrollWidth).toBeLessThanOrEqual(compactOverflow.clientWidth + 1);
+    await capture(page, testInfo, "visual-desktop-compact");
+
+    await page.getByRole("button", { name: "Open menu", exact: true }).click();
+    await page.locator('[data-testid="sidebar-operations"]:visible').click();
+    await expect(page.getByTestId("operations-screen")).toBeVisible({ timeout: 30_000 });
+    await closeCompactSidebar(page);
+    await expectSummaryTotal(page, OPERATIONS_RUNTIME_NODE_COUNT);
     await capture(page, testInfo, "operations-desktop-compact");
+
+    await useDarkLargeInterfaceText(page);
+    await expect(page.getByTestId("operations-screen")).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Open menu", exact: true }).click();
+    await page.locator('[data-testid="sidebar-visual"]:visible').click();
+    await expect(page.getByTestId("visual-layout-compact")).toBeVisible({ timeout: 30_000 });
+    await closeCompactSidebar(page);
+    await expectVisualNodeCount(page, OPERATIONS_RUNTIME_NODE_COUNT);
+    await capture(page, testInfo, "visual-desktop-dark-large-text-compact");
   } finally {
-    await workspace.cleanup();
+    await scenario.cleanup();
   }
 });

@@ -227,6 +227,8 @@ test("PR routing declares stable behavior ownership", () => {
     desktop: [
       "packages/desktop/**",
       "packages/app/src/desktop/**",
+      "packages/app/src/app/visual.tsx",
+      "packages/app/src/operations/visual/**",
       "packages/server/src/server/browser-tools/**",
       "packages/app/e2e/support/**",
       "packages/app/*config.{cjs,js,ts}",
@@ -297,6 +299,8 @@ test("browser and desktop tests have exclusive, directory-owned suites", () => {
   assert.deepEqual(filters.desktop, [
     "packages/desktop/**",
     "packages/app/src/desktop/**",
+    "packages/app/src/app/visual.tsx",
+    "packages/app/src/operations/visual/**",
     "packages/server/src/server/browser-tools/**",
     "packages/app/e2e/support/**",
     "packages/app/*config.{cjs,js,ts}",
