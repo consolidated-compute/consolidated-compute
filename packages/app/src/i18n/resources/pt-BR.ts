@@ -254,6 +254,18 @@ export const ptBR: TranslationResources = {
       clearSearch: "Limpar busca",
     },
   },
+  visual: {
+    title: "Visual",
+    canvasAccessibility:
+      "{{projects}} projetos, {{workspaces}} espaços de trabalho, {{nodes}} nós de computação",
+    projectRegion: "Projeto {{project}}",
+    workspaceRegion: "{{workspace}} em {{host}}. {{state}}",
+    managedAgent: "Agente gerenciado",
+    availability: {
+      updating: "Atualizando Visual",
+      refreshFailed: "Não foi possível atualizar Visual",
+    },
+  },
   operations: {
     title: "Operações",
     empty: "Nenhum agente ativo",

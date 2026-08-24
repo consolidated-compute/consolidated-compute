@@ -254,6 +254,18 @@ export const es: TranslationResources = {
       clearSearch: "Borrar búsqueda",
     },
   },
+  visual: {
+    title: "Visual",
+    canvasAccessibility:
+      "{{projects}} proyectos, {{workspaces}} espacios de trabajo, {{nodes}} nodos de cómputo",
+    projectRegion: "Proyecto {{project}}",
+    workspaceRegion: "{{workspace}} en {{host}}. {{state}}",
+    managedAgent: "Agente gestionado",
+    availability: {
+      updating: "Actualizando Visual",
+      refreshFailed: "No se pudo actualizar Visual",
+    },
+  },
   operations: {
     title: "Operaciones",
     empty: "No hay agentes activos",

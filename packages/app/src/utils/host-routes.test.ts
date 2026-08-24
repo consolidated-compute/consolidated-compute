@@ -7,6 +7,7 @@ import {
   buildNewWorkspaceRoute,
   buildOpenProjectRoute,
   buildOperationsRoute,
+  buildVisualRoute,
   resolveKnownHostRoute,
   buildSessionsRoute,
   buildSettingsAddHostRoute,
@@ -210,6 +211,10 @@ describe("projects settings routes", () => {
 });
 
 describe("global routes", () => {
+  it("buildVisualRoute returns the global Visual route", () => {
+    expect(buildVisualRoute()).toBe("/visual");
+  });
+
   it("buildOperationsRoute returns the global Operations route", () => {
     expect(buildOperationsRoute()).toBe("/operations");
   });

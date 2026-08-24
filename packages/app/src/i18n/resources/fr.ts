@@ -255,6 +255,18 @@ export const fr: TranslationResources = {
       clearSearch: "Effacer la recherche",
     },
   },
+  visual: {
+    title: "Visuel",
+    canvasAccessibility:
+      "{{projects}} projets, {{workspaces}} espaces de travail, {{nodes}} nœuds de calcul",
+    projectRegion: "Projet {{project}}",
+    workspaceRegion: "{{workspace}} sur {{host}}. {{state}}",
+    managedAgent: "Agent géré",
+    availability: {
+      updating: "Mise à jour du visuel",
+      refreshFailed: "Impossible d’actualiser le visuel",
+    },
+  },
   operations: {
     title: "Opérations",
     empty: "Aucun agent actif",

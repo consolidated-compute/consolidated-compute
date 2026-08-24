@@ -6,6 +6,7 @@ import {
   GitBranch,
   History,
   Home,
+  Network,
   Plus,
   Search,
   Server,
@@ -72,6 +73,7 @@ import {
   buildSessionsRoute,
   buildSettingsAddHostRoute,
   buildSettingsRoute,
+  buildVisualRoute,
 } from "@/utils/host-routes";
 import { openHostOverview } from "@/navigation/settings-navigation";
 import type { ShortcutKey } from "@/utils/format-shortcut";
@@ -120,6 +122,7 @@ interface SidebarLabels {
   sessions: string;
   schedules: string;
   operations: string;
+  visual: string;
   closeSidebar: string;
 }
 
@@ -130,6 +133,7 @@ interface MobileSidebarProps extends SidebarSharedProps {
   handleViewMoreNavigate: () => void;
   handleViewSchedulesNavigate: () => void;
   handleViewOperationsNavigate: () => void;
+  handleViewVisualNavigate: () => void;
 }
 
 interface DesktopSidebarProps extends SidebarSharedProps {
@@ -138,6 +142,7 @@ interface DesktopSidebarProps extends SidebarSharedProps {
   handleViewMore: () => void;
   handleViewSchedules: () => void;
   handleViewOperations: () => void;
+  handleViewVisual: () => void;
 }
 
 export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boolean }) {
@@ -240,6 +245,10 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     router.push(buildOperationsRoute());
   }, []);
 
+  const handleViewVisualNavigate = useCallback(() => {
+    router.push(buildVisualRoute());
+  }, []);
+
   const newWorkspaceKeys = useShortcutKeys("new-workspace");
   const labels = useMemo(
     (): SidebarLabels => ({
@@ -252,6 +261,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       sessions: t("sidebar.sections.sessions"),
       schedules: t("sidebar.sections.schedules"),
       operations: t("operations.title"),
+      visual: t("visual.title"),
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
@@ -294,6 +304,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           handleViewMoreNavigate={handleViewMoreNavigate}
           handleViewSchedulesNavigate={handleViewSchedulesNavigate}
           handleViewOperationsNavigate={handleViewOperationsNavigate}
+          handleViewVisualNavigate={handleViewVisualNavigate}
         />
       </RetainedPanelActivity>
     );
@@ -313,6 +324,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleViewMore={handleViewMoreNavigate}
         handleViewSchedules={handleViewSchedulesNavigate}
         handleViewOperations={handleViewOperationsNavigate}
+        handleViewVisual={handleViewVisualNavigate}
       />
     </RetainedPanelActivity>
   );
@@ -645,12 +657,14 @@ function MobileSidebar({
   handleViewMoreNavigate,
   handleViewSchedulesNavigate,
   handleViewOperationsNavigate,
+  handleViewVisualNavigate,
 }: MobileSidebarProps) {
   const pathname = usePathname();
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
   const isOperationsActive = pathname === "/operations";
+  const isVisualActive = pathname === "/visual";
   const { gesture: closeGesture, gestureRef: closeGestureRef } = useCloseAgentListGesture();
   const dragGestureHostPresented = useIsMobilePanelPresented("agent-list");
 
@@ -668,6 +682,11 @@ function MobileSidebar({
     closeSidebar();
     handleViewOperationsNavigate();
   }, [closeSidebar, handleViewOperationsNavigate]);
+
+  const handleViewVisual = useCallback(() => {
+    closeSidebar();
+    handleViewVisualNavigate();
+  }, [closeSidebar, handleViewVisualNavigate]);
 
   const handleWorkspacePress = useCallback(() => {
     closeSidebar();
@@ -704,6 +723,14 @@ function MobileSidebar({
             onPress={handleViewOperations}
             isActive={isOperationsActive}
             testID="sidebar-operations"
+            variant="compact"
+          />
+          <SidebarHeaderRow
+            icon={Network}
+            label={labels.visual}
+            onPress={handleViewVisual}
+            isActive={isVisualActive}
+            testID="sidebar-visual"
             variant="compact"
           />
           <SidebarHeaderRow
@@ -812,6 +839,7 @@ function DesktopSidebar({
   handleViewMore,
   handleViewSchedules,
   handleViewOperations,
+  handleViewVisual,
 }: DesktopSidebarProps) {
   const ownsTopLeft = useOwnsWindowChromeCorner("top-left");
   const pathname = usePathname();
@@ -819,6 +847,7 @@ function DesktopSidebar({
   const isSessionsActive = pathname.includes("/sessions");
   const isSchedulesActive = pathname.includes("/schedules");
   const isOperationsActive = pathname === "/operations";
+  const isVisualActive = pathname === "/visual";
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
   const { width: viewportWidth } = useWindowDimensions();
@@ -939,6 +968,14 @@ function DesktopSidebar({
               onPress={handleViewOperations}
               isActive={isOperationsActive}
               testID="sidebar-operations"
+              variant="compact"
+            />
+            <SidebarHeaderRow
+              icon={Network}
+              label={labels.visual}
+              onPress={handleViewVisual}
+              isActive={isVisualActive}
+              testID="sidebar-visual"
               variant="compact"
             />
             <SidebarHeaderRow
