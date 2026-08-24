@@ -1,6 +1,7 @@
 import { expect, test, type Page, type TestInfo } from "../../app/e2e/support/fixtures";
 import { gotoAppShell } from "../../app/e2e/support/helpers/app";
 import { openCommandCenter } from "../../app/e2e/support/helpers/command-center";
+import { buildSeededHost } from "../../app/e2e/support/helpers/daemon-registry";
 import { getE2EDaemonPort } from "../../app/e2e/support/helpers/daemon-port";
 import { addConnectedHostAndReload } from "../../app/e2e/support/helpers/hosts";
 import {
@@ -8,6 +9,7 @@ import {
   seedOperationsRuntimeScenario,
 } from "../../app/e2e/support/helpers/operations-runtime-scenario";
 import { openSettingsSection } from "../../app/e2e/support/helpers/settings";
+import { startRealElectronRenderer } from "./support/real-electron";
 import { installDesktopRuntime } from "./support/runtime";
 
 const WIDE_VIEWPORT = { width: 1280, height: 900 };
@@ -156,5 +158,98 @@ test("desktop runtime proves the 15-node Operations and Visual contract", async 
     await capture(page, testInfo, "visual-desktop-dark-large-text-compact");
   } finally {
     await scenario.cleanup();
+  }
+});
+
+test("real Electron retains the 15-node Visual contract", async ({
+  page: fixturePage,
+}, testInfo) => {
+  test.setTimeout(300_000);
+  const paseoHome = process.env.E2E_PASEO_HOME;
+  if (!paseoHome) throw new Error("E2E_PASEO_HOME was not configured by the desktop fixture");
+  await expect(fixturePage.locator("body")).toBeAttached();
+
+  const electron = await startRealElectronRenderer({
+    daemonPort: getE2EDaemonPort(),
+    paseoHome,
+    artifactDir: testInfo.outputPath("real-electron"),
+  });
+  let scenario: Awaited<ReturnType<typeof seedOperationsRuntimeScenario>> | null = null;
+
+  try {
+    const page = electron.page;
+    scenario = await seedOperationsRuntimeScenario(page, {
+      prefix: "real-electron-operations",
+      primaryWorkspaceTitle: "Electron primary workspace",
+      secondaryWorkspaceTitle: "Electron secondary workspace",
+      primaryHostLabel: "Electron primary host",
+      secondaryHostLabel: "Electron secondary host",
+    });
+    const nowIso = new Date().toISOString();
+    const hosts = [
+      buildSeededHost({
+        serverId: scenario.primaryServerId,
+        label: scenario.primaryHostLabel,
+        endpoint: `127.0.0.1:${getE2EDaemonPort()}`,
+        nowIso,
+      }),
+      buildSeededHost({
+        serverId: scenario.secondaryDaemon.serverId,
+        label: scenario.secondaryHostLabel,
+        endpoint: `127.0.0.1:${scenario.secondaryDaemon.port}`,
+        nowIso,
+      }),
+    ];
+    await page.addInitScript((seededHosts) => {
+      localStorage.setItem("@paseo:e2e", "1");
+      localStorage.setItem("@paseo:daemon-registry", JSON.stringify(seededHosts));
+    }, hosts);
+
+    const desktopStatus = await page.evaluate(() =>
+      window.paseoDesktop?.invoke("desktop_daemon_status"),
+    );
+    expect(desktopStatus).toMatchObject({ serverId: scenario.primaryServerId, status: "running" });
+
+    await page.setViewportSize(WIDE_VIEWPORT);
+    await page.goto(new URL("/visual", page.url()).href);
+    await expect(page.getByTestId("visual-layout-wide")).toBeVisible({ timeout: 30_000 });
+    await expectVisualNodeCount(page, OPERATIONS_RUNTIME_NODE_COUNT);
+    await expect(
+      page.getByTestId(
+        `visual-agent-${scenario.secondaryDaemon.serverId}-${scenario.secondaryAgent.id}`,
+      ),
+    ).toHaveAccessibleName(
+      "Open Secondary host worker. mock. Working. Electron secondary workspace. Electron secondary host",
+    );
+    await capture(page, testInfo, "visual-electron-wide");
+
+    await page.setViewportSize(COMPACT_VIEWPORT);
+    await expect(page.getByTestId("visual-layout-compact")).toBeVisible({ timeout: 30_000 });
+    const compactOverflow = await page.getByTestId("visual-scroll").evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      clientWidth: element.clientWidth,
+      scrollHeight: element.scrollHeight,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(compactOverflow.scrollHeight).toBeGreaterThan(compactOverflow.clientHeight);
+    expect(compactOverflow.scrollWidth).toBeLessThanOrEqual(compactOverflow.clientWidth + 1);
+    await capture(page, testInfo, "visual-electron-compact");
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.evaluate(() => {
+      const key = "@paseo:app-settings";
+      const stored = JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, unknown>;
+      localStorage.setItem(key, JSON.stringify({ ...stored, theme: "dark", uiBaseFontSize: 21 }));
+    });
+    await page.reload();
+    await expect(page.getByTestId("visual-layout-compact")).toBeVisible({ timeout: 30_000 });
+    await expectVisualNodeCount(page, OPERATIONS_RUNTIME_NODE_COUNT);
+    await expect
+      .poll(() => page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches))
+      .toBe(true);
+    await capture(page, testInfo, "visual-electron-dark-large-text-compact");
+  } finally {
+    await scenario?.cleanup();
+    await electron.stop();
   }
 });
