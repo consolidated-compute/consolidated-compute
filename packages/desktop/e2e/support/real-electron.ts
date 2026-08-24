@@ -8,18 +8,15 @@ import { finished } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { chromium, type Browser, type Page } from "playwright";
-import { waitForMetro, warmMetro } from "../../../app/e2e/support/global-setup";
 
 const START_TIMEOUT_MS = 90_000;
 const desktopDir = process.cwd();
 const rootDir = path.resolve(desktopDir, "../..");
-const appDir = path.join(rootDir, "packages", "app");
 const require = createRequire(path.join(desktopDir, "package.json"));
 const electronPath = require("electron") as string;
 const execFileAsync = promisify(execFile);
 
 export interface RealElectronRenderer {
-  origin: string;
   page: Page;
   stop(): Promise<void>;
 }
@@ -154,13 +151,14 @@ async function stopProcessTree(child: ChildProcess, label: string): Promise<void
 
 export async function startRealElectronRenderer(input: {
   daemonPort: number;
+  metroPort: number;
   paseoHome: string;
   artifactDir: string;
 }): Promise<RealElectronRenderer> {
   mkdirSync(input.artifactDir, { recursive: true });
   const runtimeDir = mkdtempSync(path.join(os.tmpdir(), "paseo-operations-electron-"));
-  const [expoPort, cdpPort] = await Promise.all([reservePort(), reservePort()]);
-  const origin = `http://localhost:${expoPort}`;
+  const cdpPort = await reservePort();
+  const origin = `http://localhost:${input.metroPort}`;
   const logPath = path.join(input.artifactDir, "real-electron.log");
   const log = createWriteStream(logPath, { flags: "a" });
   const listen = `127.0.0.1:${input.daemonPort}`;
@@ -173,7 +171,7 @@ export async function startRealElectronRenderer(input: {
     PASEO_DICTATION_ENABLED: "0",
     PASEO_VOICE_MODE_ENABLED: "0",
     PASEO_NODE_ENV: "development",
-    EXPO_PORT: String(expoPort),
+    EXPO_PORT: String(input.metroPort),
     EXPO_DEV_URL: origin,
     PASEO_ELECTRON_REMOTE_DEBUGGING_PORT: String(cdpPort),
     PASEO_ELECTRON_USER_DATA_DIR: path.join(runtimeDir, "user-data"),
@@ -181,33 +179,14 @@ export async function startRealElectronRenderer(input: {
     FORCE_COLOR: "0",
     NO_COLOR: "1",
   };
-  const metro = spawn(
-    process.platform === "win32" ? "npx.cmd" : "npx",
-    ["expo", "start", "--web", "--port", String(expoPort)],
-    {
-      cwd: appDir,
-      detached: process.platform !== "win32",
-      env: {
-        ...commonEnv,
-        APP_VARIANT: "development",
-        BROWSER: "none",
-        PASEO_WEB_PLATFORM: "electron",
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-  metro.stdout?.pipe(log, { end: false });
-  metro.stderr?.pipe(log, { end: false });
-
   let child: ChildProcess | null = null;
   let browser: Browser | null = null;
   let cleanupPromise: Promise<void> | null = null;
   const cleanupRuntime = (): Promise<void> => {
     cleanupPromise ??= (async () => {
-      const processes = [
-        { child, label: "Electron" },
-        { child: metro, label: "Electron Metro" },
-      ].filter((entry): entry is { child: ChildProcess; label: string } => entry.child !== null);
+      const processes = [{ child, label: "Electron" }].filter(
+        (entry): entry is { child: ChildProcess; label: string } => entry.child !== null,
+      );
       const results = await Promise.allSettled(
         processes.map((entry) => stopProcessTree(entry.child, entry.label)),
       );
@@ -231,13 +210,6 @@ export async function startRealElectronRenderer(input: {
     return cleanupPromise;
   };
   try {
-    await waitForMetro(expoPort, {
-      label: "real Electron Metro",
-      timeoutMs: START_TIMEOUT_MS,
-      childProcess: metro,
-    });
-    await warmMetro(expoPort);
-
     const electronArgs = [...(process.platform === "linux" ? ["--no-sandbox"] : []), desktopDir];
     const command = process.platform === "linux" ? "xvfb-run" : electronPath;
     const args =
@@ -254,16 +226,15 @@ export async function startRealElectronRenderer(input: {
     child.stderr?.pipe(log, { end: false });
 
     await waitForPort(cdpPort, child, logPath);
-    await waitForAppTarget(cdpPort, expoPort, child, logPath);
+    await waitForAppTarget(cdpPort, input.metroPort, child, logPath);
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`, {
       timeout: START_TIMEOUT_MS,
     });
-    const page = await waitForAppPage(browser, expoPort);
+    const page = await waitForAppPage(browser, input.metroPort);
     await page.waitForFunction(() => typeof window.paseoDesktop?.invoke === "function", undefined, {
       timeout: START_TIMEOUT_MS,
     });
     return {
-      origin,
       page,
       stop: async () => {
         await browser?.close().catch(() => undefined);

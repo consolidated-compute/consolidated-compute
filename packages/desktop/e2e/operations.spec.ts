@@ -9,7 +9,6 @@ import {
   seedOperationsRuntimeScenario,
 } from "../../app/e2e/support/helpers/operations-runtime-scenario";
 import { openSettingsSection } from "../../app/e2e/support/helpers/settings";
-import type { SeedDaemonClient } from "../../app/e2e/support/helpers/seed-client";
 import { startRealElectronRenderer } from "./support/real-electron";
 import { installDesktopRuntime } from "./support/runtime";
 
@@ -72,37 +71,6 @@ async function useDarkLargeInterfaceText(page: Page): Promise<void> {
   await page.locator('[data-testid="sidebar-operations"]:visible').click();
   await expect(page).toHaveURL(/\/operations$/, { timeout: 10_000 });
   await closeCompactSidebar(page);
-}
-
-async function allowRendererOrigin(
-  clients: SeedDaemonClient[],
-  origin: string,
-): Promise<() => Promise<void>> {
-  const patched: Array<{ client: SeedDaemonClient; allowedOrigins: string[] }> = [];
-  try {
-    for (const client of clients) {
-      const { config } = await client.getDaemonConfig();
-      const allowedOrigins = config.cors?.allowedOrigins ?? [];
-      await client.patchDaemonConfig({
-        cors: { allowedOrigins: Array.from(new Set([...allowedOrigins, origin])) },
-      });
-      patched.push({ client, allowedOrigins });
-    }
-  } catch (error) {
-    await Promise.allSettled(
-      patched.map(({ client, allowedOrigins }) =>
-        client.patchDaemonConfig({ cors: { allowedOrigins } }),
-      ),
-    );
-    throw error;
-  }
-  return async () => {
-    await Promise.allSettled(
-      patched.map(({ client, allowedOrigins }) =>
-        client.patchDaemonConfig({ cors: { allowedOrigins } }),
-      ),
-    );
-  };
 }
 
 test("desktop runtime proves the 15-node Operations and Visual contract", async ({
@@ -199,15 +167,19 @@ test("real Electron retains the 15-node Visual contract", async ({
   test.setTimeout(300_000);
   const paseoHome = process.env.E2E_PASEO_HOME;
   if (!paseoHome) throw new Error("E2E_PASEO_HOME was not configured by the desktop fixture");
+  const metroPort = Number(process.env.E2E_METRO_PORT);
+  if (!Number.isInteger(metroPort) || metroPort <= 0) {
+    throw new Error("E2E_METRO_PORT was not configured by Playwright global setup");
+  }
   await expect(fixturePage.locator("body")).toBeAttached();
 
   const electron = await startRealElectronRenderer({
     daemonPort: getE2EDaemonPort(),
+    metroPort,
     paseoHome,
     artifactDir: testInfo.outputPath("real-electron"),
   });
   let scenario: Awaited<ReturnType<typeof seedOperationsRuntimeScenario>> | null = null;
-  let restoreCorsOrigins: (() => Promise<void>) | null = null;
 
   try {
     const page = electron.page;
@@ -218,10 +190,6 @@ test("real Electron retains the 15-node Visual contract", async ({
       primaryHostLabel: "Electron primary host",
       secondaryHostLabel: "Electron secondary host",
     });
-    restoreCorsOrigins = await allowRendererOrigin(
-      [scenario.primary.client, scenario.secondary.client],
-      electron.origin,
-    );
     const nowIso = new Date().toISOString();
     const hosts = [
       buildSeededHost({
@@ -248,7 +216,11 @@ test("real Electron retains the 15-node Visual contract", async ({
     expect(desktopStatus).toMatchObject({ serverId: scenario.primaryServerId, status: "running" });
 
     await page.setViewportSize(WIDE_VIEWPORT);
-    await page.goto(new URL("/visual", page.url()).href);
+    await page.reload();
+    const visualLink = page.locator('[data-testid="sidebar-visual"]:visible');
+    await expect(visualLink).toBeVisible({ timeout: 30_000 });
+    await visualLink.click();
+    await expect(page).toHaveURL(/\/visual$/);
     await expect(page.getByTestId("visual-layout-wide")).toBeVisible({ timeout: 30_000 });
     await expectVisualNodeCount(page, OPERATIONS_RUNTIME_NODE_COUNT);
     await expect(
@@ -279,6 +251,11 @@ test("real Electron retains the 15-node Visual contract", async ({
       localStorage.setItem(key, JSON.stringify({ ...stored, theme: "dark", uiBaseFontSize: 21 }));
     });
     await page.reload();
+    await page.getByRole("button", { name: "Open menu", exact: true }).click();
+    await expect(visualLink).toBeVisible({ timeout: 30_000 });
+    await visualLink.click();
+    await expect(page).toHaveURL(/\/visual$/);
+    await closeCompactSidebar(page);
     await expect(page.getByTestId("visual-layout-compact")).toBeVisible({ timeout: 30_000 });
     await expectVisualNodeCount(page, OPERATIONS_RUNTIME_NODE_COUNT);
     await expect
@@ -286,7 +263,6 @@ test("real Electron retains the 15-node Visual contract", async ({
       .toBe(true);
     await capture(page, testInfo, "visual-electron-dark-large-text-compact");
   } finally {
-    await restoreCorsOrigins?.();
     await scenario?.cleanup();
     await electron.stop();
   }
