@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OperationsHostFacts, OperationsModel } from "./model";
-import { resolveOperationsAvailability } from "./screen-state";
+import { resolveOperationsAvailability, shouldShowUnavailableHostsAlert } from "./screen-state";
 
 function model(input: {
   hosts?: OperationsHostFacts[];
@@ -46,13 +46,15 @@ describe("resolveOperationsAvailability", () => {
       },
     ];
 
-    expect(resolveOperationsAvailability(model({ hosts }))).toEqual({
+    const availability = resolveOperationsAvailability(model({ hosts }));
+    expect(availability).toEqual({
       body: { kind: "all_hosts_unavailable" },
       unavailableHosts: hosts,
       providerSubagentIssueHosts: [],
       areAllHostsUnavailable: true,
       isPartiallyLoading: false,
     });
+    expect(shouldShowUnavailableHostsAlert(availability)).toBe(false);
   });
 
   it("keeps cached last-known agents visible when every host is unavailable", () => {
@@ -62,13 +64,15 @@ describe("resolveOperationsAvailability", () => {
       state: { kind: "offline", hasLoadedDirectory: true, error: null },
     };
 
-    expect(resolveOperationsAvailability(model({ hosts: [offline], agentCount: 2 }))).toEqual({
+    const availability = resolveOperationsAvailability(model({ hosts: [offline], agentCount: 2 }));
+    expect(availability).toEqual({
       body: { kind: "content" },
       unavailableHosts: [offline],
       providerSubagentIssueHosts: [],
       areAllHostsUnavailable: true,
       isPartiallyLoading: false,
     });
+    expect(shouldShowUnavailableHostsAlert(availability)).toBe(true);
   });
 
   it("keeps mixed-host loading visible after another host has loaded", () => {
@@ -85,7 +89,8 @@ describe("resolveOperationsAvailability", () => {
       },
     ];
 
-    expect(resolveOperationsAvailability(model({ hosts }))).toEqual({
+    const availability = resolveOperationsAvailability(model({ hosts }));
+    expect(availability).toEqual({
       body: { kind: "empty" },
       unavailableHosts: [],
       providerSubagentIssueHosts: [],
@@ -105,13 +110,15 @@ describe("resolveOperationsAvailability", () => {
       unavailable,
     ];
 
-    expect(resolveOperationsAvailability(model({ hosts }))).toEqual({
+    const availability = resolveOperationsAvailability(model({ hosts }));
+    expect(availability).toEqual({
       body: { kind: "empty" },
       unavailableHosts: [unavailable],
       providerSubagentIssueHosts: [],
       areAllHostsUnavailable: false,
       isPartiallyLoading: false,
     });
+    expect(shouldShowUnavailableHostsAlert(availability)).toBe(true);
   });
 
   it("reports unsupported and failed provider subagent snapshots without hiding managed data", () => {

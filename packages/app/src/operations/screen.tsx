@@ -10,7 +10,11 @@ import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import type { OperationsHostFacts, OperationsSummary } from "./model";
 import { OperationsProjectRows } from "./rows";
-import { resolveOperationsAvailability, type OperationsAvailability } from "./screen-state";
+import {
+  resolveOperationsAvailability,
+  shouldShowUnavailableHostsAlert,
+  type OperationsAvailability,
+} from "./screen-state";
 import { useOperationsData } from "./use-operations-data";
 
 const ThemedLoadingSpinner = withUnistyles(LoadingSpinner, (theme) => ({
@@ -156,8 +160,7 @@ function OperationsStatusAlerts({
 }): ReactElement | null {
   const { t } = useTranslation();
   const showUpdating = isRevalidating || availability.isPartiallyLoading;
-  const showAvailability =
-    availability.unavailableHosts.length > 0 && availability.body.kind !== "all_hosts_unavailable";
+  const showAvailability = shouldShowUnavailableHostsAlert(availability);
   const showProviderSubagentAvailability = availability.providerSubagentIssueHosts.length > 0;
   if (
     !didManualRefreshFail &&

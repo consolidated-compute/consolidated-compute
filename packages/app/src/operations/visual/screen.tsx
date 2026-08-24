@@ -21,7 +21,7 @@ import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
 import { getStatusDotColor } from "@/utils/status-dot-color";
 import { navigateToAgent } from "@/utils/navigate-to-agent";
-import { resolveOperationsAvailability } from "../screen-state";
+import { resolveOperationsAvailability, shouldShowUnavailableHostsAlert } from "../screen-state";
 import { useOperationsData } from "../use-operations-data";
 import {
   buildVisualTopology,
@@ -422,7 +422,7 @@ function VisualScreenContent(): ReactElement {
   }
 
   const showUpdating = operations.isRevalidating || availability.isPartiallyLoading;
-  const showUnavailable = availability.unavailableHosts.length > 0;
+  const showUnavailable = shouldShowUnavailableHostsAlert(availability);
   const showProviderUnavailable = availability.providerSubagentIssueHosts.length > 0;
   return (
     <View style={styles.container} testID="visual-screen">

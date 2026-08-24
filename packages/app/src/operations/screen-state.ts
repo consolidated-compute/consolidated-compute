@@ -14,6 +14,14 @@ export interface OperationsAvailability {
   isPartiallyLoading: boolean;
 }
 
+export function shouldShowUnavailableHostsAlert(
+  availability: Pick<OperationsAvailability, "body" | "unavailableHosts">,
+): boolean {
+  return (
+    availability.unavailableHosts.length > 0 && availability.body.kind !== "all_hosts_unavailable"
+  );
+}
+
 function isUnavailable(host: OperationsHostFacts): boolean {
   return host.state.kind === "offline" || host.state.kind === "error";
 }
