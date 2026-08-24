@@ -13,7 +13,15 @@ import {
   Unlink,
   XCircle,
 } from "lucide-react-native";
-import { Fragment, useCallback, useMemo, useState, type ReactElement } from "react";
+import {
+  Fragment,
+  Profiler,
+  useCallback,
+  useMemo,
+  useState,
+  type ProfilerOnRenderCallback,
+  type ReactElement,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   Pressable,
@@ -54,6 +62,33 @@ import {
 } from "./presentation";
 import { fitVisualRectToWidth, resolveVisualLayoutMode } from "./viewport";
 import { useVisualWorkingClock } from "./working-clock";
+
+interface VisualReactStats {
+  commits: number;
+  actualDurationMs: number;
+}
+
+const recordVisualRender: ProfilerOnRenderCallback = (_id, _phase, actualDuration) => {
+  const scope = globalThis as typeof globalThis & {
+    __PASEO_VISUAL_REACT_STATS__?: VisualReactStats;
+  };
+  const stats = scope.__PASEO_VISUAL_REACT_STATS__;
+  if (!stats) return;
+  stats.commits += 1;
+  stats.actualDurationMs += actualDuration;
+};
+
+function VisualProfiler({ children }: { children: ReactElement }): ReactElement {
+  const scope = globalThis as typeof globalThis & {
+    __PASEO_VISUAL_REACT_STATS__?: VisualReactStats;
+  };
+  if (!scope.__PASEO_VISUAL_REACT_STATS__) return children;
+  return (
+    <Profiler id="visual" onRender={recordVisualRender}>
+      {children}
+    </Profiler>
+  );
+}
 
 function ProviderGlyph({ provider, size, color }: ProviderIconProps & { provider: string }) {
   const ProviderIcon = getProviderIcon(provider);
@@ -595,7 +630,11 @@ function VisualScene({
 export function VisualScreen(): ReactElement {
   const isFocused = useIsFocused();
   if (!isFocused) return <View style={styles.container} />;
-  return <VisualScreenContent />;
+  return (
+    <VisualProfiler>
+      <VisualScreenContent />
+    </VisualProfiler>
+  );
 }
 
 function VisualScreenContent(): ReactElement {

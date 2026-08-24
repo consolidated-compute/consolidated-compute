@@ -4,14 +4,13 @@ import { gotoAppShell } from "../support/helpers/app";
 import { openCommandCenter } from "../support/helpers/command-center";
 import { getE2EDaemonPort } from "../support/helpers/daemon-port";
 import { addConnectedHostAndReload } from "../support/helpers/hosts";
-import { startIsolatedHostDaemon } from "../support/helpers/isolated-host-daemon";
 import { installOperationsHostFixture } from "../support/helpers/operations-host-fixture";
+import {
+  OPERATIONS_RUNTIME_NODE_COUNT,
+  seedOperationsRuntimeScenario,
+} from "../support/helpers/operations-runtime-scenario";
 import { seedWorkspace } from "../support/helpers/seed-client";
 import { getServerId } from "../support/helpers/server-id";
-import {
-  seedParentWithCrossWorkspaceSubagent,
-  seedParentWithSubagent,
-} from "../support/helpers/subagents";
 
 const WIDE_VIEWPORT = { width: 1280, height: 900 };
 const COMPACT_VIEWPORT = { width: 390, height: 844 };
@@ -63,6 +62,57 @@ async function useDarkLargeInterfaceText(page: Page): Promise<void> {
     const stored = JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, unknown>;
     localStorage.setItem(key, JSON.stringify({ ...stored, theme: "dark", uiBaseFontSize: 21 }));
   });
+}
+
+interface VisualProfilerStats {
+  commits: number;
+  actualDurationMs: number;
+}
+
+async function installVisualProfiler(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const scope = globalThis as typeof globalThis & {
+      __PASEO_VISUAL_REACT_STATS__?: VisualProfilerStats;
+    };
+    scope.__PASEO_VISUAL_REACT_STATS__ = { commits: 0, actualDurationMs: 0 };
+  });
+}
+
+async function collectVisualProfilerWindow(page: Page): Promise<VisualProfilerStats> {
+  return page.evaluate(async () => {
+    const scope = globalThis as typeof globalThis & {
+      __PASEO_VISUAL_REACT_STATS__?: VisualProfilerStats;
+    };
+    scope.__PASEO_VISUAL_REACT_STATS__ = { commits: 0, actualDurationMs: 0 };
+    for (let frame = 0; frame < 24; frame += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    return scope.__PASEO_VISUAL_REACT_STATS__;
+  });
+}
+
+async function expectVisualNodeCount(page: Page, expected: number): Promise<void> {
+  await expect
+    .poll(async () => {
+      const managed = await page.locator('[data-testid^="visual-agent-"]').count();
+      const provider = await page.locator('[data-testid^="visual-provider-subagent-"]').count();
+      return managed + provider;
+    })
+    .toBe(expected);
+}
+
+async function readVisualOverflow(page: Page): Promise<{
+  clientHeight: number;
+  clientWidth: number;
+  scrollHeight: number;
+  scrollWidth: number;
+}> {
+  return page.getByTestId("visual-scroll").evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    clientWidth: element.clientWidth,
+    scrollHeight: element.scrollHeight,
+    scrollWidth: element.scrollWidth,
+  }));
 }
 
 test.describe("Operations", () => {
@@ -128,99 +178,38 @@ test.describe("Operations", () => {
   test("shows a multi-host hierarchy and navigates from every app entry point", async ({
     page,
   }, testInfo) => {
-    const primaryServerId = getServerId();
-    const primary = await seedWorkspace({
-      repoPrefix: "operations-primary-",
-      title: "Primary operations workspace",
+    const scenario = await seedOperationsRuntimeScenario(page, {
+      prefix: "operations",
+      primaryWorkspaceTitle: "Primary operations workspace",
+      secondaryWorkspaceTitle: "Secondary operations workspace",
+      primaryHostLabel: "Primary operations host",
+      secondaryHostLabel: "Secondary operations host",
     });
-    const secondaryDaemon = await startIsolatedHostDaemon("operations-secondary");
-    const secondary = await seedWorkspace({
-      repoPrefix: "operations-secondary-",
-      title: "Secondary operations workspace",
-      port: secondaryDaemon.port,
-    });
+    const {
+      primaryServerId,
+      primary,
+      secondary,
+      secondaryDaemon,
+      sameWorkspace,
+      crossWorkspace,
+      secondaryAgent,
+      reviewAgent,
+      questionAgent,
+      duplicateProviderSubagentId,
+      primaryFixture,
+      secondaryFixture,
+    } = scenario;
 
     try {
-      const sameWorkspace = await seedParentWithSubagent(primary, {
-        parentTitle: "Primary parent",
-        childTitle: "Nested helper",
-      });
-      const crossWorkspace = await seedParentWithCrossWorkspaceSubagent(primary, {
-        parentTitle: "Release parent",
-        childTitle: "Cross-workspace helper",
-      });
-      const secondaryAgent = await secondary.client.createAgent({
-        provider: "mock",
-        cwd: secondary.repoPath,
-        workspaceId: secondary.workspaceId,
-        title: "Secondary host worker",
-        modeId: "load-test",
-        model: "five-minute-stream",
-        initialPrompt: "stay running",
-      });
-      await secondary.client.waitForAgentUpsert(
-        secondaryAgent.id,
-        (snapshot) => snapshot.status === "running",
-        15_000,
-      );
-      const reviewAgent = await primary.client.createAgent({
-        provider: "mock",
-        cwd: primary.repoPath,
-        workspaceId: primary.workspaceId,
-        title: "Completed work to review",
-        modeId: "load-test",
-        model: "ten-second-stream",
-        featureValues: { mockAssistantResponse: "Ready for review." },
-        initialPrompt: "Complete this work for review.",
-      });
-      const completedReview = await primary.client.waitForFinish(reviewAgent.id, 15_000);
-      expect(completedReview.status).toBe("idle");
-
-      const now = new Date().toISOString();
-      const duplicateProviderSubagentId = "duplicate-provider-child";
-      const primaryFixture = await installOperationsHostFixture(page, {
-        port: getE2EDaemonPort(),
-        providerSubagents: [
-          {
-            id: duplicateProviderSubagentId,
-            parentAgentId: sameWorkspace.parent.id,
-            provider: "codex",
-            title: "Provider-native reviewer",
-            description: "Review the primary host changes",
-            status: "failed",
-            createdAt: now,
-            updatedAt: now,
-            toolCallId: "primary-provider-call",
-            subtitle: "Primary host native child",
-          },
-        ],
-      });
-      const secondaryFixture = await installOperationsHostFixture(page, {
-        port: secondaryDaemon.port,
-        providerSubagents: [
-          {
-            id: duplicateProviderSubagentId,
-            parentAgentId: secondaryAgent.id,
-            provider: "claude",
-            title: "Provider-native explorer",
-            description: "Inspect the secondary host",
-            status: "completed",
-            createdAt: now,
-            updatedAt: now,
-            toolCallId: "secondary-provider-call",
-            subtitle: "Secondary host native child",
-          },
-        ],
-      });
-
+      await installVisualProfiler(page);
       await page.setViewportSize(WIDE_VIEWPORT);
       await gotoAppShell(page);
       expect(primaryFixture.providerSnapshotRequestCount()).toBe(0);
       await addConnectedHostAndReload(page, {
         serverId: secondaryDaemon.serverId,
-        label: "Secondary operations host",
+        label: scenario.secondaryHostLabel,
         port: secondaryDaemon.port,
-        primaryLabel: "Primary operations host",
+        primaryLabel: scenario.primaryHostLabel,
       });
 
       await test.step("Command Center opens the global route", async () => {
@@ -238,7 +227,7 @@ test.describe("Operations", () => {
       });
 
       await test.step("wide view groups projects, workspaces, agents, and subagents", async () => {
-        await expectSummaryTotal(page, 8);
+        await expectSummaryTotal(page, OPERATIONS_RUNTIME_NODE_COUNT);
         await expectProviderSnapshotRequests(primaryFixture, 2);
         await expectProviderSnapshotRequests(secondaryFixture, 2);
         await expect(
@@ -269,6 +258,9 @@ test.describe("Operations", () => {
         await expect(
           page.getByTestId(`operations-agent-${primaryServerId}-${reviewAgent.id}`),
         ).toContainText("Attention");
+        await expect(
+          page.getByTestId(`operations-agent-${primaryServerId}-${questionAgent.id}`),
+        ).toContainText("Needs input");
         await expect(
           page.getByTestId(
             `operations-provider-subagent-${primaryServerId}-${sameWorkspace.parent.id}-${duplicateProviderSubagentId}`,
@@ -304,6 +296,10 @@ test.describe("Operations", () => {
         expect(viewportBox).not.toBeNull();
         expect(sceneBox).not.toBeNull();
         expect(sceneBox!.width).toBeCloseTo(viewportBox!.width, 0);
+        await expectVisualNodeCount(page, OPERATIONS_RUNTIME_NODE_COUNT);
+        for (const state of ["running", "needs_input", "failed", "attention", "done"]) {
+          await expect(page.getByTestId(`visual-node-state-${state}`).first()).toBeVisible();
+        }
         await expect(
           page.getByTestId(`visual-workspace-${primaryServerId}-${primary.workspaceId}`),
         ).toContainText("Primary operations host");
@@ -313,6 +309,9 @@ test.describe("Operations", () => {
         await expect(
           page.getByTestId(`visual-agent-${primaryServerId}-${reviewAgent.id}`),
         ).toContainText("Attention");
+        await expect(
+          page.getByTestId(`visual-agent-${primaryServerId}-${questionAgent.id}`),
+        ).toContainText("Needs input");
         await expect(
           page.getByTestId(`visual-agent-${primaryServerId}-${sameWorkspace.child.id}`),
         ).toContainText("Child of Primary parent");
@@ -340,10 +339,11 @@ test.describe("Operations", () => {
         await expect(page).toHaveURL(/\/visual$/);
         await expect(page.getByTestId("visual-layout-wide")).toBeVisible({ timeout: 30_000 });
 
-        await page
+        const visualWorkspace = page
           .getByTestId(`visual-workspace-${secondaryDaemon.serverId}-${secondary.workspaceId}`)
-          .getByRole("button", { name: /^Secondary operations workspace on / })
-          .click();
+          .getByRole("button", { name: /^Secondary operations workspace on / });
+        await visualWorkspace.focus();
+        await visualWorkspace.press("Enter");
         await expect(page).toHaveURL(
           new RegExp(
             `/h/${secondaryDaemon.serverId}/workspace/${encodeURIComponent(secondary.workspaceId)}`,
@@ -405,6 +405,40 @@ test.describe("Operations", () => {
         await expect(page).toHaveURL(/\/operations$/);
       });
 
+      await test.step("route switches own one renderer, request, and idle commit budget", async () => {
+        let expectedPrimaryRequests = primaryFixture.providerSnapshotRequestCount();
+        let expectedSecondaryRequests = secondaryFixture.providerSnapshotRequestCount();
+        let idleVisual: VisualProfilerStats | null = null;
+        let unfocusedVisual: VisualProfilerStats | null = null;
+
+        for (let cycle = 0; cycle < 3; cycle += 1) {
+          await page.locator('[data-testid="sidebar-visual"]:visible').click();
+          await expect(page.getByTestId("visual-screen")).toBeVisible({ timeout: 30_000 });
+          await expect(page.getByTestId("operations-screen")).toHaveCount(0);
+          expectedPrimaryRequests += 1;
+          expectedSecondaryRequests += 1;
+          await expectProviderSnapshotRequests(primaryFixture, expectedPrimaryRequests);
+          await expectProviderSnapshotRequests(secondaryFixture, expectedSecondaryRequests);
+          if (cycle === 0) idleVisual = await collectVisualProfilerWindow(page);
+
+          await page.locator('[data-testid="sidebar-operations"]:visible').click();
+          await expect(page.getByTestId("operations-screen")).toBeVisible({ timeout: 30_000 });
+          await expect(page.getByTestId("visual-screen")).toHaveCount(0);
+          expectedPrimaryRequests += 1;
+          expectedSecondaryRequests += 1;
+          await expectProviderSnapshotRequests(primaryFixture, expectedPrimaryRequests);
+          await expectProviderSnapshotRequests(secondaryFixture, expectedSecondaryRequests);
+          if (cycle === 0) unfocusedVisual = await collectVisualProfilerWindow(page);
+        }
+
+        expect(idleVisual).toEqual({ commits: 0, actualDurationMs: 0 });
+        expect(unfocusedVisual).toEqual({ commits: 0, actualDurationMs: 0 });
+        await testInfo.attach("visual-react-profiler", {
+          body: Buffer.from(JSON.stringify({ idleVisual, unfocusedVisual }, null, 2)),
+          contentType: "application/json",
+        });
+      });
+
       await test.step("compact sidebar preserves the same global route", async () => {
         await page.setViewportSize(COMPACT_VIEWPORT);
         await expect(page.getByTestId("operations-screen")).toBeVisible();
@@ -418,7 +452,7 @@ test.describe("Operations", () => {
         await page.locator('[data-testid="sidebar-operations"]:visible').click();
         await expect(page).toHaveURL(/\/operations$/);
         await expect(page.getByTestId("sidebar-close")).not.toBeVisible();
-        await expectSummaryTotal(page, 8);
+        await expectSummaryTotal(page, OPERATIONS_RUNTIME_NODE_COUNT);
         await expect(page.getByTestId("operations-refresh")).toBeVisible();
         await capture(page, testInfo, "operations-compact");
 
@@ -435,6 +469,9 @@ test.describe("Operations", () => {
         expect(compactViewportBox).not.toBeNull();
         expect(compactSceneBox).not.toBeNull();
         expect(compactSceneBox!.width).toBeCloseTo(compactViewportBox!.width, 0);
+        const compactOverflow = await readVisualOverflow(page);
+        expect(compactOverflow.scrollHeight).toBeGreaterThan(compactOverflow.clientHeight);
+        expect(compactOverflow.scrollWidth).toBeLessThanOrEqual(compactOverflow.clientWidth + 1);
         await capture(page, testInfo, "visual-compact");
 
         await page.getByRole("button", { name: "Open menu", exact: true }).click();
@@ -446,7 +483,7 @@ test.describe("Operations", () => {
         await useDarkLargeInterfaceText(page);
         await reloadWithoutResettingHosts(page);
         await expect(page.getByTestId("operations-screen")).toBeVisible({ timeout: 30_000 });
-        await expectSummaryTotal(page, 8);
+        await expectSummaryTotal(page, OPERATIONS_RUNTIME_NODE_COUNT);
         await expect(
           page.getByTestId(
             `operations-provider-subagent-${secondaryDaemon.serverId}-${secondaryAgent.id}-${duplicateProviderSubagentId}`,
@@ -492,6 +529,18 @@ test.describe("Operations", () => {
           page.getByTestId(`operations-agent-${secondaryDaemon.serverId}-${secondaryAgent.id}`),
         ).toContainText("Last known");
 
+        await page.getByRole("button", { name: "Open menu", exact: true }).click();
+        await page.locator('[data-testid="sidebar-visual"]:visible').click();
+        await expect(page.getByTestId("visual-partial-hosts")).toBeVisible({ timeout: 30_000 });
+        await expect(
+          page.getByTestId(`visual-agent-${secondaryDaemon.serverId}-${secondaryAgent.id}`),
+        ).toContainText("Last known");
+        await page.getByRole("button", { name: "Open menu", exact: true }).click();
+        await page.locator('[data-testid="sidebar-operations"]:visible').click();
+        await expect(page.getByTestId("operations-partial-hosts")).toBeVisible({
+          timeout: 30_000,
+        });
+
         secondaryFixture.restoreAgentDirectoryRequests();
         await page.getByTestId("operations-refresh").click();
         await expect(page.getByTestId("operations-refresh-failed")).toHaveCount(0, {
@@ -522,9 +571,7 @@ test.describe("Operations", () => {
         ).toContainText("Last known");
       });
     } finally {
-      await secondary.cleanup().catch(() => undefined);
-      await secondaryDaemon.close().catch(() => undefined);
-      await primary.cleanup().catch(() => undefined);
+      await scenario.cleanup();
     }
   });
 });
