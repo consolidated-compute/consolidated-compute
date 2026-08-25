@@ -487,6 +487,26 @@ describe("TeamRepository runs", () => {
     expect(completed.teamSnapshot).toEqual(definition);
   });
 
+  test("preserves frozen snapshots when an updater mutates its input", async () => {
+    const run = await repository.createRun(createRunInput(definition));
+    currentTimestamp = secondTimestamp;
+
+    const updated = await repository.updateRun(run.id, (current) => {
+      current.teamSnapshot.name = "Rewritten Team";
+      current.workspace.displayName = "rewritten/workspace";
+      current.steps[0]!.snapshot.roleName = "Rewritten role";
+      current.steps[1]!.snapshot.acceptedLaunch.model = "rewritten-model";
+      return succeededRunState(current);
+    });
+
+    expect(updated.teamSnapshot).toEqual(run.teamSnapshot);
+    expect(updated.workspace).toEqual(run.workspace);
+    expect(updated.steps.map((step) => step.snapshot)).toEqual(
+      run.steps.map((step) => step.snapshot),
+    );
+    await expect(repository.getRun(run.id)).resolves.toEqual(updated);
+  });
+
   test("notifies observers after durable run creation and updates", async () => {
     const changes: TeamRepositoryChange[] = [];
     repository.subscribe((change) => changes.push(change));

@@ -321,18 +321,23 @@ export class TeamRepository {
   async updateRun(runId: string, updater: TeamRunUpdater): Promise<PersistedTeamRunRecord> {
     return this.serializeMutation(async () => {
       const current = await this.requireRun(runId);
+      const preserved = PersistedTeamRunRecordSchema.parse(current);
       const update = await updater(current);
       const run = PersistedTeamRunRecordSchema.parse({
-        ...current,
+        ...preserved,
         ...update,
-        id: current.id,
-        teamId: current.teamId,
-        teamRevision: current.teamRevision,
-        idempotencyKey: current.idempotencyKey,
-        teamSnapshot: current.teamSnapshot,
-        objective: current.objective,
-        workspace: current.workspace,
-        createdAt: current.createdAt,
+        id: preserved.id,
+        teamId: preserved.teamId,
+        teamRevision: preserved.teamRevision,
+        idempotencyKey: preserved.idempotencyKey,
+        teamSnapshot: preserved.teamSnapshot,
+        objective: preserved.objective,
+        workspace: preserved.workspace,
+        steps: update.steps.map((step, index) => ({
+          snapshot: preserved.steps[index]?.snapshot,
+          state: step.state,
+        })),
+        createdAt: preserved.createdAt,
         updatedAt: this.now().toISOString(),
       });
       await this.writeJson(this.runPath(run.id), run);
