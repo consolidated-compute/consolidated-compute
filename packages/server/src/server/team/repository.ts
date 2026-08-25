@@ -1,5 +1,5 @@
 import { mkdir, readFile, readdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { z } from "zod";
 
@@ -105,6 +105,8 @@ const TeamRunCursorSchema = z
 
 type TeamRunCursor = z.infer<typeof TeamRunCursorSchema>;
 
+const mutationTails = new Map<string, Promise<unknown>>();
+
 export class TeamNotFoundError extends Error {
   readonly code = "team_not_found";
 
@@ -183,12 +185,13 @@ export class TeamRepository {
   private readonly now: () => Date;
   private readonly writeJson: (filePath: string, value: unknown) => Promise<void>;
   private readonly listeners = new Set<TeamRepositoryListener>();
-  private mutationTail: Promise<unknown> = Promise.resolve();
+  private readonly mutationKey: string;
 
   constructor(options: TeamRepositoryOptions) {
-    const teamsDir = join(options.paseoHome, "teams");
+    const teamsDir = resolve(options.paseoHome, "teams");
     this.definitionsDir = join(teamsDir, "definitions");
     this.runsDir = join(teamsDir, "runs");
+    this.mutationKey = teamsDir;
     this.now = options.now ?? (() => new Date());
     this.writeJson = options.writeJson ?? writeJsonFileAtomic;
   }
@@ -472,9 +475,16 @@ export class TeamRepository {
   }
 
   private async serializeMutation<T>(mutation: () => Promise<T>): Promise<T> {
-    const next = this.mutationTail.catch(() => undefined).then(mutation);
-    this.mutationTail = next;
-    return next;
+    const previous = mutationTails.get(this.mutationKey) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(mutation);
+    mutationTails.set(this.mutationKey, next);
+    try {
+      return await next;
+    } finally {
+      if (mutationTails.get(this.mutationKey) === next) {
+        mutationTails.delete(this.mutationKey);
+      }
+    }
   }
 
   private publish(change: TeamRepositoryChange): void {
@@ -493,7 +503,7 @@ function compareDefinitionsNewestFirst(
   left: PersistedTeamDefinition,
   right: PersistedTeamDefinition,
 ): number {
-  const createdAtOrder = right.createdAt.localeCompare(left.createdAt);
+  const createdAtOrder = Date.parse(right.createdAt) - Date.parse(left.createdAt);
   return createdAtOrder || right.id.localeCompare(left.id);
 }
 
@@ -501,7 +511,7 @@ function compareRunsNewestFirst(
   left: PersistedTeamRunRecord,
   right: PersistedTeamRunRecord,
 ): number {
-  const createdAtOrder = right.createdAt.localeCompare(left.createdAt);
+  const createdAtOrder = Date.parse(right.createdAt) - Date.parse(left.createdAt);
   return createdAtOrder || right.id.localeCompare(left.id);
 }
 
@@ -536,8 +546,10 @@ function decodeRunCursor(token: string, teamId: string | null): TeamRunCursor {
 }
 
 function isRunAfterCursor(run: PersistedTeamRunRecord, cursor: TeamRunCursor): boolean {
-  if (run.createdAt < cursor.createdAt) return true;
-  if (run.createdAt > cursor.createdAt) return false;
+  const runCreatedAt = Date.parse(run.createdAt);
+  const cursorCreatedAt = Date.parse(cursor.createdAt);
+  if (runCreatedAt < cursorCreatedAt) return true;
+  if (runCreatedAt > cursorCreatedAt) return false;
   return run.id < cursor.id;
 }
 

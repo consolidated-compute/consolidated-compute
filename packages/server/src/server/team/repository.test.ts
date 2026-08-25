@@ -204,6 +204,55 @@ describe("TeamRepository definitions", () => {
     await expect(repository.getDefinition(created.id)).resolves.toEqual(fulfilled[0]?.value);
   });
 
+  test("serializes stale-revision updates across repository instances", async () => {
+    const created = await repository.createDefinition(createDefinitionInput());
+    let releaseFirstWrite: (() => void) | null = null;
+    const firstWriteBlocked = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve;
+    });
+    let firstWriteEntered: (() => void) | null = null;
+    const firstWriteStarted = new Promise<void>((resolve) => {
+      firstWriteEntered = resolve;
+    });
+    const firstRepository = new TeamRepository({
+      paseoHome,
+      now: () => new Date(secondTimestamp),
+      writeJson: async (filePath, value) => {
+        firstWriteEntered?.();
+        await firstWriteBlocked;
+        await writeJsonFileAtomic(filePath, value);
+      },
+    });
+    const secondRepository = new TeamRepository({
+      paseoHome,
+      now: () => new Date(secondTimestamp),
+    });
+
+    const firstUpdate = firstRepository.updateDefinition({
+      teamId: created.id,
+      expectedRevision: 1,
+      patch: { name: "First instance" },
+    });
+    await firstWriteStarted;
+    const secondUpdate = secondRepository.updateDefinition({
+      teamId: created.id,
+      expectedRevision: 1,
+      patch: { name: "Second instance" },
+    });
+    releaseFirstWrite?.();
+    const outcomes = await Promise.allSettled([firstUpdate, secondUpdate]);
+
+    expect(outcomes[0]).toMatchObject({ status: "fulfilled" });
+    expect(outcomes[1]).toMatchObject({
+      status: "rejected",
+      reason: { code: "team_revision_conflict", actualRevision: 2 },
+    });
+    await expect(repository.getDefinition(created.id)).resolves.toMatchObject({
+      name: "First instance",
+      revision: 2,
+    });
+  });
+
   test("reports unknown and corrupt files without hiding healthy definitions", async () => {
     const created = await repository.createDefinition(createDefinitionInput());
     const definitionsDir = join(paseoHome, "teams", "definitions");
@@ -486,6 +535,28 @@ describe("TeamRepository runs", () => {
 
     const finalPage = await reloaded.listRuns({ cursor: secondPage.nextCursor!, limit: 2 });
     expect(finalPage).toEqual({ runs: [runs[0]], nextCursor: null, issues: [] });
+  });
+
+  test("orders offset timestamps by their instant across cursor pages", async () => {
+    const older = await repository.createRun(createRunInput(definition, "older"));
+    const newer = await repository.createRun(createRunInput(definition, "newer"));
+    const runsDir = join(paseoHome, "teams", "runs");
+    await writeJsonFileAtomic(join(runsDir, `${older.id}.json`), {
+      ...older,
+      createdAt: "2026-08-25T13:00:00.000+01:00",
+      updatedAt: "2026-08-25T13:00:00.000+01:00",
+    });
+    await writeJsonFileAtomic(join(runsDir, `${newer.id}.json`), {
+      ...newer,
+      createdAt: "2026-08-25T12:30:00.000Z",
+      updatedAt: "2026-08-25T12:30:00.000Z",
+    });
+
+    const firstPage = await repository.listRuns({ limit: 1 });
+    expect(firstPage.runs.map((run) => run.id)).toEqual([newer.id]);
+    const secondPage = await repository.listRuns({ cursor: firstPage.nextCursor!, limit: 1 });
+    expect(secondPage.runs.map((run) => run.id)).toEqual([older.id]);
+    expect(secondPage.nextCursor).toBeNull();
   });
 
   test("binds a run cursor to its Team filter", async () => {
