@@ -54,6 +54,11 @@ $PASEO_HOME/
 │       └── {agentId}.json               # One file per agent
 ├── schedules/
 │   └── {scheduleId}.json                # One file per schedule
+├── teams/
+│   ├── definitions/
+│   │   └── {teamId}.json                # One file per Team definition
+│   └── runs/
+│       └── {teamRunId}.json             # One file per Team Run
 ├── projects/
 │   ├── projects.json                    # Project registry
 │   ├── workspaces.json                  # Workspace registry
@@ -389,7 +394,15 @@ One file per schedule. ID is 8 hex characters.
 
 ---
 
-## 4. Project Registry
+## 4. Team Store
+
+**Paths:** `$PASEO_HOME/teams/definitions/{teamId}.json` and `$PASEO_HOME/teams/runs/{teamRunId}.json`
+
+Definitions and runs use separate atomic JSON files. One repository serializes mutations across both collections so Team revision checks, run idempotency, run snapshots, and deletion checks share one read-modify-write boundary. Reads return valid records together with per-file issues; an unknown or corrupt file never removes healthy records from a list. Mutations that need a complete run index fail closed when a JSON record is unreadable. A leftover atomic-write temp file remains visible as an unknown file but does not block mutations because it was never an authoritative record.
+
+Run cursors use immutable creation time plus run ID and are bound to the optional Team filter. Records are retained indefinitely for v0.2. See [teams.md](teams.md) for ownership and lifecycle rules.
+
+## 5. Project Registry
 
 **Path:** `$PASEO_HOME/projects/projects.json`
 
@@ -424,7 +437,7 @@ workspace together with its owning project.
 
 ---
 
-## 5. Workspace Registry
+## 6. Workspace Registry
 
 **Path:** `$PASEO_HOME/projects/workspaces.json`
 
@@ -483,7 +496,7 @@ than treating it as valid.
 
 ---
 
-## 6. Push Token Store
+## 7. Push Token Store
 
 **Path:** `$PASEO_HOME/push-tokens.json`
 
@@ -497,7 +510,7 @@ Simple set of Expo push notification tokens. Loaded with permissive parsing (fil
 
 ---
 
-## 7. Daemon meta files
+## 8. Daemon meta files
 
 These small files are not validated as full Zod schemas but are persisted under `$PASEO_HOME` for daemon identity and runtime coordination.
 

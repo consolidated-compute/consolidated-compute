@@ -23,7 +23,7 @@ function nonBlankStringSchema(max: number) {
     .refine((value) => value.trim().length > 0, "Must contain non-whitespace characters");
 }
 
-const EntityIdSchema = z
+export const PersistedTeamEntityIdSchema = z
   .string()
   .min(1)
   .max(TEAM_ENTITY_ID_MAX_CHARS)
@@ -41,7 +41,7 @@ export const PersistedTeamLaunchPreferenceSchema = z
 
 export const PersistedTeamRoleSchema = z
   .object({
-    id: EntityIdSchema,
+    id: PersistedTeamEntityIdSchema,
     name: nonBlankStringSchema(TEAM_ROLE_NAME_MAX_CHARS),
     instructions: nonBlankStringSchema(TEAM_INSTRUCTIONS_MAX_CHARS),
     launch: PersistedTeamLaunchPreferenceSchema,
@@ -50,15 +50,15 @@ export const PersistedTeamRoleSchema = z
 
 export const PersistedTeamWorkflowStepSchema = z
   .object({
-    id: EntityIdSchema,
-    roleId: EntityIdSchema,
+    id: PersistedTeamEntityIdSchema,
+    roleId: PersistedTeamEntityIdSchema,
     instructions: nonBlankStringSchema(TEAM_INSTRUCTIONS_MAX_CHARS).nullable(),
   })
   .strict();
 
 export const PersistedTeamDefinitionSchema = z
   .object({
-    id: EntityIdSchema,
+    id: PersistedTeamEntityIdSchema,
     revision: z.number().int().positive(),
     name: nonBlankStringSchema(TEAM_NAME_MAX_CHARS),
     instructions: nonBlankStringSchema(TEAM_INSTRUCTIONS_MAX_CHARS),
@@ -120,8 +120,8 @@ export const PersistedTeamRunWorkspaceSnapshotSchema = z
 
 export const PersistedTeamRunStepSnapshotSchema = z
   .object({
-    stepId: EntityIdSchema,
-    roleId: EntityIdSchema,
+    stepId: PersistedTeamEntityIdSchema,
+    roleId: PersistedTeamEntityIdSchema,
     roleName: nonBlankStringSchema(TEAM_ROLE_NAME_MAX_CHARS),
     roleInstructions: nonBlankStringSchema(TEAM_INSTRUCTIONS_MAX_CHARS),
     stepInstructions: nonBlankStringSchema(TEAM_INSTRUCTIONS_MAX_CHARS).nullable(),
@@ -335,8 +335,8 @@ function requiredCurrentStepStatus(status: TeamRunStatus): TeamRunStepStatus | n
 
 const PersistedTeamRunRecordBaseSchema = z
   .object({
-    id: EntityIdSchema,
-    teamId: EntityIdSchema,
+    id: PersistedTeamEntityIdSchema,
+    teamId: PersistedTeamEntityIdSchema,
     teamRevision: z.number().int().positive(),
     idempotencyKey: nonBlankStringSchema(TEAM_IDEMPOTENCY_KEY_MAX_CHARS),
     teamSnapshot: PersistedTeamDefinitionSchema,
