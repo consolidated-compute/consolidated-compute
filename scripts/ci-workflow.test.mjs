@@ -21,6 +21,14 @@ const androidOperationsReplayPath = new URL(
   "packages/app/e2e/mobile/operations-agent-device/operations-matrix.android.ad",
   repoRoot,
 );
+const iosVisualReplayPath = new URL(
+  "packages/app/e2e/mobile/visual-agent-device/visual-matrix.ios.ad",
+  repoRoot,
+);
+const androidVisualReplayPath = new URL(
+  "packages/app/e2e/mobile/visual-agent-device/visual-matrix.android.ad",
+  repoRoot,
+);
 const upstreamReleaseMonitorPath = new URL(
   ".github/workflows/upstream-release-monitor.yml",
   repoRoot,
@@ -142,7 +150,7 @@ test("change gating allows superseded workflow runs to cancel", () => {
   }
 });
 
-test("mobile Operations keeps native device jobs off pull requests", () => {
+test("mobile Operations and Visual keep native device jobs off pull requests", () => {
   const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
   const jobs = jobBlocks(source);
   const validation = jobs.get("validate")?.join("\n") ?? "";
@@ -162,7 +170,7 @@ test("mobile Operations keeps native device jobs off pull requests", () => {
   }
 });
 
-test("mobile Operations stays isolated from the upstream runner", () => {
+test("mobile Operations and Visual stay isolated from each other and the upstream runner", () => {
   const genericRunner = readFileSync(genericMobileRunnerPath, "utf8");
   const operationsRunner = readFileSync(operationsMobileRunnerPath, "utf8");
 
@@ -171,11 +179,20 @@ test("mobile Operations stays isolated from the upstream runner", () => {
     /OPERATIONS_FIXTURE|PASEO_MOBILE_E2E_PLATFORM|operations-agent-device/,
   );
   assert.match(operationsRunner, /PASEO_MOBILE_E2E_OPERATIONS_FIXTURE:-1/);
+  assert.match(operationsRunner, /PASEO_MOBILE_E2E_MATRIX_SURFACE:-operations/);
   assert.match(operationsRunner, /PASEO_MOBILE_E2E_PLATFORM/);
-  assert.match(operationsRunner, /operations-agent-device/);
+  assert.match(operationsRunner, /\$\{MATRIX_SURFACE\}-agent-device/);
   assert.match(operationsRunner, /\.dev\/operations-agent-device-e2e/);
   assert.match(operationsRunner, /\.dev\/operations-agent-device-artifacts/);
-  assert.match(operationsRunner, /PASEO_MOBILE_E2E_METRO_PORT:-8082/);
+  assert.match(operationsRunner, /DEFAULT_METRO_PORT=8082/);
+  assert.match(operationsRunner, /\.dev\/visual-agent-device-e2e/);
+  assert.match(operationsRunner, /\.dev\/visual-agent-device-artifacts/);
+  assert.match(operationsRunner, /DEFAULT_METRO_PORT=8083/);
+  assert.match(operationsRunner, /EXPO_PUBLIC_PASEO_E2E_VISUAL_MOTION_PROBE=1/);
+  assert.match(
+    operationsRunner,
+    /\[\[ "\$\{PLATFORM\}" == "ios" \]\][\s\S]*EXPO_PUBLIC_PASEO_E2E_FORCE_VISUAL_REDUCED_MOTION=1/,
+  );
   assert.match(operationsRunner, /metro prepare[\s\S]*--no-reuse-existing/);
 });
 
@@ -191,7 +208,33 @@ test("mobile Operations replays keep one cross-platform contract", () => {
   assert.match(iosReplay, /wait "id=\\"menu-button\\"" 45000/);
 });
 
-test("mobile Operations reuses native development apps", () => {
+test("mobile Visual replays keep one cross-platform accessibility contract", () => {
+  const iosReplay = readFileSync(iosVisualReplayPath, "utf8");
+  const androidReplay = readFileSync(androidVisualReplayPath, "utf8");
+  const normalizePlatform = (source) =>
+    source
+      .replace(/^context platform=(ios|android)/, "context platform=native")
+      .replace(/^settings animations off\n/m, "");
+
+  assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
+  assert.match(iosReplay, /open "\$\{APP_ID\}" "paseo:\/\/visual" --relaunch/);
+  assert.doesNotMatch(iosReplay, /settings animations off/);
+  assert.match(androidReplay, /settings animations off/);
+  assert.match(iosReplay, /orientation landscape-left/);
+  assert.match(iosReplay, /orientation landscape-left[\s\S]*visual-viewport/);
+  assert.doesNotMatch(
+    iosReplay,
+    /orientation landscape-left\nwait[^\n]+\nwait "id=\\"visual-layout-compact/,
+  );
+  assert.match(iosReplay, /wait "id=\\"visual-motion-reduced\\"" 10000/);
+  assert.match(iosReplay, /home\nopen "\$\{APP_ID\}"\nwait "id=\\"visual-screen/);
+  assert.match(iosReplay, /get attrs "id=\\"visual-workspace-open-/);
+  assert.match(iosReplay, /get attrs "id=\\"visual-agent-/);
+  assert.match(iosReplay, /get attrs "id=\\"visual-provider-subagent-/);
+  assert.match(iosReplay, /visual-dark-large-text-reduced-motion\.png/);
+});
+
+test("mobile Operations and Visual reuse native development apps", () => {
   const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
 
   assert.match(source, /actions\/cache\/restore@[a-f0-9]{40}/);
@@ -203,15 +246,19 @@ test("mobile Operations reuses native development apps", () => {
   assert.match(source, /-PreactNativeArchitectures=x86_64/);
   assert.match(source, /packages\/expo-two-way-audio\/ios\/\*\*/);
   assert.match(source, /packages\/expo-two-way-audio\/android\/\*\*/);
+  assert.match(source, /npm run test:e2e:mobile:operations/);
+  assert.match(source, /npm run test:e2e:mobile:visual/);
+  assert.match(source, /EVIDENCE_ROOT\/operations/);
+  assert.match(source, /EVIDENCE_ROOT\/visual/);
   assert.doesNotMatch(source, /hashFiles\('\.github\/workflows\/mobile-operations\.yml'/);
 });
 
-test("mobile Operations bounds Android replay resources", () => {
+test("mobile Operations and Visual bound Android replay resources", () => {
   const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
 
   assert.match(source, /ram-size: 2048M/);
   assert.match(source, /heap-size: 512M/);
-  assert.match(source, /NODE_OPTIONS=--max-old-space-size=2048 npm run test:e2e:mobile:operations/);
+  assert.equal(source.match(/NODE_OPTIONS=--max-old-space-size=2048/g)?.length, 2);
 });
 
 test("fork delivery and write-back jobs stay quarantined", () => {

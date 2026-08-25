@@ -48,6 +48,14 @@ PASEO_MOBILE_E2E_PLATFORM=ios npm run test:e2e:mobile:operations
 
 Use `android` for the Android run. The Operations runner uses its own Agent Device state and artifact directories under `.dev/operations-agent-device-*` and defaults Metro to port `8082`, so it does not stop or overwrite a normal mobile run. Choose another unused `PASEO_MOBILE_E2E_METRO_PORT` when needed; the fixture daemon endpoint is compiled into the bundle, so this runner always starts a fresh Metro process. `.github/workflows/mobile-operations.yml` runs the device matrix on its weekday schedule or by manual dispatch, then retains passing screenshots, timings, JUnit output, logs, and failure diagnostics. Pull requests only validate the workflow and replay contracts; the normal app and browser checks own change-time coverage. The scheduled matrix caches the built development-client `.app` and APK by native inputs; JavaScript-only changes reuse the binaries and still compile the current Metro bundle before replay.
 
+Visual reuses that two-host fixture and cached native app with a separate replay, Agent Device state, artifact directory, and Metro port (`8083` by default):
+
+```bash
+PASEO_MOBILE_E2E_PLATFORM=ios npm run test:e2e:mobile:visual
+```
+
+The Visual replay cold-opens `/visual`, checks rotation and resume, drills into host-qualified Workspace and managed-agent targets, records accessibility attributes for managed and provider-native nodes, and captures light, dark, large-text, and reduced-motion evidence. Android disables the system animation scales. The iOS bundle uses an E2E-only reduced-motion override because Agent Device cannot change that simulator setting. Both replays assert that the Visual working clock is inactive. The scheduled workflow runs Operations and Visual even if one replay fails, then reports the platform job as failed after retaining both evidence directories.
+
 When replay diverges, read its ranked selector suggestions. Edit the script deliberately and rerun it from the beginning. `--update` is retained for compatibility but no longer rewrites scripts.
 
 ## Maestro compatibility
