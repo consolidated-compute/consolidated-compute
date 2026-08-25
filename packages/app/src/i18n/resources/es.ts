@@ -65,7 +65,7 @@ export const es: TranslationResources = {
       agents: "Agentes",
       newAgent: "Nuevo agente",
       open: "Abrir {{name}}",
-      openInSidePanel: "Abrir {{name}} en el panel lateral",
+      openInSidePane: "Abrir {{name}} en el panel lateral",
       openInFocusedPane: "Abrir {{name}} en el panel enfocado",
       addProject: "Agregar proyecto",
       home: "Hogar",
@@ -497,6 +497,7 @@ export const es: TranslationResources = {
     },
     fileActions: {
       openFile: "Abrir archivo",
+      openToSide: "Abrir al lado",
       copyPath: "Copiar ruta",
       copyRelativePath: "Copiar ruta relativa",
       revealIn: "Mostrar en {{target}}",
@@ -663,6 +664,7 @@ export const es: TranslationResources = {
         closeLeft: "Cerca de la izquierda",
         closeRight: "Cerca de la derecha",
         closeOthers: "Cerrar otras pestañas",
+        moveToMain: "Mover al panel principal",
         reloadAgent: "Recargar agente",
         reloadAgentTooltip:
           "Vuelva a cargar el agente para actualizar habilidades, MCP o estado de inicio de sesión.",
@@ -689,7 +691,7 @@ export const es: TranslationResources = {
         terminalProfilesMenu: "Terminal profiles",
         editTerminalProfiles: "Edit profiles",
       },
-      sidePanel: {
+      explorerSidebar: {
         open: "Abrir panel lateral",
         close: "Cerrar panel lateral",
         toggle: "Alternar panel lateral",
@@ -961,6 +963,7 @@ export const es: TranslationResources = {
       },
       diff: {
         openChangesTab: "Abrir la pestaña Cambios",
+        openDiffTab: "Abrir la pestaña Diferencia",
         closeChangesTab: "Cerrar la pestaña Cambios",
         binaryFile: "archivo binario",
         tooLarge: "La diferencia es demasiado grande para mostrarse",
@@ -971,6 +974,7 @@ export const es: TranslationResources = {
         switchToUnified: "Cambiar a diferencia unificada",
         switchToSplit: "Cambiar a diferencia lado a lado",
         options: "Opciones de diferencia",
+        inlineDiff: "Diferencia integrada",
         hideWhitespace: "Ocultar espacios en blanco",
         showWhitespace: "Mostrar espacios en blanco",
         scrollLongLines: "Desplazarse por largas filas",
@@ -1322,6 +1326,12 @@ export const es: TranslationResources = {
     },
   },
   desktop: {
+    windowControls: {
+      minimize: "Minimizar ventana",
+      maximize: "Maximizar ventana",
+      restore: "Restaurar ventana",
+      close: "Cerrar ventana",
+    },
     quitting: {
       title: "Saliendo dePaseo...",
       detail: "Deteniendo el demonio local.",
@@ -1867,6 +1877,7 @@ export const es: TranslationResources = {
     },
     diff: {
       changesLabel: "Cambios",
+      diffLabel: "Diferencia",
       changesSubtitle: "Diferencias del árbol de trabajo",
       commitSubtitle: "Diferencias del commit",
       uncommittedSubtitle: "Cambios sin confirmar",
@@ -1961,6 +1972,7 @@ export const es: TranslationResources = {
     sections: {
       general: "General",
       appearance: "Apariencia",
+      layout: en.settings.sections.layout,
       editor: "Editor",
       shortcuts: "Atajos",
       integrations: "Integraciones",
@@ -1969,6 +1981,7 @@ export const es: TranslationResources = {
       diagnostics: "Diagnóstico",
       about: "Acerca de",
     },
+    layout: en.settings.layout,
     editor: {
       title: "Editor",
       vimKeybindings: "Atajos de Vim",
@@ -2060,11 +2073,6 @@ export const es: TranslationResources = {
         label: "Historial de terminal",
         description: "Líneas mantenidas en el búfer de terminal incorporado",
         accessibilityLabel: "Líneas del historial de terminal",
-      },
-      sidePanelRouting: {
-        label: "Abrir pestañas de apoyo en el panel lateral",
-        description:
-          "Los enlaces a archivos, las solicitudes de incorporación y el progreso de configuración se abren junto a tu trabajo en lugar del panel enfocado",
       },
       autoExpandReasoning: {
         label: "Siempre expandir razonamiento",
@@ -2262,7 +2270,6 @@ export const es: TranslationResources = {
         toggleBothSidebars: "Alternar ambas barras laterales",
         toggleSettings: "Alternar configuración",
         toggleFocusMode: "Alternar modo de enfoque",
-        toggleExplorerPaneMaximization: "Alternar maximización del panel lateral",
         cycleTheme: "Tema del ciclo",
         focusMessageInput: "Entrada de mensaje de enfoque",
         cycleAgentMode: "Alternar modo del agente",
