@@ -562,9 +562,21 @@ function validateRunStepTimestampOrder(run: TeamRunRecordShape, issues: Contract
   const runEndedAt = "endedAt" in run.state ? Date.parse(run.state.endedAt) : null;
   const runStopRequestedAt =
     "stopRequestedAt" in run.state ? Date.parse(run.state.stopRequestedAt) : null;
+  let precedingStepEndedAt: number | null = null;
 
   for (const [index, step] of run.steps.entries()) {
     const path = ["steps", index, "state"];
+    if ("startedAt" in step.state) {
+      const stepStartedAt = Date.parse(step.state.startedAt);
+      const overlapsPrecedingStep =
+        precedingStepEndedAt !== null && stepStartedAt < precedingStepEndedAt;
+      if (overlapsPrecedingStep) {
+        issues.push({
+          path: [...path, "startedAt"],
+          message: "Step startedAt cannot precede the preceding step endedAt",
+        });
+      }
+    }
     if (runStartedAt !== null) {
       if ("startedAt" in step.state && Date.parse(step.state.startedAt) < runStartedAt) {
         issues.push({
@@ -591,6 +603,9 @@ function validateRunStepTimestampOrder(run: TeamRunRecordShape, issues: Contract
           message: "Step stopRequestedAt cannot precede run stopRequestedAt",
         });
       }
+    }
+    if ("endedAt" in step.state) {
+      precedingStepEndedAt = Date.parse(step.state.endedAt);
     }
   }
 }

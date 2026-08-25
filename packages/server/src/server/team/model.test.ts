@@ -496,6 +496,32 @@ describe("Team Run contract", () => {
     );
   });
 
+  test("rejects overlap between sequential steps", () => {
+    const run = createRun();
+    run.steps[0]!.state = {
+      status: "succeeded",
+      plannedAgentId: agentId,
+      agentId,
+      startedAt: timestamp,
+      endedAt: "2026-08-25T12:00:02.000Z",
+    };
+    run.steps[1]!.state = {
+      status: "running",
+      plannedAgentId: secondAgentId,
+      agentId: secondAgentId,
+      startedAt: "2026-08-25T12:00:01.000Z",
+    };
+    run.updatedAt = "2026-08-25T12:00:03.000Z";
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Step startedAt cannot precede the preceding step endedAt",
+    );
+  });
+
   test("does not admit copied outputs or transcripts", () => {
     const run = { ...createRun(), output: "copied", transcript: [] };
 
