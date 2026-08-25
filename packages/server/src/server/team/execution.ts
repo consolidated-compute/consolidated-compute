@@ -189,6 +189,13 @@ export async function preflightTeamRun(
   return { workspace: workspaceSnapshot(currentWorkspace), steps };
 }
 
+export async function revalidateTeamRunWorkspace(
+  workspaceRegistry: TeamWorkspaceStore,
+  expectedWorkspace: TeamRunWorkspaceSnapshot,
+): Promise<void> {
+  await requireActiveWorkspace(workspaceRegistry, expectedWorkspace.workspaceId, expectedWorkspace);
+}
+
 interface ProviderCatalogRead {
   models: AgentModelDefinition[] | null;
   error: string | null;

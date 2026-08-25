@@ -8,6 +8,7 @@ import type { WorkspaceMutation, WorkspaceTerminationBoundary } from "../workspa
 import {
   executeTeamStep,
   preflightTeamRun,
+  revalidateTeamRunWorkspace,
   TeamExecutionPreflightError,
   type TeamAgentProfileConfigStore,
   type TeamAgentStream,
@@ -188,32 +189,47 @@ export class TeamRunService {
       },
       { definition, workspaceId: input.workspaceId },
     );
-    return this.serializeAdmission(async () => {
-      const acceptedExisting = await this.repository.getRunByIdempotency(
-        input.teamId,
-        input.idempotencyKey,
-      );
-      if (acceptedExisting) return acceptedExisting;
-      this.requireAcceptingStarts();
-
-      const run = await this.repository.createRun({
-        teamId: input.teamId,
-        expectedRevision: input.expectedRevision,
-        idempotencyKey: input.idempotencyKey,
-        objective: input.objective,
-        workspace: accepted.workspace,
-        steps: accepted.steps,
-      });
-      this.launchExecution(run.id);
-      return run;
-    });
+    return this.withWorkspaceOperation(input.workspaceId, () =>
+      this.serializeAdmission(async () => {
+        const acceptedExisting = await this.repository.getRunByIdempotency(
+          input.teamId,
+          input.idempotencyKey,
+        );
+        if (acceptedExisting) return acceptedExisting;
+        this.requireAcceptingStarts();
+        await revalidateTeamRunWorkspace(this.workspaceRegistry, accepted.workspace);
+        const run = await this.repository.createRun({
+          teamId: input.teamId,
+          expectedRevision: input.expectedRevision,
+          idempotencyKey: input.idempotencyKey,
+          objective: input.objective,
+          workspace: accepted.workspace,
+          steps: accepted.steps,
+        });
+        this.launchExecution(run.id);
+        return run;
+      }),
+    );
   }
 
   async cancelRun(runId: string): Promise<PersistedTeamRunRecord> {
     const run = await this.requireRun(runId);
     if (isTerminalTeamRunStatus(run.state.status)) return run;
-    this.requestTermination(runId, "cancel");
-    return this.stopActiveRun(runId);
+    const stopped = await this.withWorkspaceOperation(run.workspace.workspaceId, async () => {
+      const current = await this.requireRun(runId);
+      if (isTerminalTeamRunStatus(current.state.status)) return current;
+      this.requestTermination(runId, "cancel");
+      return this.stopActiveRun(runId, false);
+    });
+    if (stopped.state.status === "stop_failed" || isTerminalTeamRunStatus(stopped.state.status)) {
+      return stopped;
+    }
+    await this.executions.get(runId);
+    const settled = await this.requireRun(runId);
+    if (!isTerminalTeamRunStatus(settled.state.status) && settled.state.status !== "stop_failed") {
+      return this.finishTermination(runId, this.terminationRequests.get(runId) ?? "cancel");
+    }
+    return settled;
   }
 
   async waitForRun(runId: string): Promise<PersistedTeamRunRecord> {
@@ -453,6 +469,7 @@ export class TeamRunService {
       const reason = this.requestedTerminationReason(latest);
       if (!isTerminal && !reason) return false;
       await events.return(undefined);
+      if (latest.state.status === "stop_failed") return true;
       if (!isTerminal) await this.finishTermination(runId, reason ?? "cancel");
       return true;
     });
@@ -558,9 +575,38 @@ export class TeamRunService {
         throw new Error(`Team Run ${run.id} stopped before agent creation`);
       }
       const created = await this.createAgent(input);
-      await this.persistAgentCreated(run.id, stepIndex, agentId);
+      let persisted: PersistedTeamRunRecord;
+      try {
+        persisted = await this.persistAgentCreated(run.id, stepIndex, agentId);
+      } catch (error) {
+        await this.cancelUnadmittedAgent(run.id, agentId);
+        throw error;
+      }
+      if (
+        isTerminalTeamRunStatus(persisted.state.status) ||
+        this.requestedTerminationReason(persisted)
+      ) {
+        await this.cancelUnadmittedAgent(run.id, agentId);
+      }
       return created;
     });
+  }
+
+  private async cancelUnadmittedAgent(runId: string, agentId: string): Promise<void> {
+    try {
+      const cancellation = await this.cancelAgentRun(agentId);
+      if (cancellation.status === "refused") {
+        this.logger.error(
+          { runId, agentId },
+          "Cancellation was refused for an unadmitted Team step agent",
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        { err: error, runId, agentId },
+        "Failed to cancel an unadmitted Team step agent",
+      );
+    }
   }
 
   private async persistPermissionState(
@@ -660,7 +706,10 @@ export class TeamRunService {
     });
   }
 
-  private async stopActiveRun(runId: string): Promise<PersistedTeamRunRecord> {
+  private async stopActiveRun(
+    runId: string,
+    waitForExecution = true,
+  ): Promise<PersistedTeamRunRecord> {
     const reason = this.terminationRequests.get(runId) ?? "cancel";
     const timestamp = this.timestamp();
     let agentIdToCancel: string | null = null;
@@ -725,7 +774,7 @@ export class TeamRunService {
       return updated;
     }
 
-    if (reason !== "shutdown") await this.executions.get(runId);
+    if (reason !== "shutdown" && waitForExecution) await this.executions.get(runId);
     return this.requireRun(runId);
   }
 

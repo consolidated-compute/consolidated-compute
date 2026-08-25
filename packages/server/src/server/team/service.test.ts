@@ -20,7 +20,7 @@ import {
   type WorkspaceMutation,
   type WorkspaceTerminationBoundary,
 } from "../workspace-registry.js";
-import type { TeamProviderCatalog } from "./execution.js";
+import { TeamExecutionPreflightError, type TeamProviderCatalog } from "./execution.js";
 import type { PersistedTeamDefinition, PersistedTeamRunRecord } from "./model.js";
 import {
   TeamRepository,
@@ -282,6 +282,7 @@ interface QueuedEvent {
 
 class MemoryAgentRuntime {
   readonly creations: CreateAgentFromMcpInput[] = [];
+  readonly cancellations: string[] = [];
   readonly streams: Array<{ agentId: string; prompt: AgentPromptInput }> = [];
   readonly finalResponses = new Map<string, string | null>();
   cancellation: AgentRunCancellationResult = { status: "settled" };
@@ -335,6 +336,7 @@ class MemoryAgentRuntime {
   }
 
   async cancelAgentRun(agentId: string): Promise<AgentRunCancellationResult> {
+    this.cancellations.push(agentId);
     if (this.cancellation.status === "settled") {
       void this.pushEvent(agentId, {
         type: "turn_canceled",
@@ -496,6 +498,29 @@ describe("TeamRunService", () => {
     expect(harness.runtime.streams[1]?.prompt).not.toContain("Review passed.");
   });
 
+  test("rejects admission when the Workspace archives after the preflight read", async () => {
+    const harness = await createHarness();
+    harness.providerCatalog.blockRefresh = true;
+    const refreshStarted = harness.providerCatalog.waitForRefresh();
+    const starting = startRun(harness, "archive-during-admission").catch((error) => error);
+    await refreshStarted;
+
+    harness.workspaceRegistry.blockNextGet = true;
+    const staleReadStarted = harness.workspaceRegistry.waitForBlockedGet();
+    harness.providerCatalog.unblockRefresh();
+    await staleReadStarted;
+    await harness.workspaceRegistry.archive("wks_team_service");
+    harness.workspaceRegistry.unblockGet();
+
+    const error = await starting;
+    expect(error).toBeInstanceOf(TeamExecutionPreflightError);
+    expect((error as TeamExecutionPreflightError).issues).toEqual([
+      { kind: "workspace_archived", workspaceId: "wks_team_service" },
+    ]);
+    expect(await harness.repository.listActiveRuns()).toEqual([]);
+    expect(harness.runtime.creations).toEqual([]);
+  });
+
   test("persists permission wait and resume without launching the later role", async () => {
     const harness = await createHarness();
     const run = await startRun(harness);
@@ -602,15 +627,41 @@ describe("TeamRunService", () => {
       plannedAgentId: firstAgentId,
       startedAt: timestamp,
     });
-    const stopping = await harness.service.cancelRun(run.id);
-    expect(stopping.state.status).toBe("stopping");
-    expect(stopping.steps[0]?.state).toMatchObject({ status: "stopping", agentId: null });
+    const canceling = harness.service.cancelRun(run.id);
+    expect((await harness.repository.getRun(run.id))?.steps[0]?.state).toEqual(
+      creating?.steps[0]?.state,
+    );
     harness.runtime.unblockCreation();
 
-    const canceled = await harness.service.waitForRun(run.id);
+    const canceled = await canceling;
     expect(canceled.state.status).toBe("canceled");
     expect(harness.runtime.streams).toEqual([]);
     expect(harness.runtime.creations).toHaveLength(1);
+    expect(harness.runtime.cancellations).toEqual([firstAgentId]);
+  });
+
+  test("retains an unadmitted created agent when cancellation is refused", async () => {
+    const harness = await createHarness();
+    harness.runtime.blockCreation = true;
+    harness.runtime.cancellation = { status: "refused" };
+    const run = await startRun(harness);
+    await harness.runtime.waitForCreations(1);
+
+    const canceling = harness.service.cancelRun(run.id);
+    harness.runtime.unblockCreation();
+    const refused = await canceling;
+
+    expect(refused.state.status).toBe("stop_failed");
+    expect(refused.steps[0]?.state).toMatchObject({
+      status: "stop_failed",
+      agentId: firstAgentId,
+    });
+    expect(harness.runtime.streams).toEqual([]);
+
+    harness.runtime.cancellation = { status: "settled" };
+    const canceled = await harness.service.cancelRun(run.id);
+    expect(canceled.state.status).toBe("canceled");
+    expect(harness.runtime.cancellations).toEqual([firstAgentId, firstAgentId]);
   });
 
   test("treats Workspace archive as authoritative cancellation", async () => {
@@ -825,6 +876,7 @@ describe("TeamRunService", () => {
       state: { status: "interrupted" },
     });
     expect(harness.runtime.streams).toEqual([]);
+    expect(harness.runtime.cancellations).toEqual([firstAgentId]);
   });
 
   test("serializes run persistence with the shutdown fence", async () => {
