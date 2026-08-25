@@ -430,6 +430,72 @@ describe("Team Run contract", () => {
     );
   });
 
+  test("rejects a step that starts before its run", () => {
+    const run = createRun();
+    run.state = { status: "running", startedAt: "2026-08-25T12:00:01.000Z" };
+    run.updatedAt = "2026-08-25T12:00:02.000Z";
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Step startedAt cannot precede run startedAt",
+    );
+  });
+
+  test("rejects a step that ends after its run", () => {
+    const run = createRun();
+    run.steps[0]!.state = {
+      status: "succeeded",
+      plannedAgentId: agentId,
+      agentId,
+      startedAt: timestamp,
+      endedAt: "2026-08-25T12:00:02.000Z",
+    };
+    run.steps[1]!.state = { status: "pending" };
+    run.state = {
+      status: "failed",
+      startedAt: timestamp,
+      endedAt: "2026-08-25T12:00:01.000Z",
+      error: "preflight failed",
+    };
+    run.updatedAt = "2026-08-25T12:00:03.000Z";
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Step endedAt cannot follow run endedAt",
+    );
+  });
+
+  test("rejects a step stop request before the run stop request", () => {
+    const run = createRun();
+    run.steps[1]!.state = {
+      status: "stopping",
+      plannedAgentId: secondAgentId,
+      agentId: secondAgentId,
+      startedAt: timestamp,
+      stopRequestedAt: "2026-08-25T12:00:01.000Z",
+    };
+    run.state = {
+      status: "stopping",
+      startedAt: timestamp,
+      stopRequestedAt: "2026-08-25T12:00:02.000Z",
+    };
+    run.updatedAt = "2026-08-25T12:00:03.000Z";
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Step stopRequestedAt cannot precede run stopRequestedAt",
+    );
+  });
+
   test("does not admit copied outputs or transcripts", () => {
     const run = { ...createRun(), output: "copied", transcript: [] };
 

@@ -550,7 +550,49 @@ function validateRunTimestamps(run: TeamRunRecordShape): ContractIssue[] {
   for (const [index, step] of run.steps.entries()) {
     validateStateTimestamps(step.state, ["steps", index, "state"], createdAt, updatedAt, issues);
   }
+  validateRunStepTimestampOrder(run, issues);
   return issues;
+}
+
+function validateRunStepTimestampOrder(run: TeamRunRecordShape, issues: ContractIssue[]): void {
+  const runStartedAt =
+    "startedAt" in run.state && run.state.startedAt !== null
+      ? Date.parse(run.state.startedAt)
+      : null;
+  const runEndedAt = "endedAt" in run.state ? Date.parse(run.state.endedAt) : null;
+  const runStopRequestedAt =
+    "stopRequestedAt" in run.state ? Date.parse(run.state.stopRequestedAt) : null;
+
+  for (const [index, step] of run.steps.entries()) {
+    const path = ["steps", index, "state"];
+    if (runStartedAt !== null) {
+      if ("startedAt" in step.state && Date.parse(step.state.startedAt) < runStartedAt) {
+        issues.push({
+          path: [...path, "startedAt"],
+          message: "Step startedAt cannot precede run startedAt",
+        });
+      }
+    }
+    if (runEndedAt !== null) {
+      if ("endedAt" in step.state && Date.parse(step.state.endedAt) > runEndedAt) {
+        issues.push({
+          path: [...path, "endedAt"],
+          message: "Step endedAt cannot follow run endedAt",
+        });
+      }
+    }
+    if (runStopRequestedAt !== null) {
+      if (
+        "stopRequestedAt" in step.state &&
+        Date.parse(step.state.stopRequestedAt) < runStopRequestedAt
+      ) {
+        issues.push({
+          path: [...path, "stopRequestedAt"],
+          message: "Step stopRequestedAt cannot precede run stopRequestedAt",
+        });
+      }
+    }
+  }
 }
 
 function validateStateTimestamps(
