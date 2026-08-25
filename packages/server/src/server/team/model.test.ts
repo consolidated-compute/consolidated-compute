@@ -492,6 +492,39 @@ describe("Team Run state shapes", () => {
       true,
     );
   });
+
+  test("rejects terminal steps whose created agent differs from the planned identity", () => {
+    const mismatchedAgentId = "d65fc288-0a1b-45a9-b0c8-8346cd1721b3";
+    const states = [
+      {
+        status: "failed",
+        plannedAgentId: agentId,
+        agentId: mismatchedAgentId,
+        startedAt: timestamp,
+        endedAt: timestamp,
+        error: "failed",
+      },
+      {
+        status: "canceled",
+        plannedAgentId: agentId,
+        agentId: mismatchedAgentId,
+        startedAt: timestamp,
+        endedAt: timestamp,
+      },
+      {
+        status: "interrupted",
+        plannedAgentId: agentId,
+        agentId: mismatchedAgentId,
+        startedAt: timestamp,
+        endedAt: timestamp,
+        error: "restart",
+      },
+    ];
+
+    for (const state of states) {
+      expect(PersistedTeamRunStepStateSchema.safeParse(state).success).toBe(false);
+    }
+  });
 });
 
 describe("Team Run transitions", () => {

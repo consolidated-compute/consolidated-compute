@@ -206,18 +206,29 @@ const StopFailedStepStateSchema = z
   })
   .strict();
 
-export const PersistedTeamRunStepStateSchema = z.discriminatedUnion("status", [
-  PendingStepStateSchema,
-  CreatingStepStateSchema,
-  RunningStepStateSchema,
-  WaitingForPermissionStepStateSchema,
-  StoppingStepStateSchema,
-  SucceededStepStateSchema,
-  FailedStepStateSchema,
-  CanceledStepStateSchema,
-  InterruptedStepStateSchema,
-  StopFailedStepStateSchema,
-]);
+export const PersistedTeamRunStepStateSchema = z
+  .discriminatedUnion("status", [
+    PendingStepStateSchema,
+    CreatingStepStateSchema,
+    RunningStepStateSchema,
+    WaitingForPermissionStepStateSchema,
+    StoppingStepStateSchema,
+    SucceededStepStateSchema,
+    FailedStepStateSchema,
+    CanceledStepStateSchema,
+    InterruptedStepStateSchema,
+    StopFailedStepStateSchema,
+  ])
+  .superRefine((state, context) => {
+    if (!("plannedAgentId" in state)) return;
+    if (!("agentId" in state)) return;
+    if (state.agentId === null || state.agentId === state.plannedAgentId) return;
+    context.addIssue({
+      code: "custom",
+      path: ["agentId"],
+      message: "agentId must match plannedAgentId",
+    });
+  });
 
 export const PersistedTeamRunStepSchema = z
   .object({
