@@ -5327,6 +5327,60 @@ test("createAgent fails when explicit agent ID is not a UUID", async () => {
   ).rejects.toThrow("createAgent: agentId must be a UUID");
 });
 
+test("createAgent reserves fresh explicit IDs before provider creation", async () => {
+  const agentId = "00000000-0000-4000-8000-000000000101";
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-test-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const firstClient = new TestAgentClient();
+  const firstManager = new AgentManager({
+    clients: { codex: firstClient },
+    registry: storage,
+    logger,
+  });
+
+  const creations = await Promise.allSettled([
+    firstManager.createAgent({ provider: "codex", cwd: workdir }, agentId, {
+      workspaceId: undefined,
+      requireFreshAgentId: true,
+    }),
+    firstManager.createAgent({ provider: "codex", cwd: workdir }, agentId, {
+      workspaceId: undefined,
+      requireFreshAgentId: true,
+    }),
+  ]);
+
+  expect(creations.map((creation) => creation.status).sort()).toEqual(["fulfilled", "rejected"]);
+  expect(firstClient.createdConfigs).toHaveLength(1);
+  expect(creations.find((creation) => creation.status === "rejected")).toMatchObject({
+    reason: { message: `Agent with id ${agentId} already exists` },
+  });
+
+  firstManager.prepareForShutdown();
+  await firstManager.closeAgent(agentId);
+  await firstManager.flushForShutdown();
+  await storage.flush();
+  const stored = await storage.get(agentId);
+  const secondClient = new TestAgentClient();
+  const secondManager = new AgentManager({
+    clients: { codex: secondClient },
+    registry: storage,
+    logger,
+  });
+
+  await expect(
+    secondManager.createAgent({ provider: "codex", cwd: workdir }, agentId, {
+      workspaceId: undefined,
+      requireFreshAgentId: true,
+    }),
+  ).rejects.toThrow(`Agent with id ${agentId} already exists`);
+  expect(secondClient.createdConfigs).toHaveLength(0);
+  expect(await storage.get(agentId)).toEqual(stored);
+
+  secondManager.prepareForShutdown();
+  await secondManager.flushForShutdown();
+  rmSync(workdir, { recursive: true, force: true });
+});
+
 test("createAgent persists provided title before returning", async () => {
   const agentId = "00000000-0000-4000-8000-000000000102";
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-test-"));
