@@ -347,6 +347,22 @@ describe("Team Run contract", () => {
     expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
   });
 
+  test("accepts cancellation while the current agent is still being created", () => {
+    const run = createRun();
+    run.steps[0]!.state = {
+      status: "canceled",
+      plannedAgentId: agentId,
+      agentId: null,
+      startedAt: timestamp,
+      endedAt: timestamp,
+    };
+    run.steps[1]!.state = { status: "pending" };
+    run.state = { status: "canceled", startedAt: timestamp, endedAt: timestamp };
+
+    expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
+    expect(canTransitionTeamRunStep("creating", "canceled")).toBe(true);
+  });
+
   test("rejects terminal timestamps before their start", () => {
     const run = createRun();
     run.steps[0]!.state = {
@@ -448,7 +464,13 @@ describe("Team Run state shapes", () => {
         endedAt: timestamp,
         error: "failed",
       },
-      { status: "canceled", agentId, startedAt: timestamp, endedAt: timestamp },
+      {
+        status: "canceled",
+        plannedAgentId: agentId,
+        agentId,
+        startedAt: timestamp,
+        endedAt: timestamp,
+      },
       {
         status: "interrupted",
         plannedAgentId: agentId,

@@ -180,7 +180,8 @@ const FailedStepStateSchema = z
 const CanceledStepStateSchema = z
   .object({
     status: z.literal("canceled"),
-    agentId: z.guid(),
+    plannedAgentId: z.guid(),
+    agentId: z.guid().nullable(),
     startedAt: TimestampSchema,
     endedAt: TimestampSchema,
   })
@@ -660,7 +661,7 @@ const TEAM_RUN_STEP_TRANSITIONS: Readonly<
   Record<TeamRunStepStatus, ReadonlySet<TeamRunStepStatus>>
 > = {
   pending: new Set(["creating"]),
-  creating: new Set(["running", "stopping", "failed", "interrupted"]),
+  creating: new Set(["running", "stopping", "failed", "canceled", "interrupted"]),
   running: new Set([
     "waiting_for_permission",
     "stopping",
