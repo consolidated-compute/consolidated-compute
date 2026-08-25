@@ -28,7 +28,7 @@ const EntityIdSchema = z
   .min(1)
   .max(TEAM_ENTITY_ID_MAX_CHARS)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
-const WorkspaceProjectIdSchema = z.string().min(1).max(8_192);
+const WorkspaceRegistryIdSchema = nonBlankStringSchema(8_192);
 const TimestampSchema = z.string().datetime({ offset: true });
 const ErrorSchema = nonBlankStringSchema(TEAM_ERROR_MAX_CHARS);
 
@@ -111,8 +111,8 @@ export const PersistedTeamDefinitionSchema = z
 
 export const PersistedTeamRunWorkspaceSnapshotSchema = z
   .object({
-    workspaceId: EntityIdSchema,
-    projectId: WorkspaceProjectIdSchema,
+    workspaceId: WorkspaceRegistryIdSchema,
+    projectId: WorkspaceRegistryIdSchema,
     cwd: z.string().min(1).max(8_192),
     displayName: nonBlankStringSchema(512),
   })
@@ -125,7 +125,7 @@ export const PersistedTeamRunStepSnapshotSchema = z
     roleName: nonBlankStringSchema(TEAM_ROLE_NAME_MAX_CHARS),
     roleInstructions: nonBlankStringSchema(TEAM_INSTRUCTIONS_MAX_CHARS),
     stepInstructions: nonBlankStringSchema(TEAM_INSTRUCTIONS_MAX_CHARS).nullable(),
-    resolvedLaunch: PersistedTeamLaunchPreferenceSchema,
+    acceptedLaunch: PersistedTeamLaunchPreferenceSchema,
   })
   .strict();
 
@@ -366,9 +366,9 @@ function stepSnapshotMatchesRole(
   const instructionsMatch =
     step.snapshot.roleInstructions === role.instructions &&
     step.snapshot.stepInstructions === workflowStep.instructions;
-  const providerMatches = step.snapshot.resolvedLaunch.provider === role.launch.provider;
+  const providerMatches = step.snapshot.acceptedLaunch.provider === role.launch.provider;
   const modelMatches =
-    role.launch.model === null || step.snapshot.resolvedLaunch.model === role.launch.model;
+    role.launch.model === null || step.snapshot.acceptedLaunch.model === role.launch.model;
   return identityMatches && instructionsMatch && providerMatches && modelMatches;
 }
 
@@ -510,25 +510,66 @@ function validateStateTimestamps(
   updatedAt: number,
   issues: ContractIssue[],
 ): void {
-  if (!("startedAt" in state) || state.startedAt === null) return;
-  const startedAt = Date.parse(state.startedAt);
-  if (startedAt < createdAt) {
-    issues.push({ path: [...path, "startedAt"], message: "startedAt cannot precede createdAt" });
+  const stateStartedAt = "startedAt" in state ? state.startedAt : null;
+  let startedAt: number | null = null;
+  if (stateStartedAt !== null) {
+    startedAt = validateTimestampBounds(
+      stateStartedAt,
+      "startedAt",
+      path,
+      createdAt,
+      updatedAt,
+      issues,
+    );
   }
-  if ("stopRequestedAt" in state && Date.parse(state.stopRequestedAt) < startedAt) {
-    issues.push({
-      path: [...path, "stopRequestedAt"],
-      message: "stopRequestedAt cannot precede startedAt",
-    });
+  if ("stopRequestedAt" in state) {
+    const stopRequestedAt = validateTimestampBounds(
+      state.stopRequestedAt,
+      "stopRequestedAt",
+      path,
+      createdAt,
+      updatedAt,
+      issues,
+    );
+    if (startedAt !== null && stopRequestedAt < startedAt) {
+      issues.push({
+        path: [...path, "stopRequestedAt"],
+        message: "stopRequestedAt cannot precede startedAt",
+      });
+    }
   }
   if (!("endedAt" in state)) return;
-  const endedAt = Date.parse(state.endedAt);
-  if (endedAt < startedAt) {
+  const endedAt = validateTimestampBounds(
+    state.endedAt,
+    "endedAt",
+    path,
+    createdAt,
+    updatedAt,
+    issues,
+  );
+  if (startedAt !== null && endedAt < startedAt) {
     issues.push({ path: [...path, "endedAt"], message: "endedAt cannot precede startedAt" });
   }
-  if (endedAt > updatedAt) {
-    issues.push({ path: [...path, "endedAt"], message: "endedAt cannot follow updatedAt" });
+}
+
+type LifecycleTimestampField = "startedAt" | "stopRequestedAt" | "endedAt";
+
+function validateTimestampBounds(
+  value: string,
+  field: LifecycleTimestampField,
+  path: (string | number)[],
+  createdAt: number,
+  updatedAt: number,
+  issues: ContractIssue[],
+): number {
+  const timestamp = Date.parse(value);
+  if (timestamp < createdAt) {
+    issues.push({ path: [...path, field], message: `${field} cannot precede createdAt` });
   }
+  if (timestamp > updatedAt) {
+    issues.push({ path: [...path, field], message: `${field} cannot follow updatedAt` });
+  }
+  return timestamp;
 }
 
 export const PersistedTeamRunRecordSchema = PersistedTeamRunRecordBaseSchema.superRefine(

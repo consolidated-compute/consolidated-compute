@@ -78,7 +78,7 @@ function createRun(team = createTeam()): PersistedTeamRunRecord {
           roleName: "Planner",
           roleInstructions: "Inspect the objective and produce a bounded plan.",
           stepInstructions: null,
-          resolvedLaunch: { provider: "codex", model: "gpt-5.6" },
+          acceptedLaunch: { provider: "codex", model: "gpt-5.6" },
         },
         state: {
           status: "succeeded",
@@ -94,7 +94,7 @@ function createRun(team = createTeam()): PersistedTeamRunRecord {
           roleName: "Implementer",
           roleInstructions: "Implement the accepted plan and verify the change.",
           stepInstructions: "Keep the diff focused.",
-          resolvedLaunch: { provider: "codex", model: "gpt-5.6" },
+          acceptedLaunch: { provider: "codex", model: "gpt-5.6" },
         },
         state: {
           status: "running",
@@ -192,9 +192,16 @@ describe("Team Run contract", () => {
     expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
   });
 
-  test("requires an explicit model preference in the resolved launch", () => {
+  test("preserves legacy path-shaped Workspace IDs in the Workspace snapshot", () => {
     const run = createRun();
-    run.steps[0]!.snapshot.resolvedLaunch.model = null;
+    run.workspace.workspaceId = "/Users/example/legacy workspace";
+
+    expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
+  });
+
+  test("requires an explicit model preference in the accepted launch", () => {
+    const run = createRun();
+    run.steps[0]!.snapshot.acceptedLaunch.model = null;
 
     const result = PersistedTeamRunRecordSchema.safeParse(run);
 
@@ -203,6 +210,13 @@ describe("Team Run contract", () => {
     expect(result.error.issues.map((issue) => issue.message)).toContain(
       "Run step snapshot must match its frozen Team role and workflow step",
     );
+  });
+
+  test("allows a null accepted model when the role has no model preference", () => {
+    const run = createRun();
+    run.steps[1]!.snapshot.acceptedLaunch.model = null;
+
+    expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
   });
 
   test("rejects more than one active sequential step", () => {
@@ -297,6 +311,47 @@ describe("Team Run contract", () => {
     if (result.success) return;
     expect(result.error.issues.map((issue) => issue.message)).toContain(
       "endedAt cannot precede startedAt",
+    );
+  });
+
+  test("rejects a pre-start terminal timestamp outside the record bounds", () => {
+    const run = createRun();
+    run.steps[1]!.state = { status: "pending" };
+    run.state = {
+      status: "canceled",
+      startedAt: null,
+      endedAt: "2026-08-25T11:59:59.000Z",
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "endedAt cannot precede createdAt",
+    );
+  });
+
+  test("rejects active timestamps after the record update", () => {
+    const run = createRun();
+    run.steps[1]!.state = {
+      status: "stopping",
+      agentId: "d65fc288-0a1b-45a9-b0c8-8346cd1721b3",
+      startedAt: timestamp,
+      stopRequestedAt: "2026-08-25T12:00:01.000Z",
+    };
+    run.state = {
+      status: "stopping",
+      startedAt: timestamp,
+      stopRequestedAt: "2026-08-25T12:00:01.000Z",
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "stopRequestedAt cannot follow updatedAt",
     );
   });
 

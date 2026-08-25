@@ -20,7 +20,7 @@ A Team has:
 
 The first workflow is sequential. A role may appear in more than one step. A step may add instructions for that occurrence. There are no conditions, retries, or fan-out.
 
-The saved provider/model values are preferences, not an availability claim. Team authoring uses the host catalog. Run acceptance validates every step against the selected Workspace catalog and freezes the resolved launch values.
+The saved provider/model values are preferences, not an availability claim. Team authoring uses the host catalog. Run acceptance validates every step against the selected Workspace catalog and freezes the accepted launch values. A null accepted model means that the provider exposes or owns no concrete model selection; it does not make a model ID required for providers that run without one.
 
 A Team does not own a Workspace. Starting a run supplies an opaque `workspaceId`; the daemon resolves its persisted `cwd` and snapshots the Workspace identity. Never infer or recover a Workspace from a client-supplied path.
 
