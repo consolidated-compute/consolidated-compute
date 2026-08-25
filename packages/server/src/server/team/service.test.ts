@@ -494,6 +494,35 @@ describe("TeamRunService", () => {
     expect(harness.runtime.creations).toHaveLength(1);
   });
 
+  test("keeps Workspace termination authoritative when final-step cancellation is refused", async () => {
+    const harness = await createHarness();
+    const run = await startRun(harness);
+    await harness.runtime.waitForStream(firstAgentId);
+    harness.runtime.finalResponses.set(firstAgentId, "Builder finished.");
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+    });
+    await harness.runtime.waitForStream(secondAgentId);
+    harness.runtime.cancellation = { status: "refused" };
+
+    await harness.workspaceRegistry.archive("wks_team_service");
+    expect((await harness.repository.getRun(run.id))?.state.status).toBe("stop_failed");
+
+    harness.runtime.finalResponses.set(secondAgentId, "Review finished after termination.");
+    await harness.runtime.pushEvent(secondAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+    });
+
+    const canceled = await harness.service.waitForRun(run.id);
+    expect(canceled.state.status).toBe("canceled");
+    expect(canceled.steps).toMatchObject([
+      { state: { status: "succeeded", agentId: firstAgentId } },
+      { state: { status: "canceled", agentId: secondAgentId } },
+    ]);
+  });
+
   test("fences starts and interrupts unsettled work during shutdown", async () => {
     const harness = await createHarness();
     const run = await startRun(harness);
@@ -509,6 +538,37 @@ describe("TeamRunService", () => {
       agentId: firstAgentId,
     });
     await expect(startRun(harness, "after-shutdown")).rejects.toBeInstanceOf(
+      TeamRunServiceShuttingDownError,
+    );
+  });
+
+  test("serializes run persistence with the shutdown fence", async () => {
+    const harness = await createHarness();
+    const originalCreateRun = harness.repository.createRun.bind(harness.repository);
+    let releaseCreateRun: (() => void) | undefined;
+    let reportCreateRunEntered: (() => void) | undefined;
+    const createRunEntered = new Promise<void>((resolve) => {
+      reportCreateRunEntered = resolve;
+    });
+    const createRunReleased = new Promise<void>((resolve) => {
+      releaseCreateRun = resolve;
+    });
+    harness.repository.createRun = async (input) => {
+      reportCreateRunEntered?.();
+      await createRunReleased;
+      return originalCreateRun(input);
+    };
+
+    const starting = startRun(harness, "shutdown-race");
+    await createRunEntered;
+    const shuttingDown = harness.service.shutdown();
+    releaseCreateRun?.();
+
+    const run = await starting;
+    await shuttingDown;
+
+    expect((await harness.repository.getRun(run.id))?.state.status).toBe("interrupted");
+    await expect(startRun(harness, "after-raced-shutdown")).rejects.toBeInstanceOf(
       TeamRunServiceShuttingDownError,
     );
   });

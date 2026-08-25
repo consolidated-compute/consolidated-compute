@@ -106,6 +106,7 @@ export class TeamRunService {
   private readonly createAgentId: () => string;
   private readonly executions = new Map<string, Promise<void>>();
   private readonly terminationRequests = new Map<string, TeamRunTerminationReason>();
+  private admissionTail: Promise<unknown> = Promise.resolve();
   private unsubscribeWorkspaceMutations: (() => void) | null = null;
   private acceptingStarts = false;
   private initialized = false;
@@ -164,18 +165,25 @@ export class TeamRunService {
       },
       { definition, workspaceId: input.workspaceId },
     );
-    this.requireAcceptingStarts();
+    return this.serializeAdmission(async () => {
+      const acceptedExisting = await this.repository.getRunByIdempotency(
+        input.teamId,
+        input.idempotencyKey,
+      );
+      if (acceptedExisting) return acceptedExisting;
+      this.requireAcceptingStarts();
 
-    const run = await this.repository.createRun({
-      teamId: input.teamId,
-      expectedRevision: input.expectedRevision,
-      idempotencyKey: input.idempotencyKey,
-      objective: input.objective,
-      workspace: accepted.workspace,
-      steps: accepted.steps,
+      const run = await this.repository.createRun({
+        teamId: input.teamId,
+        expectedRevision: input.expectedRevision,
+        idempotencyKey: input.idempotencyKey,
+        objective: input.objective,
+        workspace: accepted.workspace,
+        steps: accepted.steps,
+      });
+      this.launchExecution(run.id);
+      return run;
     });
-    this.launchExecution(run.id);
-    return run;
   }
 
   async cancelRun(runId: string): Promise<PersistedTeamRunRecord> {
@@ -191,7 +199,9 @@ export class TeamRunService {
   }
 
   async shutdown(): Promise<void> {
-    this.acceptingStarts = false;
+    await this.serializeAdmission(async () => {
+      this.acceptingStarts = false;
+    });
     this.unsubscribeWorkspaceMutations?.();
     this.unsubscribeWorkspaceMutations = null;
 
@@ -207,6 +217,15 @@ export class TeamRunService {
 
   private requireAcceptingStarts(): void {
     if (!this.acceptingStarts) throw new TeamRunServiceShuttingDownError();
+  }
+
+  private serializeAdmission<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.admissionTail.then(operation, operation);
+    this.admissionTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   private launchExecution(runId: string): void {
@@ -473,6 +492,16 @@ export class TeamRunService {
         return unchangedRun(run);
       }
       if (step.state.agentId === null) return unchangedRun(run);
+      const reason = this.terminationRequests.get(runId);
+      if (reason) {
+        return {
+          steps: replaceStep(run.steps, stepIndex, {
+            ...step,
+            state: terminationStepState(step, reason, timestamp),
+          }),
+          state: terminalBoundaryState(run, reason, timestamp),
+        };
+      }
       const succeededStep: TeamRunStep = {
         ...step,
         state: {
@@ -493,12 +522,6 @@ export class TeamRunService {
             endedAt: timestamp,
           },
         };
-      }
-
-      const reason = this.terminationRequests.get(runId);
-      if (reason) {
-        const steps = replaceStep(run.steps, stepIndex, succeededStep);
-        return { steps, state: terminalBoundaryState(run, reason, timestamp) };
       }
 
       advanced = true;
@@ -601,26 +624,11 @@ export class TeamRunService {
         return { steps: run.steps, state: terminalBoundaryState(run, reason, timestamp, detail) };
       }
       if (!("plannedAgentId" in active.step.state)) return unchangedRun(run);
-      const agentId = "agentId" in active.step.state ? active.step.state.agentId : null;
-      const state: PersistedTeamRunStepState =
-        reason === "shutdown"
-          ? {
-              status: "interrupted",
-              plannedAgentId: active.step.state.plannedAgentId,
-              agentId,
-              startedAt: active.step.state.startedAt,
-              endedAt: timestamp,
-              error: boundedError(detail ?? "Daemon interrupted Team Run execution"),
-            }
-          : {
-              status: "canceled",
-              plannedAgentId: active.step.state.plannedAgentId,
-              agentId,
-              startedAt: active.step.state.startedAt,
-              endedAt: timestamp,
-            };
       return {
-        steps: replaceStep(run.steps, active.index, { ...active.step, state }),
+        steps: replaceStep(run.steps, active.index, {
+          ...active.step,
+          state: terminationStepState(active.step, reason, timestamp, detail),
+        }),
         state: terminalBoundaryState(run, reason, timestamp, detail),
       };
     });
@@ -738,6 +746,35 @@ function terminalBoundaryState(
     };
   }
   return { status: "canceled", startedAt, endedAt };
+}
+
+function terminationStepState(
+  step: TeamRunStep,
+  reason: TeamRunTerminationReason,
+  endedAt: string,
+  detail?: string,
+): PersistedTeamRunStepState {
+  if (!("plannedAgentId" in step.state)) {
+    throw new Error(`Team step ${step.snapshot.stepId} has no planned agent ID`);
+  }
+  const agentId = "agentId" in step.state ? step.state.agentId : null;
+  if (reason === "shutdown") {
+    return {
+      status: "interrupted",
+      plannedAgentId: step.state.plannedAgentId,
+      agentId,
+      startedAt: step.state.startedAt,
+      endedAt,
+      error: boundedError(detail ?? "Daemon interrupted Team Run execution"),
+    };
+  }
+  return {
+    status: "canceled",
+    plannedAgentId: step.state.plannedAgentId,
+    agentId,
+    startedAt: step.state.startedAt,
+    endedAt,
+  };
 }
 
 function boundedError(message: string): string {
