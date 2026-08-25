@@ -1,9 +1,12 @@
 import { PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import type { AgentProfile } from "@getpaseo/protocol/messages";
 import { describe, expect, test } from "vitest";
 
 import type {
+  AgentFeature,
   AgentModelDefinition,
   AgentPromptInput,
+  AgentSessionConfig,
   AgentStreamEvent,
 } from "../agent/agent-sdk-types.js";
 import type { CreateAgentFromMcpInput } from "../agent/create-agent/create.js";
@@ -27,6 +30,7 @@ import {
   preflightTeamRun,
   type AcceptedTeamRunFacts,
   type TeamAgentStream,
+  type TeamFeatureCatalog,
   type TeamProviderCatalog,
   type TeamRunPreflightDependencies,
   type TeamStepExecutionDependencies,
@@ -48,13 +52,13 @@ function createDefinition(): PersistedTeamDefinition {
         id: "role_builder",
         name: "Builder",
         instructions: "Implement the requested change.",
-        launch: { provider: "codex", model: "latest" },
+        profileId: "profile_builder",
       },
       {
         id: "role_reviewer",
         name: "Reviewer",
         instructions: "Review the implementation.",
-        launch: { provider: "claude", model: null },
+        profileId: "profile_reviewer",
       },
     ],
     workflow: [
@@ -68,6 +72,25 @@ function createDefinition(): PersistedTeamDefinition {
     createdAt: firstTimestamp,
     updatedAt: firstTimestamp,
   });
+}
+
+function createProfiles(): AgentProfile[] {
+  return [
+    {
+      id: "profile_builder",
+      name: "Codex Builder",
+      provider: " codex ",
+      model: " latest ",
+      modeId: " workspace-write ",
+      thinkingOptionId: " high ",
+      featureValues: { fast_mode: true },
+    },
+    {
+      id: "profile_reviewer",
+      name: "Claude Reviewer",
+      provider: "claude",
+    },
+  ];
 }
 
 function createWorkspace() {
@@ -105,11 +128,27 @@ class MemoryProviderCatalog implements TeamProviderCatalog {
   readonly reads: CatalogRead[] = [];
   readonly models = new Map<string, AgentModelDefinition[]>();
   readonly errors = new Map<string, Error>();
+  readonly createConfigErrors = new Map<string, Error>();
+  readonly createConfigReads: Array<{
+    cwd: string | null | undefined;
+    provider: string;
+    requestedMode: string | undefined;
+    featureValues: Record<string, unknown> | undefined;
+  }> = [];
+  readonly modes = new Map<string, string[]>();
 
   constructor() {
     this.models.set("codex", [
-      { provider: "codex", id: "gpt-5.6", label: "GPT-5.6", aliases: ["latest"] },
+      {
+        provider: "codex",
+        id: "gpt-5.6",
+        label: "GPT-5.6",
+        aliases: ["latest"],
+        thinkingOptions: [{ id: "high", label: "High" }],
+      },
     ]);
+    this.modes.set("codex", ["workspace-write"]);
+    this.modes.set("claude", []);
     this.models.set("claude", [
       { provider: "claude", id: "sonnet", label: "Sonnet", isDefault: true },
     ]);
@@ -128,6 +167,60 @@ class MemoryProviderCatalog implements TeamProviderCatalog {
     const error = this.errors.get(input.provider);
     if (error) throw error;
     return this.models.get(input.provider) ?? [];
+  }
+
+  async resolveCreateConfig(input: Parameters<TeamProviderCatalog["resolveCreateConfig"]>[0]) {
+    this.createConfigReads.push({
+      cwd: input.cwd,
+      provider: input.provider,
+      requestedMode: input.requestedMode,
+      featureValues: input.featureValues,
+    });
+    const error = this.createConfigErrors.get(input.provider);
+    if (error) throw error;
+    if (input.requestedMode && !this.modes.get(input.provider)?.includes(input.requestedMode)) {
+      throw new Error(`Invalid mode '${input.requestedMode}' for provider '${input.provider}'`);
+    }
+    return { modeId: input.requestedMode, featureValues: input.featureValues };
+  }
+}
+
+class MemoryAgentProfileConfigStore {
+  agentProfiles = createProfiles();
+
+  get() {
+    return { agentProfiles: this.agentProfiles };
+  }
+}
+
+class MemoryFeatureCatalog implements TeamFeatureCatalog {
+  readonly reads: AgentSessionConfig[] = [];
+  readonly features = new Map<string, AgentFeature[]>([
+    [
+      "codex",
+      [
+        { type: "toggle", id: "fast_mode", label: "Fast", value: false },
+        {
+          type: "select",
+          id: "approval_policy",
+          label: "Approval policy",
+          value: null,
+          options: [
+            { id: "ask", label: "Ask" },
+            { id: "never", label: "Never" },
+          ],
+        },
+      ],
+    ],
+    ["claude", []],
+  ]);
+  readonly errors = new Map<string, Error>();
+
+  async listDraftFeatures(config: AgentSessionConfig): Promise<AgentFeature[]> {
+    this.reads.push(config);
+    const error = this.errors.get(config.provider);
+    if (error) throw error;
+    return this.features.get(config.provider) ?? [];
   }
 }
 
@@ -152,6 +245,8 @@ class MemoryAgentStream implements TeamAgentStream {
 interface ExecutionHarness {
   workspaceStore: MemoryWorkspaceStore;
   providerCatalog: MemoryProviderCatalog;
+  featureCatalog: MemoryFeatureCatalog;
+  daemonConfigStore: MemoryAgentProfileConfigStore;
   agentStream: MemoryAgentStream;
   creations: CreateAgentFromMcpInput[];
   preflightDependencies: TeamRunPreflightDependencies;
@@ -161,20 +256,28 @@ interface ExecutionHarness {
 function createHarness(): ExecutionHarness {
   const workspaceStore = new MemoryWorkspaceStore(createWorkspace());
   const providerCatalog = new MemoryProviderCatalog();
+  const featureCatalog = new MemoryFeatureCatalog();
+  const daemonConfigStore = new MemoryAgentProfileConfigStore();
   const agentStream = new MemoryAgentStream();
   const creations: CreateAgentFromMcpInput[] = [];
   const preflightDependencies = {
     workspaceRegistry: workspaceStore,
     providerCatalog,
+    featureCatalog,
+    daemonConfigStore,
   };
   return {
     workspaceStore,
     providerCatalog,
+    featureCatalog,
+    daemonConfigStore,
     agentStream,
     creations,
     preflightDependencies,
     executionDependencies: {
-      ...preflightDependencies,
+      workspaceRegistry: workspaceStore,
+      providerCatalog,
+      featureCatalog,
       createAgent: async (input) => {
         creations.push(input);
       },
@@ -211,7 +314,7 @@ async function collectEvents(
 }
 
 describe("Team Run preflight", () => {
-  test("uses the active Workspace and freezes accepted models for every step", async () => {
+  test("resolves host profiles and freezes their complete launch facts", async () => {
     const harness = createHarness();
     const definition = createDefinition();
 
@@ -226,9 +329,23 @@ describe("Team Run preflight", () => {
       cwd: "/repo/worktree",
       displayName: "Team workspace",
     });
-    expect(accepted.steps.map((step) => step.snapshot.acceptedLaunch)).toEqual([
-      { provider: "codex", model: "gpt-5.6" },
-      { provider: "claude", model: "sonnet" },
+    expect(accepted.steps.map((step) => step.snapshot.resolvedLaunch)).toEqual([
+      {
+        profileId: "profile_builder",
+        provider: "codex",
+        model: "gpt-5.6",
+        modeId: "workspace-write",
+        thinkingOptionId: "high",
+        featureValues: { fast_mode: true },
+      },
+      {
+        profileId: "profile_reviewer",
+        provider: "claude",
+        model: "sonnet",
+        modeId: null,
+        thinkingOptionId: null,
+        featureValues: {},
+      },
     ]);
     expect(harness.providerCatalog.refreshes).toEqual([
       { cwd: "/repo/worktree", providers: ["codex", "claude"] },
@@ -237,7 +354,182 @@ describe("Team Run preflight", () => {
       { cwd: "/repo/worktree", provider: "codex", wait: false },
       { cwd: "/repo/worktree", provider: "claude", wait: false },
     ]);
+    expect(harness.providerCatalog.createConfigReads).toEqual([
+      {
+        cwd: "/repo/worktree",
+        provider: "codex",
+        requestedMode: "workspace-write",
+        featureValues: { fast_mode: true },
+      },
+      {
+        cwd: "/repo/worktree",
+        provider: "claude",
+        requestedMode: undefined,
+        featureValues: undefined,
+      },
+    ]);
+    expect(harness.featureCatalog.reads).toEqual([
+      {
+        provider: "codex",
+        cwd: "/repo/worktree",
+        model: "gpt-5.6",
+        modeId: "workspace-write",
+        thinkingOptionId: "high",
+        featureValues: { fast_mode: true },
+      },
+    ]);
     expect(harness.workspaceStore.reads).toEqual(["wks_team_test", "wks_team_test"]);
+  });
+
+  test("keeps a Team visible but refuses a missing profile without fallback", async () => {
+    const harness = createHarness();
+    harness.daemonConfigStore.agentProfiles = [
+      {
+        id: "some_other_profile",
+        name: "Some other profile",
+        provider: "codex",
+      },
+    ];
+
+    await expect(
+      preflightTeamRun(harness.preflightDependencies, {
+        definition: createDefinition(),
+        workspaceId: "wks_team_test",
+      }),
+    ).rejects.toMatchObject({
+      code: "team_execution_preflight_failed",
+      issues: [
+        {
+          kind: "profile_not_found",
+          roleId: "role_builder",
+          profileId: "profile_builder",
+        },
+        {
+          kind: "profile_not_found",
+          roleId: "role_reviewer",
+          profileId: "profile_reviewer",
+        },
+      ],
+    });
+    expect(harness.providerCatalog.refreshes).toEqual([]);
+    expect(harness.providerCatalog.reads).toEqual([]);
+    expect(harness.providerCatalog.createConfigReads).toEqual([]);
+  });
+
+  test("resolves every Team role even when the workflow does not use it", async () => {
+    const harness = createHarness();
+    const definition = createDefinition();
+    definition.roles.push({
+      id: "role_observer",
+      name: "Observer",
+      instructions: "Observe without joining this workflow.",
+      profileId: "profile_observer",
+    });
+
+    await expect(
+      preflightTeamRun(harness.preflightDependencies, {
+        definition,
+        workspaceId: "wks_team_test",
+      }),
+    ).rejects.toMatchObject({
+      code: "team_execution_preflight_failed",
+      issues: [
+        {
+          kind: "profile_not_found",
+          roleId: "role_observer",
+          profileId: "profile_observer",
+        },
+      ],
+    });
+    expect(harness.providerCatalog.refreshes).toEqual([]);
+  });
+
+  test("treats profile display metadata as outside Team launch ownership", async () => {
+    const harness = createHarness();
+    harness.daemonConfigStore.agentProfiles[0] = {
+      ...harness.daemonConfigStore.agentProfiles[0]!,
+      name: "   ",
+    };
+
+    const accepted = await preflightTeamRun(harness.preflightDependencies, {
+      definition: createDefinition(),
+      workspaceId: "wks_team_test",
+    });
+
+    expect(accepted.steps[0]!.snapshot.roleName).toBe("Builder");
+    expect(accepted.steps[0]!.snapshot.resolvedLaunch).not.toHaveProperty("profileName");
+  });
+
+  test("rejects profile settings that the selected Workspace cannot launch", async () => {
+    const harness = createHarness();
+    harness.daemonConfigStore.agentProfiles[0] = {
+      ...harness.daemonConfigStore.agentProfiles[0]!,
+      modeId: "removed-mode",
+    };
+
+    await expect(
+      preflightTeamRun(harness.preflightDependencies, {
+        definition: createDefinition(),
+        workspaceId: "wks_team_test",
+      }),
+    ).rejects.toMatchObject({
+      code: "team_execution_preflight_failed",
+      issues: [
+        {
+          kind: "launch_unavailable",
+          roleId: "role_builder",
+          profileId: "profile_builder",
+          message: "Invalid mode 'removed-mode' for provider 'codex'",
+        },
+      ],
+    });
+    expect(harness.creations).toEqual([]);
+  });
+
+  test("rejects unavailable, mistyped, and invalid feature values", async () => {
+    const cases: Array<{
+      featureValues: Record<string, unknown>;
+      message: string;
+    }> = [
+      {
+        featureValues: { removed_feature: true },
+        message: "Feature 'removed_feature' is not available for this launch",
+      },
+      {
+        featureValues: { fast_mode: "yes" },
+        message: "Feature 'fast_mode' requires a boolean value",
+      },
+      {
+        featureValues: { approval_policy: "always" },
+        message: "Feature 'approval_policy' does not support option 'always'",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const harness = createHarness();
+      harness.daemonConfigStore.agentProfiles[0] = {
+        ...harness.daemonConfigStore.agentProfiles[0]!,
+        featureValues: testCase.featureValues,
+      };
+
+      await expect(
+        preflightTeamRun(harness.preflightDependencies, {
+          definition: createDefinition(),
+          workspaceId: "wks_team_test",
+        }),
+      ).rejects.toMatchObject({
+        code: "team_execution_preflight_failed",
+        issues: [
+          {
+            kind: "launch_unavailable",
+            roleId: "role_builder",
+            profileId: "profile_builder",
+            message: testCase.message,
+          },
+        ],
+      });
+      expect(harness.creations).toEqual([]);
+    }
   });
 
   test("rejects missing and archived Workspaces before catalog access", async () => {
@@ -271,7 +563,8 @@ describe("Team Run preflight", () => {
       issues: [
         {
           kind: "launch_unavailable",
-          stepId: "step_review",
+          roleId: "role_reviewer",
+          profileId: "profile_reviewer",
           provider: "claude",
           message: "Claude is unavailable",
         },
@@ -317,13 +610,20 @@ describe("Team step execution", () => {
         }),
       ),
     ).rejects.toMatchObject({
-      issues: [{ kind: "launch_unavailable", stepId: "step_build", model: "gpt-5.6" }],
+      issues: [
+        {
+          kind: "launch_unavailable",
+          roleId: "role_builder",
+          profileId: "profile_builder",
+          model: "gpt-5.6",
+        },
+      ],
     });
     expect(harness.creations).toEqual([]);
     expect(harness.agentStream.calls).toEqual([]);
   });
 
-  test("owns one stream through denied permission and keeps the frozen canonical model", async () => {
+  test("revalidates frozen feature values before agent creation", async () => {
     const harness = createHarness();
     const definition = createDefinition();
     const accepted = await preflightTeamRun(harness.preflightDependencies, {
@@ -331,8 +631,45 @@ describe("Team step execution", () => {
       workspaceId: "wks_team_test",
     });
     const run = createRun(definition, accepted);
+    harness.featureCatalog.features.set("codex", []);
+
+    await expect(
+      collectEvents(
+        executeTeamStep(harness.executionDependencies, {
+          run,
+          stepId: "step_build",
+          plannedAgentId,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      issues: [
+        {
+          kind: "launch_unavailable",
+          roleId: "role_builder",
+          profileId: "profile_builder",
+          message: "Feature 'fast_mode' is not available for this launch",
+        },
+      ],
+    });
+    expect(harness.creations).toEqual([]);
+  });
+
+  test("owns one stream and launches the frozen profile after that profile is deleted", async () => {
+    const harness = createHarness();
+    const definition = createDefinition();
+    const accepted = await preflightTeamRun(harness.preflightDependencies, {
+      definition,
+      workspaceId: "wks_team_test",
+    });
+    const run = createRun(definition, accepted);
+    harness.daemonConfigStore.agentProfiles = [];
     harness.providerCatalog.models.set("codex", [
-      { provider: "codex", id: "gpt-5.6", label: "GPT-5.6" },
+      {
+        provider: "codex",
+        id: "gpt-5.6",
+        label: "GPT-5.6",
+        thinkingOptions: [{ id: "high", label: "High" }],
+      },
       { provider: "codex", id: "gpt-5.7", label: "GPT-5.7", aliases: ["latest"] },
     ]);
     harness.agentStream.events = [
@@ -404,6 +741,9 @@ describe("Team step execution", () => {
       provider: "codex/gpt-5.6",
       cwd: "/repo/worktree",
       workspaceId: "wks_team_test",
+      mode: "workspace-write",
+      thinking: "high",
+      features: { fast_mode: true },
       title: "Delivery Team: Builder",
       labels: {
         [TEAM_ID_LABEL]: "team_delivery",
@@ -509,7 +849,14 @@ describe("Team step prompt", () => {
       roleName: role.name,
       roleInstructions: role.instructions,
       stepInstructions: null,
-      acceptedLaunch: role.launch,
+      resolvedLaunch: {
+        profileId: role.profileId,
+        provider: "codex",
+        model: "gpt-5.6",
+        modeId: "workspace-write",
+        thinkingOptionId: "high",
+        featureValues: { fast_mode: true },
+      },
     };
     const withoutHandoff = composeTeamStepPrompt({
       teamName: definition.name,

@@ -35,13 +35,13 @@ function createTeam(): PersistedTeamDefinition {
         id: "role_planner",
         name: "Planner",
         instructions: "Inspect the objective and produce a bounded plan.",
-        launch: { provider: "codex", model: "gpt-5.6" },
+        profileId: "profile_planner",
       },
       {
         id: "role_builder",
         name: "Implementer",
         instructions: "Implement the accepted plan and verify the change.",
-        launch: { provider: "codex", model: null },
+        profileId: "profile_builder",
       },
     ],
     workflow: [
@@ -79,7 +79,14 @@ function createRun(team = createTeam()): PersistedTeamRunRecord {
           roleName: "Planner",
           roleInstructions: "Inspect the objective and produce a bounded plan.",
           stepInstructions: null,
-          acceptedLaunch: { provider: "codex", model: "gpt-5.6" },
+          resolvedLaunch: {
+            profileId: "profile_planner",
+            provider: "codex",
+            model: "gpt-5.6",
+            modeId: "plan",
+            thinkingOptionId: "high",
+            featureValues: { web_search: true },
+          },
         },
         state: {
           status: "succeeded",
@@ -96,7 +103,14 @@ function createRun(team = createTeam()): PersistedTeamRunRecord {
           roleName: "Implementer",
           roleInstructions: "Implement the accepted plan and verify the change.",
           stepInstructions: "Keep the diff focused.",
-          acceptedLaunch: { provider: "codex", model: "gpt-5.6" },
+          resolvedLaunch: {
+            profileId: "profile_builder",
+            provider: "codex",
+            model: "gpt-5.6",
+            modeId: null,
+            thinkingOptionId: null,
+            featureValues: {},
+          },
         },
         state: {
           status: "running",
@@ -202,9 +216,9 @@ describe("Team Run contract", () => {
     expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
   });
 
-  test("requires a concrete accepted model for an explicit model preference", () => {
+  test("requires each resolved step to retain its role's profile identity", () => {
     const run = createRun();
-    run.steps[0]!.snapshot.acceptedLaunch.model = null;
+    run.steps[0]!.snapshot.resolvedLaunch.profileId = "profile_other";
 
     const result = PersistedTeamRunRecordSchema.safeParse(run);
 
@@ -215,19 +229,38 @@ describe("Team Run contract", () => {
     );
   });
 
-  test("allows a canonical accepted model for an explicit alias preference", () => {
-    const team = createTeam();
-    team.roles[0]!.launch.model = "latest";
-    const run = createRun(team);
+  test("keeps resolved launch facts independent of later Agent Profile configuration", () => {
+    const run = createRun();
+    run.steps[1]!.snapshot.resolvedLaunch = {
+      ...run.steps[1]!.snapshot.resolvedLaunch,
+      provider: "claude",
+      model: null,
+      modeId: "accept-edits",
+      thinkingOptionId: null,
+      featureValues: { auto_accept: false },
+    };
 
     expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
   });
 
-  test("allows a null accepted model when the role has no model preference", () => {
+  test("rejects non-JSON feature values in frozen launch facts", () => {
     const run = createRun();
-    run.steps[1]!.snapshot.acceptedLaunch.model = null;
+    run.steps[1]!.snapshot.resolvedLaunch.featureValues = {
+      callback: () => undefined,
+    };
 
-    expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toContainEqual([
+      "steps",
+      1,
+      "snapshot",
+      "resolvedLaunch",
+      "featureValues",
+      "callback",
+    ]);
   });
 
   test("rejects more than one active sequential step", () => {
