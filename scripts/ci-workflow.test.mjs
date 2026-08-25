@@ -189,6 +189,10 @@ test("mobile Operations and Visual stay isolated from each other and the upstrea
   assert.match(operationsRunner, /\.dev\/visual-agent-device-artifacts/);
   assert.match(operationsRunner, /DEFAULT_METRO_PORT=8083/);
   assert.match(operationsRunner, /EXPO_PUBLIC_PASEO_E2E_VISUAL_MOTION_PROBE=1/);
+  assert.match(
+    operationsRunner,
+    /\[\[ "\$\{PLATFORM\}" == "ios" \]\][\s\S]*EXPO_PUBLIC_PASEO_E2E_FORCE_VISUAL_REDUCED_MOTION=1/,
+  );
   assert.match(operationsRunner, /metro prepare[\s\S]*--no-reuse-existing/);
 });
 
@@ -208,11 +212,14 @@ test("mobile Visual replays keep one cross-platform accessibility contract", () 
   const iosReplay = readFileSync(iosVisualReplayPath, "utf8");
   const androidReplay = readFileSync(androidVisualReplayPath, "utf8");
   const normalizePlatform = (source) =>
-    source.replace(/^context platform=(ios|android)/, "context platform=native");
+    source
+      .replace(/^context platform=(ios|android)/, "context platform=native")
+      .replace(/^settings animations off\n/m, "");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
   assert.match(iosReplay, /open "\$\{APP_ID\}" "paseo:\/\/visual" --relaunch/);
-  assert.match(iosReplay, /settings animations off/);
+  assert.doesNotMatch(iosReplay, /settings animations off/);
+  assert.match(androidReplay, /settings animations off/);
   assert.match(iosReplay, /orientation landscape-left/);
   assert.match(iosReplay, /orientation landscape-left[\s\S]*visual-viewport/);
   assert.doesNotMatch(

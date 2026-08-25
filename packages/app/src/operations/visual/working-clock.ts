@@ -11,11 +11,14 @@ import {
 import type { VisualNode } from "./topology";
 import { shouldRunVisualWorkingClock } from "./presentation";
 
+const FORCE_REDUCED_MOTION_FOR_E2E =
+  process.env.EXPO_PUBLIC_PASEO_E2E_FORCE_VISUAL_REDUCED_MOTION === "1";
+
 export function useVisualWorkingClock(nodes: readonly VisualNode[]): {
   phase: SharedValue<number>;
   isActive: boolean;
 } {
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = useReducedMotion() || FORCE_REDUCED_MOTION_FOR_E2E;
   const phase = useSharedValue(0);
   const active = shouldRunVisualWorkingClock({
     nodes,

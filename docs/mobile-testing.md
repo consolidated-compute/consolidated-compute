@@ -54,7 +54,7 @@ Visual reuses that two-host fixture and cached native app with a separate replay
 PASEO_MOBILE_E2E_PLATFORM=ios npm run test:e2e:mobile:visual
 ```
 
-The Visual replay cold-opens `/visual`, checks rotation and resume, drills into host-qualified Workspace and managed-agent targets, records accessibility attributes for managed and provider-native nodes, and captures light, dark, large-text, and reduced-motion evidence. The scheduled workflow runs Operations and Visual even if one replay fails, then reports the platform job as failed after retaining both evidence directories.
+The Visual replay cold-opens `/visual`, checks rotation and resume, drills into host-qualified Workspace and managed-agent targets, records accessibility attributes for managed and provider-native nodes, and captures light, dark, large-text, and reduced-motion evidence. Android disables the system animation scales. The iOS bundle uses an E2E-only reduced-motion override because Agent Device cannot change that simulator setting. Both replays assert that the Visual working clock is inactive. The scheduled workflow runs Operations and Visual even if one replay fails, then reports the platform job as failed after retaining both evidence directories.
 
 When replay diverges, read its ranked selector suggestions. Edit the script deliberately and rerun it from the beginning. `--update` is retained for compatibility but no longer rewrites scripts.
 

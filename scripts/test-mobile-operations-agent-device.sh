@@ -33,6 +33,11 @@ esac
 
 if [[ "${MATRIX_SURFACE}" == "visual" ]]; then
   export EXPO_PUBLIC_PASEO_E2E_VISUAL_MOTION_PROBE=1
+  if [[ "${PLATFORM}" == "ios" ]]; then
+    # Agent Device has no iOS command for the system Reduce Motion setting.
+    # Exercise the same presentation path without changing production bundles.
+    export EXPO_PUBLIC_PASEO_E2E_FORCE_VISUAL_REDUCED_MOTION=1
+  fi
 fi
 
 STATE_DIR="${PASEO_MOBILE_E2E_STATE_DIR:-${DEFAULT_STATE_DIR}}"
@@ -58,14 +63,16 @@ cleanup() {
     wait "${FIXTURE_PID}" >/dev/null 2>&1 || true
   fi
   if [[ "${RESET_DEVICE_SETTINGS}" -eq 1 ]]; then
-    AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" settings animations on \
-      >/dev/null 2>&1 || true
     if [[ "${PLATFORM}" == "ios" ]]; then
       xcrun simctl ui booted content_size large >/dev/null 2>&1 || true
       xcrun simctl ui booted appearance light >/dev/null 2>&1 || true
-    elif command -v adb >/dev/null 2>&1; then
-      adb shell settings put system font_scale 1.0 >/dev/null 2>&1 || true
-      adb shell cmd uimode night no >/dev/null 2>&1 || true
+    else
+      AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" settings animations on \
+        >/dev/null 2>&1 || true
+      if command -v adb >/dev/null 2>&1; then
+        adb shell settings put system font_scale 1.0 >/dev/null 2>&1 || true
+        adb shell cmd uimode night no >/dev/null 2>&1 || true
+      fi
     fi
   fi
   if [[ -n "${METRO_LOG_PATH}" && -f "${METRO_LOG_PATH}" ]]; then
