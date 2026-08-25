@@ -296,6 +296,57 @@ describe("Team Run contract", () => {
     expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
   });
 
+  test.each(["canceled", "interrupted"] as const)("rejects an all-succeeded %s run", (status) => {
+    const run = createRun();
+    run.steps[1]!.state = {
+      status: "succeeded",
+      agentId: "d65fc288-0a1b-45a9-b0c8-8346cd1721b3",
+      startedAt: timestamp,
+      endedAt: timestamp,
+    };
+    if (status === "canceled") {
+      run.state = { status, startedAt: timestamp, endedAt: timestamp };
+    } else {
+      run.state = { status, startedAt: timestamp, endedAt: timestamp, error: "restart" };
+    }
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      `A ${status} run requires a matching step or a pending workflow boundary`,
+    );
+  });
+
+  test("rejects a pre-start interrupted run with reached work", () => {
+    const run = createRun();
+    run.steps[1]!.state = { status: "pending" };
+    run.state = {
+      status: "interrupted",
+      startedAt: null,
+      endedAt: timestamp,
+      error: "restart",
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "A pre-start interrupted run can contain only pending steps",
+    );
+  });
+
+  test("accepts cancellation before any step starts", () => {
+    const run = createRun();
+    run.steps[0]!.state = { status: "pending" };
+    run.steps[1]!.state = { status: "pending" };
+    run.state = { status: "canceled", startedAt: null, endedAt: timestamp };
+
+    expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
+  });
+
   test("rejects terminal timestamps before their start", () => {
     const run = createRun();
     run.steps[0]!.state = {

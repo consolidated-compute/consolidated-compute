@@ -399,6 +399,7 @@ function validateRunLifecycle(run: TeamRunRecordShape): ContractIssue[] {
   const issues: ContractIssue[] = [];
   const stepStatuses = run.steps.map((step) => step.state.status);
   issues.push(...validateSequentialStepStatuses(stepStatuses));
+  issues.push(...validateCanceledOrInterruptedOutcome(run, stepStatuses));
   const activeStepCount = stepStatuses.filter((status) => ACTIVE_STEP_STATUSES.has(status)).length;
   if (activeStepCount > 1) {
     issues.push({
@@ -456,6 +457,38 @@ function validateRunLifecycle(run: TeamRunRecordShape): ContractIssue[] {
     });
   }
   return issues;
+}
+
+function validateCanceledOrInterruptedOutcome(
+  run: TeamRunRecordShape,
+  stepStatuses: TeamRunStepStatus[],
+): ContractIssue[] {
+  const status = run.state.status;
+  if (status !== "canceled" && status !== "interrupted") return [];
+
+  const allPending = stepStatuses.every((stepStatus) => stepStatus === "pending");
+  if (run.state.startedAt === null) {
+    if (allPending) return [];
+    return [
+      {
+        path: ["state", "startedAt"],
+        message: `A pre-start ${status} run can contain only pending steps`,
+      },
+    ];
+  }
+
+  const hasMatchingTerminalStep = stepStatuses.includes(status);
+  const hasPendingStep = stepStatuses.includes("pending");
+  const isStepBoundary = stepStatuses.every(
+    (stepStatus) => stepStatus === "succeeded" || stepStatus === "pending",
+  );
+  if (hasMatchingTerminalStep || (hasPendingStep && isStepBoundary)) return [];
+  return [
+    {
+      path: ["state", "status"],
+      message: `A ${status} run requires a matching step or a pending workflow boundary`,
+    },
+  ];
 }
 
 function validateSequentialStepStatuses(statuses: TeamRunStepStatus[]): ContractIssue[] {
