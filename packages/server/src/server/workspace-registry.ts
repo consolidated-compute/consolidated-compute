@@ -105,6 +105,13 @@ export interface WorkspaceMutation {
   expectsInitialAgent?: boolean;
 }
 
+export interface WorkspaceTerminationBoundary {
+  boundaryId: string;
+  phase: "start" | "commit" | "finish";
+  kind: "archive" | "remove";
+  workspaceId: string;
+}
+
 export interface WorkspaceMutationContext {
   expectsInitialAgent?: boolean;
 }
@@ -162,9 +169,20 @@ export interface WorkspaceRegistry {
   subscribeToMutations?(
     listener: (mutation: WorkspaceMutation) => void | Promise<void>,
   ): () => void;
+  /** Synchronous boundary around archive/remove persistence and publication. */
+  subscribeToTerminationBoundaries?(
+    listener: (boundary: WorkspaceTerminationBoundary) => void | Promise<void>,
+  ): () => void;
 }
 
 type RegistryRecord = PersistedProjectRecord | PersistedWorkspaceRecord;
+
+interface RegistryMutationHooks<TRecord extends RegistryRecord, TResult> {
+  forcePersist?: (result: TResult) => boolean;
+  beforeWrite?: (records: readonly TRecord[]) => Promise<void>;
+  afterWrite?: () => Promise<void>;
+  afterCommit?: () => void | Promise<void>;
+}
 
 class FileBackedRegistry<TRecord extends RegistryRecord> {
   private readonly filePath: string;
@@ -227,13 +245,21 @@ class FileBackedRegistry<TRecord extends RegistryRecord> {
   }
 
   async update(id: string, updater: (record: TRecord) => TRecord): Promise<TRecord | null> {
+    return this.updateWithHooks(id, updater);
+  }
+
+  protected async updateWithHooks(
+    id: string,
+    updater: (record: TRecord) => TRecord,
+    hooks?: RegistryMutationHooks<TRecord, TRecord | null>,
+  ): Promise<TRecord | null> {
     return this.mutateCache((records) => {
       const existing = records.get(id);
       if (!existing) return null;
       const next = this.schema.parse(updater(existing));
       records.set(id, next);
       return next;
-    });
+    }, hooks);
   }
 
   async archive(id: string, archivedAt: string): Promise<void> {
@@ -264,13 +290,16 @@ class FileBackedRegistry<TRecord extends RegistryRecord> {
     await this.removeIfPresent(id);
   }
 
-  protected async removeIfPresent(id: string): Promise<TRecord | null> {
+  protected async removeIfPresent(
+    id: string,
+    hooks?: RegistryMutationHooks<TRecord, TRecord | null>,
+  ): Promise<TRecord | null> {
     return this.mutateCache((records) => {
       const existing = records.get(id);
       if (!existing) return null;
       records.delete(id);
       return existing;
-    });
+    }, hooks);
   }
 
   private async load(): Promise<void> {
@@ -308,12 +337,7 @@ class FileBackedRegistry<TRecord extends RegistryRecord> {
 
   protected async mutateCache<TResult>(
     updater: (records: Map<string, TRecord>) => TResult,
-    hooks?: {
-      forcePersist?: (result: TResult) => boolean;
-      beforeWrite?: (records: readonly TRecord[]) => Promise<void>;
-      afterWrite?: () => Promise<void>;
-      afterCommit?: () => void;
-    },
+    hooks?: RegistryMutationHooks<TRecord, TResult>,
   ): Promise<TResult> {
     const previous = this.mutationQueue;
     let release!: () => void;
@@ -338,7 +362,7 @@ class FileBackedRegistry<TRecord extends RegistryRecord> {
         this.cache.clear();
         for (const [id, record] of staged) this.cache.set(id, record);
       }
-      hooks?.afterCommit?.();
+      await hooks?.afterCommit?.();
       return result;
     } finally {
       release();
@@ -502,6 +526,10 @@ export class FileBackedWorkspaceRegistry
   private readonly mutationListeners = new Set<
     (mutation: WorkspaceMutation) => void | Promise<void>
   >();
+  private readonly terminationBoundaryListeners = new Set<
+    (boundary: WorkspaceTerminationBoundary) => void | Promise<void>
+  >();
+  private nextTerminationBoundaryId = 1;
 
   constructor(
     filePath: string,
@@ -528,6 +556,13 @@ export class FileBackedWorkspaceRegistry
   ): () => void {
     this.mutationListeners.add(listener);
     return () => this.mutationListeners.delete(listener);
+  }
+
+  subscribeToTerminationBoundaries(
+    listener: (boundary: WorkspaceTerminationBoundary) => void | Promise<void>,
+  ): () => void {
+    this.terminationBoundaryListeners.add(listener);
+    return () => this.terminationBoundaryListeners.delete(listener);
   }
 
   override async update(
@@ -559,22 +594,86 @@ export class FileBackedWorkspaceRegistry
     archivedAt: string,
     context?: WorkspaceArchiveContext,
   ): Promise<void> {
-    const workspace = await super.update(workspaceId, (existing) => ({
-      ...existing,
-      updatedAt: archivedAt,
-      archivedAt,
-      ...(context?.autoArchivedChangeRequestUrl
-        ? { autoArchivedChangeRequestUrl: context.autoArchivedChangeRequestUrl }
-        : {}),
-    }));
-    if (!workspace) return;
-    await this.notifyMutation({ kind: "archive", workspaceId, workspace });
+    let boundaryStarted = false;
+    const boundaryId = `workspace-termination-${this.nextTerminationBoundaryId++}`;
+    try {
+      const workspace = await this.updateWithHooks(
+        workspaceId,
+        (existing) => ({
+          ...existing,
+          updatedAt: archivedAt,
+          archivedAt,
+          ...(context?.autoArchivedChangeRequestUrl
+            ? { autoArchivedChangeRequestUrl: context.autoArchivedChangeRequestUrl }
+            : {}),
+        }),
+        {
+          beforeWrite: async () => {
+            boundaryStarted = true;
+            await this.notifyTerminationBoundary({
+              boundaryId,
+              phase: "start",
+              kind: "archive",
+              workspaceId,
+            });
+          },
+          afterCommit: () =>
+            this.notifyTerminationBoundary({
+              boundaryId,
+              phase: "commit",
+              kind: "archive",
+              workspaceId,
+            }),
+        },
+      );
+      if (!workspace) return;
+      await this.notifyMutation({ kind: "archive", workspaceId, workspace });
+    } finally {
+      if (boundaryStarted) {
+        await this.notifyTerminationBoundary({
+          boundaryId,
+          phase: "finish",
+          kind: "archive",
+          workspaceId,
+        });
+      }
+    }
   }
 
   override async remove(workspaceId: string): Promise<void> {
-    const workspace = await this.removeIfPresent(workspaceId);
-    if (!workspace) return;
-    await this.notifyMutation({ kind: "remove", workspaceId, workspace: null });
+    let boundaryStarted = false;
+    const boundaryId = `workspace-termination-${this.nextTerminationBoundaryId++}`;
+    try {
+      const workspace = await this.removeIfPresent(workspaceId, {
+        beforeWrite: async () => {
+          boundaryStarted = true;
+          await this.notifyTerminationBoundary({
+            boundaryId,
+            phase: "start",
+            kind: "remove",
+            workspaceId,
+          });
+        },
+        afterCommit: () =>
+          this.notifyTerminationBoundary({
+            boundaryId,
+            phase: "commit",
+            kind: "remove",
+            workspaceId,
+          }),
+      });
+      if (!workspace) return;
+      await this.notifyMutation({ kind: "remove", workspaceId, workspace: null });
+    } finally {
+      if (boundaryStarted) {
+        await this.notifyTerminationBoundary({
+          boundaryId,
+          phase: "finish",
+          kind: "remove",
+          workspaceId,
+        });
+      }
+    }
   }
 
   async commitWorkspaceLabelMutation<TResult>(input: {
@@ -628,6 +727,29 @@ export class FileBackedWorkspaceRegistry
         }
       }),
     );
+  }
+
+  private async notifyTerminationBoundary(boundary: WorkspaceTerminationBoundary): Promise<void> {
+    const notifications: Promise<void>[] = [];
+    for (const listener of this.terminationBoundaryListeners) {
+      try {
+        notifications.push(Promise.resolve(listener(boundary)));
+      } catch (error) {
+        this.logger.error(
+          { err: error, boundary },
+          "Workspace termination boundary listener failed",
+        );
+      }
+    }
+    const results = await Promise.allSettled(notifications);
+    for (const result of results) {
+      if (result.status === "rejected") {
+        this.logger.error(
+          { err: result.reason, boundary },
+          "Workspace termination boundary listener failed",
+        );
+      }
+    }
   }
 }
 

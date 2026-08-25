@@ -164,7 +164,7 @@ const StoppingStepStateSchema = z
   .object({
     status: z.literal("stopping"),
     plannedAgentId: z.guid(),
-    agentId: z.guid(),
+    agentId: z.guid().nullable(),
     startedAt: TimestampSchema,
     stopRequestedAt: TimestampSchema,
   })
