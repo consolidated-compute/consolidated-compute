@@ -29,6 +29,7 @@ import {
   TeamRepository,
   TeamRevisionConflictError,
   TeamRunNotFoundError,
+  type TeamRunUpdate,
 } from "./repository.js";
 
 type TeamRunStep = PersistedTeamRunRecord["steps"][number];
@@ -106,6 +107,7 @@ export class TeamRunService {
   private readonly createAgentId: () => string;
   private readonly executions = new Map<string, Promise<void>>();
   private readonly terminationRequests = new Map<string, TeamRunTerminationReason>();
+  private readonly workspaceTerminationFences = new Map<string, number>();
   private admissionTail: Promise<unknown> = Promise.resolve();
   private unsubscribeWorkspaceMutations: (() => void) | null = null;
   private acceptingStarts = false;
@@ -251,7 +253,7 @@ export class TeamRunService {
   private async executeRun(runId: string): Promise<void> {
     let run = await this.requireRun(runId);
     if (run.state.status === "queued") {
-      const reason = this.terminationRequests.get(runId);
+      const reason = this.requestedTerminationReason(run);
       if (reason) {
         await this.finishTermination(runId, reason);
         return;
@@ -352,7 +354,7 @@ export class TeamRunService {
   ): Promise<boolean> {
     const current = await this.requireRun(runId);
     const isTerminal = isTerminalTeamRunStatus(current.state.status);
-    const reason = this.terminationRequests.get(runId);
+    const reason = this.requestedTerminationReason(current);
     if (!isTerminal && !reason) return false;
     await events.return(undefined);
     if (!isTerminal) await this.finishTermination(runId, reason ?? "cancel");
@@ -396,7 +398,7 @@ export class TeamRunService {
   ): Promise<StepExecutionOutcome> {
     const current = await this.requireRun(runId);
     if (isTerminalTeamRunStatus(current.state.status)) return { status: "terminal" };
-    const requestedReason = this.terminationRequests.get(runId);
+    const requestedReason = this.requestedTerminationReason(current);
     if (requestedReason) {
       await this.finishTermination(runId, requestedReason);
       return { status: "terminal" };
@@ -492,15 +494,9 @@ export class TeamRunService {
         return unchangedRun(run);
       }
       if (step.state.agentId === null) return unchangedRun(run);
-      const reason = this.terminationRequests.get(runId);
+      const reason = this.requestedTerminationReason(run);
       if (reason) {
-        return {
-          steps: replaceStep(run.steps, stepIndex, {
-            ...step,
-            state: terminationStepState(step, reason, timestamp),
-          }),
-          state: terminalBoundaryState(run, reason, timestamp),
-        };
+        return terminationRunUpdate(run, reason, timestamp);
       }
       const succeededStep: TeamRunStep = {
         ...step,
@@ -619,18 +615,7 @@ export class TeamRunService {
     const timestamp = this.timestamp();
     return this.repository.updateRun(runId, (run) => {
       if (isTerminalTeamRunStatus(run.state.status)) return unchangedRun(run);
-      const active = findActiveStep(run);
-      if (!active) {
-        return { steps: run.steps, state: terminalBoundaryState(run, reason, timestamp, detail) };
-      }
-      if (!("plannedAgentId" in active.step.state)) return unchangedRun(run);
-      return {
-        steps: replaceStep(run.steps, active.index, {
-          ...active.step,
-          state: terminationStepState(active.step, reason, timestamp, detail),
-        }),
-        state: terminalBoundaryState(run, reason, timestamp, detail),
-      };
+      return terminationRunUpdate(run, reason, timestamp, detail);
     });
   }
 
@@ -639,6 +624,8 @@ export class TeamRunService {
     const message = boundedError(errorMessage(error));
     return this.repository.updateRun(runId, (run) => {
       if (isTerminalTeamRunStatus(run.state.status)) return unchangedRun(run);
+      const requestedReason = this.requestedTerminationReason(run);
+      if (requestedReason) return terminationRunUpdate(run, requestedReason, timestamp);
       const active = findActiveStep(run);
       const startedAt = runStartedAt(run) ?? timestamp;
       if (!active || !("plannedAgentId" in active.step.state)) {
@@ -674,12 +661,29 @@ export class TeamRunService {
     }
   }
 
+  private requestedTerminationReason(
+    run: PersistedTeamRunRecord,
+  ): TeamRunTerminationReason | undefined {
+    return (
+      this.terminationRequests.get(run.id) ??
+      (this.workspaceTerminationFences.has(run.workspace.workspaceId) ? "workspace" : undefined)
+    );
+  }
+
   private async handleWorkspaceMutation(mutation: WorkspaceMutation): Promise<void> {
     if (mutation.kind !== "archive" && mutation.kind !== "remove") return;
-    const run = await this.repository.getActiveRunForWorkspace(mutation.workspaceId);
-    if (!run) return;
-    this.requestTermination(run.id, "workspace");
-    await this.stopActiveRun(run.id);
+    const fenceCount = this.workspaceTerminationFences.get(mutation.workspaceId) ?? 0;
+    this.workspaceTerminationFences.set(mutation.workspaceId, fenceCount + 1);
+    try {
+      const run = await this.repository.getActiveRunForWorkspace(mutation.workspaceId);
+      if (!run) return;
+      this.requestTermination(run.id, "workspace");
+      await this.stopActiveRun(run.id);
+    } finally {
+      const remaining = (this.workspaceTerminationFences.get(mutation.workspaceId) ?? 1) - 1;
+      if (remaining === 0) this.workspaceTerminationFences.delete(mutation.workspaceId);
+      else this.workspaceTerminationFences.set(mutation.workspaceId, remaining);
+    }
   }
 
   private async requireRun(runId: string): Promise<PersistedTeamRunRecord> {
@@ -746,6 +750,26 @@ function terminalBoundaryState(
     };
   }
   return { status: "canceled", startedAt, endedAt };
+}
+
+function terminationRunUpdate(
+  run: PersistedTeamRunRecord,
+  reason: TeamRunTerminationReason,
+  endedAt: string,
+  detail?: string,
+): TeamRunUpdate {
+  const active = findActiveStep(run);
+  if (!active) {
+    return { steps: run.steps, state: terminalBoundaryState(run, reason, endedAt, detail) };
+  }
+  if (!("plannedAgentId" in active.step.state)) return unchangedRun(run);
+  return {
+    steps: replaceStep(run.steps, active.index, {
+      ...active.step,
+      state: terminationStepState(active.step, reason, endedAt, detail),
+    }),
+    state: terminalBoundaryState(run, reason, endedAt, detail),
+  };
 }
 
 function terminationStepState(

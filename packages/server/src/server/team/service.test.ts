@@ -523,6 +523,50 @@ describe("TeamRunService", () => {
     ]);
   });
 
+  test("fences final completion before the Workspace run lookup settles", async () => {
+    const harness = await createHarness();
+    const run = await startRun(harness);
+    await harness.runtime.waitForStream(firstAgentId);
+    harness.runtime.finalResponses.set(firstAgentId, "Builder finished.");
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+    });
+    await harness.runtime.waitForStream(secondAgentId);
+
+    const originalLookup = harness.repository.getActiveRunForWorkspace.bind(harness.repository);
+    let reportLookupEntered: (() => void) | undefined;
+    let releaseLookup: (() => void) | undefined;
+    const lookupEntered = new Promise<void>((resolve) => {
+      reportLookupEntered = resolve;
+    });
+    const lookupReleased = new Promise<void>((resolve) => {
+      releaseLookup = resolve;
+    });
+    harness.repository.getActiveRunForWorkspace = async (workspaceId) => {
+      reportLookupEntered?.();
+      await lookupReleased;
+      return originalLookup(workspaceId);
+    };
+
+    const archiving = harness.workspaceRegistry.archive("wks_team_service");
+    await lookupEntered;
+    harness.runtime.finalResponses.set(secondAgentId, "Review crossed the archive boundary.");
+    await harness.runtime.pushEvent(secondAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+    });
+    const canceled = await harness.service.waitForRun(run.id);
+    releaseLookup?.();
+    await archiving;
+
+    expect(canceled.state.status).toBe("canceled");
+    expect(canceled.steps[1]?.state).toMatchObject({
+      status: "canceled",
+      agentId: secondAgentId,
+    });
+  });
+
   test("fences starts and interrupts unsettled work during shutdown", async () => {
     const harness = await createHarness();
     const run = await startRun(harness);
