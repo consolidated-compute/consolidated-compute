@@ -8,8 +8,11 @@ export const TEAM_INSTRUCTIONS_MAX_CHARS = 32_000;
 export const TEAM_OBJECTIVE_MAX_CHARS = 32_000;
 export const TEAM_ERROR_MAX_CHARS = 4_096;
 export const TEAM_IDEMPOTENCY_KEY_MAX_CHARS = 256;
+export const TEAM_AGENT_PROFILE_ID_MAX_CHARS = 512;
 export const TEAM_PROVIDER_ID_MAX_CHARS = 128;
 export const TEAM_MODEL_ID_MAX_CHARS = 256;
+export const TEAM_MODE_ID_MAX_CHARS = 256;
+export const TEAM_THINKING_OPTION_ID_MAX_CHARS = 256;
 export const TEAM_ENTITY_ID_MAX_CHARS = 128;
 export const TEAM_MAX_ROLES = 12;
 export const TEAM_MAX_WORKFLOW_STEPS = 24;
@@ -32,10 +35,14 @@ const WorkspaceRegistryIdSchema = nonBlankStringSchema(8_192);
 const TimestampSchema = z.string().datetime({ offset: true });
 const ErrorSchema = nonBlankStringSchema(TEAM_ERROR_MAX_CHARS);
 
-export const PersistedTeamLaunchPreferenceSchema = z
+export const PersistedTeamResolvedLaunchSchema = z
   .object({
+    profileId: nonBlankStringSchema(TEAM_AGENT_PROFILE_ID_MAX_CHARS),
     provider: nonBlankStringSchema(TEAM_PROVIDER_ID_MAX_CHARS),
     model: nonBlankStringSchema(TEAM_MODEL_ID_MAX_CHARS).nullable(),
+    modeId: nonBlankStringSchema(TEAM_MODE_ID_MAX_CHARS).nullable(),
+    thinkingOptionId: nonBlankStringSchema(TEAM_THINKING_OPTION_ID_MAX_CHARS).nullable(),
+    featureValues: z.record(z.string(), z.json()),
   })
   .strict();
 
@@ -44,7 +51,7 @@ export const PersistedTeamRoleSchema = z
     id: PersistedTeamEntityIdSchema,
     name: nonBlankStringSchema(TEAM_ROLE_NAME_MAX_CHARS),
     instructions: nonBlankStringSchema(TEAM_INSTRUCTIONS_MAX_CHARS),
-    launch: PersistedTeamLaunchPreferenceSchema,
+    profileId: nonBlankStringSchema(TEAM_AGENT_PROFILE_ID_MAX_CHARS),
   })
   .strict();
 
@@ -125,7 +132,7 @@ export const PersistedTeamRunStepSnapshotSchema = z
     roleName: nonBlankStringSchema(TEAM_ROLE_NAME_MAX_CHARS),
     roleInstructions: nonBlankStringSchema(TEAM_INSTRUCTIONS_MAX_CHARS),
     stepInstructions: nonBlankStringSchema(TEAM_INSTRUCTIONS_MAX_CHARS).nullable(),
-    acceptedLaunch: PersistedTeamLaunchPreferenceSchema,
+    resolvedLaunch: PersistedTeamResolvedLaunchSchema,
   })
   .strict();
 
@@ -383,9 +390,8 @@ function stepSnapshotMatchesRole(
   const instructionsMatch =
     step.snapshot.roleInstructions === role.instructions &&
     step.snapshot.stepInstructions === workflowStep.instructions;
-  const providerMatches = step.snapshot.acceptedLaunch.provider === role.launch.provider;
-  const modelMatches = role.launch.model === null || step.snapshot.acceptedLaunch.model !== null;
-  return identityMatches && instructionsMatch && providerMatches && modelMatches;
+  const profileMatches = step.snapshot.resolvedLaunch.profileId === role.profileId;
+  return identityMatches && instructionsMatch && profileMatches;
 }
 
 function validateRunStepSnapshots(run: TeamRunRecordShape): ContractIssue[] {

@@ -33,13 +33,13 @@ function createDefinitionInput(): CreateTeamDefinitionInput {
         id: "role_builder",
         name: "Builder",
         instructions: "Implement and verify the requested change.",
-        launch: { provider: "codex", model: "gpt-5.6" },
+        profileId: "profile_builder",
       },
       {
         id: "role_reviewer",
         name: "Reviewer",
         instructions: "Review the implementation for correctness.",
-        launch: { provider: "claude", model: null },
+        profileId: "profile_reviewer",
       },
     ],
     workflow: [
@@ -79,7 +79,14 @@ function createRunInput(
           roleName: role.name,
           roleInstructions: role.instructions,
           stepInstructions: workflowStep.instructions,
-          acceptedLaunch: role.launch,
+          resolvedLaunch: {
+            profileId: role.profileId,
+            provider: role.id === "role_builder" ? "codex" : "claude",
+            model: role.id === "role_builder" ? "gpt-5.6" : null,
+            modeId: role.id === "role_builder" ? "workspace-write" : null,
+            thinkingOptionId: role.id === "role_builder" ? "high" : null,
+            featureValues: role.id === "role_builder" ? { web_search: true } : {},
+          },
         },
         state: { status: "pending" as const },
       };
@@ -142,6 +149,18 @@ describe("TeamRepository definitions", () => {
     const reloaded = new TeamRepository({ paseoHome });
     await expect(reloaded.getDefinition(created.id)).resolves.toEqual(created);
     await expect(reloaded.listDefinitions()).resolves.toEqual({
+      definitions: [created],
+      issues: [],
+    });
+  });
+
+  test("keeps definitions visible when their host profile is missing", async () => {
+    const input = createDefinitionInput();
+    input.roles[0] = { ...input.roles[0]!, profileId: "profile_deleted_later" };
+
+    const created = await repository.createDefinition(input);
+
+    await expect(new TeamRepository({ paseoHome }).listDefinitions()).resolves.toEqual({
       definitions: [created],
       issues: [],
     });
@@ -495,7 +514,7 @@ describe("TeamRepository runs", () => {
       current.teamSnapshot.name = "Rewritten Team";
       current.workspace.displayName = "rewritten/workspace";
       current.steps[0]!.snapshot.roleName = "Rewritten role";
-      current.steps[1]!.snapshot.acceptedLaunch.model = "rewritten-model";
+      current.steps[1]!.snapshot.resolvedLaunch.model = "rewritten-model";
       return succeededRunState(current);
     });
 
