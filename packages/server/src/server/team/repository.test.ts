@@ -14,6 +14,7 @@ import {
   TeamRevisionConflictError,
   TeamRunPageError,
   TeamStorageCorruptError,
+  TeamWorkspaceHasActiveRunError,
   type CreateTeamDefinitionInput,
   type CreateTeamRunInput,
   type TeamRepositoryChange,
@@ -56,6 +57,7 @@ function createDefinitionInput(): CreateTeamDefinitionInput {
 function createRunInput(
   definition: PersistedTeamDefinition,
   idempotencyKey = "start-1",
+  workspaceId = "wks_0123456789abcdef",
 ): CreateTeamRunInput {
   const roles = new Map(definition.roles.map((role) => [role.id, role]));
   return {
@@ -64,9 +66,9 @@ function createRunInput(
     idempotencyKey,
     objective: "Deliver the requested repository change.",
     workspace: {
-      workspaceId: "wks_0123456789abcdef",
+      workspaceId,
       projectId: "prj_0123456789abcdef",
-      cwd: "/repo/worktree",
+      cwd: `/repo/${workspaceId}`,
       displayName: "feature/teams",
     },
     steps: definition.workflow.map((workflowStep) => {
@@ -446,14 +448,48 @@ describe("TeamRepository runs", () => {
     await expect(repository.listRuns()).resolves.toMatchObject({ runs: [first], issues: [] });
   });
 
-  test("creates distinct runs for different idempotency keys", async () => {
+  test("creates distinct runs for different idempotency keys and Workspaces", async () => {
     const first = await repository.createRun(createRunInput(definition, "start-1"));
-    const second = await repository.createRun(createRunInput(definition, "start-2"));
+    const second = await repository.createRun(
+      createRunInput(definition, "start-2", "wks_1123456789abcdef"),
+    );
 
     expect(second.id).not.toBe(first.id);
     await expect(repository.listRuns()).resolves.toMatchObject({
       runs: expect.arrayContaining([first, second]),
       issues: [],
+    });
+  });
+
+  test("atomically rejects competing runs for one Workspace", async () => {
+    const [first, second] = await Promise.allSettled([
+      repository.createRun(createRunInput(definition, "start-1")),
+      repository.createRun(createRunInput(definition, "start-2")),
+    ]);
+
+    const fulfilled = [first, second].filter((result) => result.status === "fulfilled");
+    const rejected = [first, second].filter((result) => result.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]).toMatchObject({
+      reason: expect.any(TeamWorkspaceHasActiveRunError),
+    });
+    await expect(repository.listActiveRuns()).resolves.toHaveLength(1);
+  });
+
+  test("releases the Workspace after the owning run becomes terminal", async () => {
+    const first = await repository.createRun(createRunInput(definition, "start-1"));
+    currentTimestamp = secondTimestamp;
+    await repository.updateRun(first.id, (current) => succeededRunState(current));
+
+    const second = await repository.createRun(createRunInput(definition, "start-2"));
+
+    await expect(repository.getActiveRunForWorkspace(first.workspace.workspaceId)).resolves.toEqual(
+      second,
+    );
+    await expect(repository.getRunByIdempotency(definition.id, "start-1")).resolves.toMatchObject({
+      id: first.id,
+      state: { status: "succeeded" },
     });
   });
 
@@ -560,7 +596,11 @@ describe("TeamRepository runs", () => {
     const runs: PersistedTeamRunRecord[] = [];
     for (let minute = 0; minute < 5; minute += 1) {
       currentTimestamp = `2026-08-25T12:0${minute}:00.000Z`;
-      runs.push(await repository.createRun(createRunInput(definition, `start-${minute}`)));
+      runs.push(
+        await repository.createRun(
+          createRunInput(definition, `start-${minute}`, `wks_page_${minute}`),
+        ),
+      );
     }
 
     const firstPage = await repository.listRuns({ limit: 2 });
@@ -577,8 +617,8 @@ describe("TeamRepository runs", () => {
   });
 
   test("orders offset timestamps by their instant across cursor pages", async () => {
-    const older = await repository.createRun(createRunInput(definition, "older"));
-    const newer = await repository.createRun(createRunInput(definition, "newer"));
+    const older = await repository.createRun(createRunInput(definition, "older", "wks_older"));
+    const newer = await repository.createRun(createRunInput(definition, "newer", "wks_newer"));
     const runsDir = join(paseoHome, "teams", "runs");
     await writeJsonFileAtomic(join(runsDir, `${older.id}.json`), {
       ...older,
@@ -600,9 +640,9 @@ describe("TeamRepository runs", () => {
 
   test("binds a run cursor to its Team filter", async () => {
     currentTimestamp = "2026-08-25T12:02:00.000Z";
-    await repository.createRun(createRunInput(definition, "start-2"));
+    await repository.createRun(createRunInput(definition, "start-2", "wks_cursor_2"));
     currentTimestamp = "2026-08-25T12:03:00.000Z";
-    await repository.createRun(createRunInput(definition, "start-3"));
+    await repository.createRun(createRunInput(definition, "start-3", "wks_cursor_3"));
     const page = await repository.listRuns({ limit: 1 });
 
     await expect(

@@ -243,6 +243,25 @@ describe("Team Run contract", () => {
     expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
   });
 
+  test("allows cancellation while a planned agent is still being created", () => {
+    const run = createRun();
+    run.steps[0]!.state = {
+      status: "stopping",
+      plannedAgentId: agentId,
+      agentId: null,
+      startedAt: timestamp,
+      stopRequestedAt: timestamp,
+    };
+    run.steps[1]!.state = { status: "pending" };
+    run.state = {
+      status: "stopping",
+      startedAt: timestamp,
+      stopRequestedAt: timestamp,
+    };
+
+    expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
+  });
+
   test("rejects non-JSON feature values in frozen launch facts", () => {
     const run = createRun();
     run.steps[1]!.snapshot.resolvedLaunch.featureValues = {

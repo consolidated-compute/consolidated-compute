@@ -143,6 +143,18 @@ export class TeamHasActiveRunError extends Error {
   }
 }
 
+export class TeamWorkspaceHasActiveRunError extends Error {
+  readonly code = "team_workspace_has_active_run";
+
+  constructor(
+    readonly workspaceId: string,
+    readonly runId: string,
+  ) {
+    super(`Workspace ${workspaceId} already has an active Team Run: ${runId}`);
+    this.name = "TeamWorkspaceHasActiveRunError";
+  }
+}
+
 export class TeamRunNotFoundError extends Error {
   readonly code = "team_run_not_found";
 
@@ -244,6 +256,37 @@ export class TeamRepository {
     return this.readRecord(this.runPath(runId), runId, "runs", PersistedTeamRunRecordSchema);
   }
 
+  async getRunByIdempotency(
+    teamId: string,
+    idempotencyKey: string,
+  ): Promise<PersistedTeamRunRecord | null> {
+    requireRepositoryId(teamId);
+    const collection = await this.readRuns();
+    this.requireHealthyCollection(collection.issues);
+    return (
+      collection.records.find(
+        (run) => run.teamId === teamId && run.idempotencyKey === idempotencyKey,
+      ) ?? null
+    );
+  }
+
+  async listActiveRuns(): Promise<PersistedTeamRunRecord[]> {
+    const collection = await this.readRuns();
+    this.requireHealthyCollection(collection.issues);
+    return collection.records.filter((run) => isActiveTeamRunStatus(run.state.status));
+  }
+
+  async getActiveRunForWorkspace(workspaceId: string): Promise<PersistedTeamRunRecord | null> {
+    const collection = await this.readRuns();
+    this.requireHealthyCollection(collection.issues);
+    return (
+      collection.records.find(
+        (run) =>
+          run.workspace.workspaceId === workspaceId && isActiveTeamRunStatus(run.state.status),
+      ) ?? null
+    );
+  }
+
   async createDefinition(input: CreateTeamDefinitionInput): Promise<PersistedTeamDefinition> {
     return this.serializeMutation(async () => {
       let teamId = generateTeamId();
@@ -290,6 +333,15 @@ export class TeamRepository {
       );
       if (existing) return existing;
       this.requireHealthyCollection(collection.issues);
+
+      const workspaceRun = collection.records.find(
+        (run) =>
+          run.workspace.workspaceId === input.workspace.workspaceId &&
+          isActiveTeamRunStatus(run.state.status),
+      );
+      if (workspaceRun) {
+        throw new TeamWorkspaceHasActiveRunError(input.workspace.workspaceId, workspaceRun.id);
+      }
 
       const definition = await this.requireDefinition(input.teamId);
       this.requireRevision(definition, input.expectedRevision);

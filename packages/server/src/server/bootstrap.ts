@@ -226,6 +226,8 @@ import {
 } from "./hub/relationship-remote.js";
 import { DaemonExecutions } from "./hub/daemon-executions.js";
 import { PluginService } from "./plugins/index.js";
+import { TeamRepository } from "./team/repository.js";
+import { TeamRunService } from "./team/service.js";
 
 const MAX_MCP_DEBUG_BATCH_ITEMS = 10;
 const REDACTED_LOG_VALUE = "[redacted]";
@@ -470,6 +472,8 @@ export interface PaseoDaemon {
   serviceProxy: ServiceProxySubsystem;
   scriptRuntimeStore: WorkspaceScriptRuntimeStore;
   browserToolsBroker: BrowserToolsBroker;
+  teamRepository: TeamRepository;
+  teamRunService: TeamRunService;
   start(): Promise<void>;
   stop(): Promise<void>;
   getListenTarget(): ListenTarget | null;
@@ -1150,6 +1154,18 @@ export async function createPaseoDaemon(
   };
   const createAgent = (input: Parameters<typeof createAgentCommand>[1]) =>
     createAgentCommand(createAgentCommandDependencies, input);
+  const teamRepository = new TeamRepository({ paseoHome: config.paseoHome });
+  const teamRunService = new TeamRunService({
+    repository: teamRepository,
+    workspaceRegistry,
+    providerCatalog: providerSnapshotManager,
+    daemonConfigStore,
+    createAgent,
+    agentManager,
+    cancelAgentRun: (agentId) => agentManager.cancelAgentRun(agentId),
+    logger,
+  });
+  await teamRunService.initialize();
   const archiveWorkspaceByIdExternal = (workspaceId: string, requestId: string) =>
     archiveByScope(
       {
@@ -1715,6 +1731,7 @@ export async function createPaseoDaemon(
     await hubRelationships.stop();
     workspaceReconciliation.dispose();
     scriptHealthMonitor.stop();
+    await teamRunService.shutdown();
     // Freeze both ingress and registration before taking the agent closure snapshot.
     wsServer?.prepareForShutdown();
     agentManager.prepareForShutdown();
@@ -1756,6 +1773,8 @@ export async function createPaseoDaemon(
     serviceProxy,
     scriptRuntimeStore,
     browserToolsBroker,
+    teamRepository,
+    teamRunService,
     start,
     stop,
     getListenTarget: () => boundListenTarget,
