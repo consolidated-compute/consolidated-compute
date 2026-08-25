@@ -68,6 +68,10 @@ interface VisualReactStats {
   actualDurationMs: number;
 }
 
+// Native accessibility snapshots cannot see the intentionally hidden animated glyph.
+// The scheduled device replay enables this semantic-only marker to verify reduced motion.
+const SHOW_VISUAL_MOTION_PROBE = process.env.EXPO_PUBLIC_PASEO_E2E_VISUAL_MOTION_PROBE === "1";
+
 const recordVisualRender: ProfilerOnRenderCallback = (_id, _phase, actualDuration) => {
   const scope = globalThis as typeof globalThis & {
     __PASEO_VISUAL_REACT_STATS__?: VisualReactStats;
@@ -600,6 +604,17 @@ function VisualScene({
       ]}
       testID={`visual-layout-${topology.mode}`}
     >
+      {SHOW_VISUAL_MOTION_PROBE ? (
+        <View
+          accessible
+          accessibilityLabel={
+            workingClock.isActive ? "Visual motion active" : "Visual motion reduced"
+          }
+          pointerEvents="none"
+          style={styles.motionProbe}
+          testID={workingClock.isActive ? "visual-motion-active" : "visual-motion-reduced"}
+        />
+      ) : null}
       {topology.projects.map((project) => (
         <Fragment key={project.key}>
           <VisualProject project={project} rect={fitRect(project.rect, topology, viewportWidth)} />
@@ -748,6 +763,11 @@ const styles = StyleSheet.create((theme) => ({
   },
   scene: {
     position: "relative",
+  },
+  motionProbe: {
+    position: "absolute",
+    width: 1,
+    height: 1,
   },
   project: {
     position: "absolute",

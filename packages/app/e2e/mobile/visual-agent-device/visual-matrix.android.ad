@@ -30,13 +30,14 @@ wait "id=\"settings-host-picker\"" 30000
 open "${APP_ID}" "paseo://visual" --relaunch
 wait "id=\"visual-screen\"" 30000
 wait "id=\"visual-layout-compact\"" 30000
+wait "id=\"visual-motion-reduced\"" 10000
 wait "id=\"visual-workspace-open-${PRIMARY_SERVER_ID}-${PRIMARY_WORKSPACE_ID}\"" 20000
 get attrs "id=\"visual-workspace-open-${PRIMARY_SERVER_ID}-${PRIMARY_WORKSPACE_ID}\""
 screenshot "${AD_ARTIFACTS}/visual-cold-light.png" --scale 1
 
 orientation landscape-left
 wait "id=\"visual-screen\"" 10000
-wait "id=\"visual-layout-compact\"" 10000
+wait "id=\"visual-viewport\"" 10000
 wait "id=\"menu-button\"" 10000
 screenshot "${AD_ARTIFACTS}/visual-landscape.png" --scale 1
 orientation portrait

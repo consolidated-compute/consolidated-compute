@@ -188,6 +188,7 @@ test("mobile Operations and Visual stay isolated from each other and the upstrea
   assert.match(operationsRunner, /\.dev\/visual-agent-device-e2e/);
   assert.match(operationsRunner, /\.dev\/visual-agent-device-artifacts/);
   assert.match(operationsRunner, /DEFAULT_METRO_PORT=8083/);
+  assert.match(operationsRunner, /EXPO_PUBLIC_PASEO_E2E_VISUAL_MOTION_PROBE=1/);
   assert.match(operationsRunner, /metro prepare[\s\S]*--no-reuse-existing/);
 });
 
@@ -213,6 +214,12 @@ test("mobile Visual replays keep one cross-platform accessibility contract", () 
   assert.match(iosReplay, /open "\$\{APP_ID\}" "paseo:\/\/visual" --relaunch/);
   assert.match(iosReplay, /settings animations off/);
   assert.match(iosReplay, /orientation landscape-left/);
+  assert.match(iosReplay, /orientation landscape-left[\s\S]*visual-viewport/);
+  assert.doesNotMatch(
+    iosReplay,
+    /orientation landscape-left\nwait[^\n]+\nwait "id=\\"visual-layout-compact/,
+  );
+  assert.match(iosReplay, /wait "id=\\"visual-motion-reduced\\"" 10000/);
   assert.match(iosReplay, /home\nopen "\$\{APP_ID\}"\nwait "id=\\"visual-screen/);
   assert.match(iosReplay, /get attrs "id=\\"visual-workspace-open-/);
   assert.match(iosReplay, /get attrs "id=\\"visual-agent-/);
