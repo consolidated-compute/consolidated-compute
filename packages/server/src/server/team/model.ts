@@ -140,6 +140,7 @@ const CreatingStepStateSchema = z
 const RunningStepStateSchema = z
   .object({
     status: z.literal("running"),
+    plannedAgentId: z.guid(),
     agentId: z.guid(),
     startedAt: TimestampSchema,
   })
@@ -147,6 +148,7 @@ const RunningStepStateSchema = z
 const WaitingForPermissionStepStateSchema = z
   .object({
     status: z.literal("waiting_for_permission"),
+    plannedAgentId: z.guid(),
     agentId: z.guid(),
     startedAt: TimestampSchema,
   })
@@ -154,6 +156,7 @@ const WaitingForPermissionStepStateSchema = z
 const StoppingStepStateSchema = z
   .object({
     status: z.literal("stopping"),
+    plannedAgentId: z.guid(),
     agentId: z.guid(),
     startedAt: TimestampSchema,
     stopRequestedAt: TimestampSchema,
@@ -162,6 +165,7 @@ const StoppingStepStateSchema = z
 const SucceededStepStateSchema = z
   .object({
     status: z.literal("succeeded"),
+    plannedAgentId: z.guid(),
     agentId: z.guid(),
     startedAt: TimestampSchema,
     endedAt: TimestampSchema,
@@ -199,6 +203,7 @@ const InterruptedStepStateSchema = z
 const StopFailedStepStateSchema = z
   .object({
     status: z.literal("stop_failed"),
+    plannedAgentId: z.guid(),
     agentId: z.guid(),
     startedAt: TimestampSchema,
     stopRequestedAt: TimestampSchema,

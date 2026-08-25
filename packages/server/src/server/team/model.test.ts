@@ -22,6 +22,7 @@ import {
 
 const timestamp = "2026-08-25T12:00:00.000Z";
 const agentId = "9f44cd43-89a5-4371-af49-679bfbf8d1d7";
+const secondAgentId = "d65fc288-0a1b-45a9-b0c8-8346cd1721b3";
 
 function createTeam(): PersistedTeamDefinition {
   return {
@@ -82,6 +83,7 @@ function createRun(team = createTeam()): PersistedTeamRunRecord {
         },
         state: {
           status: "succeeded",
+          plannedAgentId: agentId,
           agentId,
           startedAt: timestamp,
           endedAt: timestamp,
@@ -98,7 +100,8 @@ function createRun(team = createTeam()): PersistedTeamRunRecord {
         },
         state: {
           status: "running",
-          agentId: "d65fc288-0a1b-45a9-b0c8-8346cd1721b3",
+          plannedAgentId: secondAgentId,
+          agentId: secondAgentId,
           startedAt: timestamp,
         },
       },
@@ -223,6 +226,7 @@ describe("Team Run contract", () => {
     const run = createRun();
     run.steps[0]!.state = {
       status: "waiting_for_permission",
+      plannedAgentId: agentId,
       agentId,
       startedAt: timestamp,
     };
@@ -273,7 +277,8 @@ describe("Team Run contract", () => {
     const run = createRun();
     run.steps[1]!.state = {
       status: "succeeded",
-      agentId: "d65fc288-0a1b-45a9-b0c8-8346cd1721b3",
+      plannedAgentId: secondAgentId,
+      agentId: secondAgentId,
       startedAt: timestamp,
       endedAt: timestamp,
     };
@@ -300,7 +305,8 @@ describe("Team Run contract", () => {
     const run = createRun();
     run.steps[1]!.state = {
       status: "succeeded",
-      agentId: "d65fc288-0a1b-45a9-b0c8-8346cd1721b3",
+      plannedAgentId: secondAgentId,
+      agentId: secondAgentId,
       startedAt: timestamp,
       endedAt: timestamp,
     };
@@ -367,6 +373,7 @@ describe("Team Run contract", () => {
     const run = createRun();
     run.steps[0]!.state = {
       status: "succeeded",
+      plannedAgentId: agentId,
       agentId,
       startedAt: "2026-08-25T12:00:01.000Z",
       endedAt: timestamp,
@@ -403,7 +410,8 @@ describe("Team Run contract", () => {
     const run = createRun();
     run.steps[1]!.state = {
       status: "stopping",
-      agentId: "d65fc288-0a1b-45a9-b0c8-8346cd1721b3",
+      plannedAgentId: secondAgentId,
+      agentId: secondAgentId,
       startedAt: timestamp,
       stopRequestedAt: "2026-08-25T12:00:01.000Z",
     };
@@ -452,10 +460,22 @@ describe("Team Run state shapes", () => {
     const states = [
       { status: "pending" },
       { status: "creating", plannedAgentId: agentId, startedAt: timestamp },
-      { status: "running", agentId, startedAt: timestamp },
-      { status: "waiting_for_permission", agentId, startedAt: timestamp },
-      { status: "stopping", agentId, startedAt: timestamp, stopRequestedAt: timestamp },
-      { status: "succeeded", agentId, startedAt: timestamp, endedAt: timestamp },
+      { status: "running", plannedAgentId: agentId, agentId, startedAt: timestamp },
+      { status: "waiting_for_permission", plannedAgentId: agentId, agentId, startedAt: timestamp },
+      {
+        status: "stopping",
+        plannedAgentId: agentId,
+        agentId,
+        startedAt: timestamp,
+        stopRequestedAt: timestamp,
+      },
+      {
+        status: "succeeded",
+        plannedAgentId: agentId,
+        agentId,
+        startedAt: timestamp,
+        endedAt: timestamp,
+      },
       {
         status: "failed",
         plannedAgentId: agentId,
@@ -481,6 +501,7 @@ describe("Team Run state shapes", () => {
       },
       {
         status: "stop_failed",
+        plannedAgentId: agentId,
         agentId,
         startedAt: timestamp,
         stopRequestedAt: timestamp,
@@ -493,13 +514,38 @@ describe("Team Run state shapes", () => {
     );
   });
 
-  test("rejects terminal steps whose created agent differs from the planned identity", () => {
-    const mismatchedAgentId = "d65fc288-0a1b-45a9-b0c8-8346cd1721b3";
+  test("rejects step states whose created agent differs from the planned identity", () => {
     const states = [
+      {
+        status: "running",
+        plannedAgentId: agentId,
+        agentId: secondAgentId,
+        startedAt: timestamp,
+      },
+      {
+        status: "waiting_for_permission",
+        plannedAgentId: agentId,
+        agentId: secondAgentId,
+        startedAt: timestamp,
+      },
+      {
+        status: "stopping",
+        plannedAgentId: agentId,
+        agentId: secondAgentId,
+        startedAt: timestamp,
+        stopRequestedAt: timestamp,
+      },
+      {
+        status: "succeeded",
+        plannedAgentId: agentId,
+        agentId: secondAgentId,
+        startedAt: timestamp,
+        endedAt: timestamp,
+      },
       {
         status: "failed",
         plannedAgentId: agentId,
-        agentId: mismatchedAgentId,
+        agentId: secondAgentId,
         startedAt: timestamp,
         endedAt: timestamp,
         error: "failed",
@@ -507,17 +553,25 @@ describe("Team Run state shapes", () => {
       {
         status: "canceled",
         plannedAgentId: agentId,
-        agentId: mismatchedAgentId,
+        agentId: secondAgentId,
         startedAt: timestamp,
         endedAt: timestamp,
       },
       {
         status: "interrupted",
         plannedAgentId: agentId,
-        agentId: mismatchedAgentId,
+        agentId: secondAgentId,
         startedAt: timestamp,
         endedAt: timestamp,
         error: "restart",
+      },
+      {
+        status: "stop_failed",
+        plannedAgentId: agentId,
+        agentId: secondAgentId,
+        startedAt: timestamp,
+        stopRequestedAt: timestamp,
+        error: "busy",
       },
     ];
 
