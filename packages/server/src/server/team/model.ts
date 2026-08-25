@@ -28,6 +28,7 @@ const EntityIdSchema = z
   .min(1)
   .max(TEAM_ENTITY_ID_MAX_CHARS)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const WorkspaceProjectIdSchema = z.string().min(1).max(8_192);
 const TimestampSchema = z.string().datetime({ offset: true });
 const ErrorSchema = nonBlankStringSchema(TEAM_ERROR_MAX_CHARS);
 
@@ -111,7 +112,7 @@ export const PersistedTeamDefinitionSchema = z
 export const PersistedTeamRunWorkspaceSnapshotSchema = z
   .object({
     workspaceId: EntityIdSchema,
-    projectId: EntityIdSchema,
+    projectId: WorkspaceProjectIdSchema,
     cwd: z.string().min(1).max(8_192),
     displayName: nonBlankStringSchema(512),
   })
@@ -366,7 +367,9 @@ function stepSnapshotMatchesRole(
     step.snapshot.roleInstructions === role.instructions &&
     step.snapshot.stepInstructions === workflowStep.instructions;
   const providerMatches = step.snapshot.resolvedLaunch.provider === role.launch.provider;
-  return identityMatches && instructionsMatch && providerMatches;
+  const modelMatches =
+    role.launch.model === null || step.snapshot.resolvedLaunch.model === role.launch.model;
+  return identityMatches && instructionsMatch && providerMatches && modelMatches;
 }
 
 function validateRunStepSnapshots(run: TeamRunRecordShape): ContractIssue[] {
@@ -395,6 +398,7 @@ function validateRunStepSnapshots(run: TeamRunRecordShape): ContractIssue[] {
 function validateRunLifecycle(run: TeamRunRecordShape): ContractIssue[] {
   const issues: ContractIssue[] = [];
   const stepStatuses = run.steps.map((step) => step.state.status);
+  issues.push(...validateSequentialStepStatuses(stepStatuses));
   const activeStepCount = stepStatuses.filter((status) => ACTIVE_STEP_STATUSES.has(status)).length;
   if (activeStepCount > 1) {
     issues.push({
@@ -440,16 +444,49 @@ function validateRunLifecycle(run: TeamRunRecordShape): ContractIssue[] {
     });
   }
   const hasFailedStep = stepStatuses.includes("failed");
+  const hasPendingStep = stepStatuses.includes("pending");
   const isBoundaryFailure = stepStatuses.every(
     (status) => status === "succeeded" || status === "pending",
   );
-  if (run.state.status === "failed" && !hasFailedStep && !isBoundaryFailure) {
+  const hasValidFailedState = hasFailedStep || (hasPendingStep && isBoundaryFailure);
+  if (run.state.status === "failed" && !hasValidFailedState) {
     issues.push({
       path: ["state", "status"],
       message: "A failed run requires a failed step or a preflight failure",
     });
   }
   return issues;
+}
+
+function validateSequentialStepStatuses(statuses: TeamRunStepStatus[]): ContractIssue[] {
+  let frontierIndex: number | null = null;
+  for (const [index, status] of statuses.entries()) {
+    if (status === "succeeded") {
+      if (frontierIndex !== null) {
+        return [
+          {
+            path: ["steps", index, "state", "status"],
+            message: "Succeeded steps must form a workflow prefix",
+          },
+        ];
+      }
+      continue;
+    }
+    if (status === "pending") {
+      frontierIndex ??= index;
+      continue;
+    }
+    if (frontierIndex !== null) {
+      return [
+        {
+          path: ["steps", index, "state", "status"],
+          message: "Only the next workflow step may be active or terminal",
+        },
+      ];
+    }
+    frontierIndex = index;
+  }
+  return [];
 }
 
 function validateRunTimestamps(run: TeamRunRecordShape): ContractIssue[] {

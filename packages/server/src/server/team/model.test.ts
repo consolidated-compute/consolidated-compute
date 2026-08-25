@@ -185,6 +185,26 @@ describe("Team Run contract", () => {
     );
   });
 
+  test("preserves legacy path-shaped project IDs in the Workspace snapshot", () => {
+    const run = createRun();
+    run.workspace.projectId = "/Users/example/legacy project";
+
+    expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
+  });
+
+  test("requires an explicit model preference in the resolved launch", () => {
+    const run = createRun();
+    run.steps[0]!.snapshot.resolvedLaunch.model = null;
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Run step snapshot must match its frozen Team role and workflow step",
+    );
+  });
+
   test("rejects more than one active sequential step", () => {
     const run = createRun();
     run.steps[0]!.state = {
@@ -199,6 +219,19 @@ describe("Team Run contract", () => {
     if (result.success) return;
     expect(result.error.issues.map((issue) => issue.message)).toContain(
       "A sequential Team Run cannot have more than one active step",
+    );
+  });
+
+  test("rejects a later active step while an earlier step is pending", () => {
+    const run = createRun();
+    run.steps[0]!.state = { status: "pending" };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Only the next workflow step may be active or terminal",
     );
   });
 
@@ -220,6 +253,33 @@ describe("Team Run contract", () => {
     run.state = { status: "succeeded", startedAt: timestamp, endedAt: timestamp };
 
     expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(false);
+  });
+
+  test("rejects a failed run after every step succeeded", () => {
+    const run = createRun();
+    run.steps[1]!.state = {
+      status: "succeeded",
+      agentId: "d65fc288-0a1b-45a9-b0c8-8346cd1721b3",
+      startedAt: timestamp,
+      endedAt: timestamp,
+    };
+    run.state = { status: "failed", startedAt: timestamp, endedAt: timestamp, error: "failed" };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "A failed run requires a failed step or a preflight failure",
+    );
+  });
+
+  test("accepts a failed run at a step boundary", () => {
+    const run = createRun();
+    run.steps[1]!.state = { status: "pending" };
+    run.state = { status: "failed", startedAt: timestamp, endedAt: timestamp, error: "missing" };
+
+    expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
   });
 
   test("rejects terminal timestamps before their start", () => {
