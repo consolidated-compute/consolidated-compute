@@ -79,19 +79,44 @@ function createWorkspace(workspaceId = "wks_team_service"): PersistedWorkspaceRe
 class MemoryWorkspaceRegistry implements TeamRunWorkspaceRegistry {
   private readonly listeners = new Set<(mutation: WorkspaceMutation) => void | Promise<void>>();
   private readonly terminationBoundaryListeners = new Set<
-    (boundary: WorkspaceTerminationBoundary) => void
+    (boundary: WorkspaceTerminationBoundary) => void | Promise<void>
   >();
   readonly workspaces = new Map<string, PersistedWorkspaceRecord>();
+  blockNextGet = false;
+  blockMutationWrite = false;
+  failMutationWrite = false;
   blockMutationPublication = false;
+  private nextTerminationBoundaryId = 1;
+  private releaseGet: (() => void) | null = null;
+  private releaseMutationWrite: (() => void) | null = null;
   private releaseMutationPublication: (() => void) | null = null;
+  private readonly mutationWriteWaiters = new Set<() => void>();
   private readonly mutationCommitWaiters = new Set<() => void>();
+  private readonly getWaiters = new Set<() => void>();
 
   constructor(workspace: PersistedWorkspaceRecord) {
     this.workspaces.set(workspace.workspaceId, workspace);
   }
 
   async get(workspaceId: string): Promise<PersistedWorkspaceRecord | null> {
-    return this.workspaces.get(workspaceId) ?? null;
+    const workspace = this.workspaces.get(workspaceId) ?? null;
+    if (!this.blockNextGet) return workspace;
+    this.blockNextGet = false;
+    for (const waiter of this.getWaiters) waiter();
+    this.getWaiters.clear();
+    await new Promise<void>((resolve) => {
+      this.releaseGet = resolve;
+    });
+    return workspace;
+  }
+
+  async waitForBlockedGet(): Promise<void> {
+    await new Promise<void>((resolve) => this.getWaiters.add(resolve));
+  }
+
+  unblockGet(): void {
+    this.releaseGet?.();
+    this.releaseGet = null;
   }
 
   subscribeToMutations(
@@ -102,19 +127,39 @@ class MemoryWorkspaceRegistry implements TeamRunWorkspaceRegistry {
   }
 
   subscribeToTerminationBoundaries(
-    listener: (boundary: WorkspaceTerminationBoundary) => void,
+    listener: (boundary: WorkspaceTerminationBoundary) => void | Promise<void>,
   ): () => void {
     this.terminationBoundaryListeners.add(listener);
     return () => this.terminationBoundaryListeners.delete(listener);
   }
 
   async archive(workspaceId: string): Promise<void> {
-    this.notifyTerminationBoundary({ phase: "start", kind: "archive", workspaceId });
+    const workspace = this.workspaces.get(workspaceId);
+    if (!workspace) return;
+    const boundaryId = `memory-workspace-termination-${this.nextTerminationBoundaryId++}`;
+    await this.notifyTerminationBoundary({
+      boundaryId,
+      phase: "start",
+      kind: "archive",
+      workspaceId,
+    });
     try {
-      const workspace = this.workspaces.get(workspaceId);
-      if (!workspace) return;
+      for (const waiter of this.mutationWriteWaiters) waiter();
+      this.mutationWriteWaiters.clear();
+      if (this.blockMutationWrite) {
+        await new Promise<void>((resolve) => {
+          this.releaseMutationWrite = resolve;
+        });
+      }
+      if (this.failMutationWrite) throw new Error("Workspace archive write failed");
       const archived = { ...workspace, archivedAt: timestamp, updatedAt: timestamp };
       this.workspaces.set(workspaceId, archived);
+      await this.notifyTerminationBoundary({
+        boundaryId,
+        phase: "commit",
+        kind: "archive",
+        workspaceId,
+      });
       for (const waiter of this.mutationCommitWaiters) waiter();
       this.mutationCommitWaiters.clear();
       if (this.blockMutationPublication) {
@@ -129,8 +174,23 @@ class MemoryWorkspaceRegistry implements TeamRunWorkspaceRegistry {
       };
       await Promise.all([...this.listeners].map((listener) => listener(mutation)));
     } finally {
-      this.notifyTerminationBoundary({ phase: "finish", kind: "archive", workspaceId });
+      await this.notifyTerminationBoundary({
+        boundaryId,
+        phase: "finish",
+        kind: "archive",
+        workspaceId,
+      });
     }
+  }
+
+  async waitForMutationWrite(): Promise<void> {
+    await new Promise<void>((resolve) => this.mutationWriteWaiters.add(resolve));
+  }
+
+  unblockMutationWrite(): void {
+    this.blockMutationWrite = false;
+    this.releaseMutationWrite?.();
+    this.releaseMutationWrite = null;
   }
 
   async waitForMutationCommit(): Promise<void> {
@@ -143,15 +203,35 @@ class MemoryWorkspaceRegistry implements TeamRunWorkspaceRegistry {
     this.releaseMutationPublication = null;
   }
 
-  private notifyTerminationBoundary(boundary: WorkspaceTerminationBoundary): void {
-    for (const listener of this.terminationBoundaryListeners) listener(boundary);
+  private async notifyTerminationBoundary(boundary: WorkspaceTerminationBoundary): Promise<void> {
+    await Promise.all([...this.terminationBoundaryListeners].map((listener) => listener(boundary)));
   }
 }
 
 class MemoryProviderCatalog implements TeamProviderCatalog {
   models = [{ provider: "codex", id: "gpt-5.6", label: "GPT-5.6" }];
+  blockRefresh = false;
+  private releaseRefresh: (() => void) | null = null;
+  private readonly refreshWaiters = new Set<() => void>();
 
-  async refreshSnapshotForCwd(): Promise<void> {}
+  async refreshSnapshotForCwd(): Promise<void> {
+    for (const waiter of this.refreshWaiters) waiter();
+    this.refreshWaiters.clear();
+    if (!this.blockRefresh) return;
+    await new Promise<void>((resolve) => {
+      this.releaseRefresh = resolve;
+    });
+  }
+
+  async waitForRefresh(): Promise<void> {
+    await new Promise<void>((resolve) => this.refreshWaiters.add(resolve));
+  }
+
+  unblockRefresh(): void {
+    this.blockRefresh = false;
+    this.releaseRefresh?.();
+    this.releaseRefresh = null;
+  }
 
   async listModels() {
     return this.models;
@@ -636,6 +716,64 @@ describe("TeamRunService", () => {
       status: "canceled",
       agentId: secondAgentId,
     });
+  });
+
+  test("does not cancel a run when the Workspace archive write fails", async () => {
+    const harness = await createHarness();
+    const run = await startRun(harness);
+    await harness.runtime.waitForStream(firstAgentId);
+    harness.runtime.finalResponses.set(firstAgentId, "Builder finished.");
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+    });
+    await harness.runtime.waitForStream(secondAgentId);
+    harness.workspaceRegistry.blockMutationWrite = true;
+    harness.workspaceRegistry.failMutationWrite = true;
+    const writeStarted = harness.workspaceRegistry.waitForMutationWrite();
+
+    const archiving = harness.workspaceRegistry.archive("wks_team_service").catch((error) => error);
+    await writeStarted;
+    harness.runtime.finalResponses.set(secondAgentId, "Review finished.");
+    await harness.runtime.pushEvent(secondAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+    });
+    harness.workspaceRegistry.unblockMutationWrite();
+
+    await expect(archiving).resolves.toBeInstanceOf(Error);
+    const completed = await harness.service.waitForRun(run.id);
+    expect(completed.state.status).toBe("succeeded");
+    expect(harness.workspaceRegistry.workspaces.get("wks_team_service")?.archivedAt).toBeNull();
+  });
+
+  test("does not create the next agent after Workspace termination starts during revalidation", async () => {
+    const harness = await createHarness();
+    const run = await startRun(harness);
+    await harness.runtime.waitForStream(firstAgentId);
+    harness.runtime.finalResponses.set(firstAgentId, "Builder finished.");
+    harness.providerCatalog.blockRefresh = true;
+    const refreshStarted = harness.providerCatalog.waitForRefresh();
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+    });
+    await refreshStarted;
+
+    harness.workspaceRegistry.blockNextGet = true;
+    const staleReadStarted = harness.workspaceRegistry.waitForBlockedGet();
+    harness.providerCatalog.unblockRefresh();
+    await staleReadStarted;
+    await harness.workspaceRegistry.archive("wks_team_service");
+    harness.workspaceRegistry.unblockGet();
+
+    const canceled = await harness.service.waitForRun(run.id);
+    expect(canceled.state.status).toBe("canceled");
+    expect(canceled.steps[1]?.state).toMatchObject({
+      status: "canceled",
+      agentId: null,
+    });
+    expect(harness.runtime.creations).toHaveLength(1);
   });
 
   test("fences starts and interrupts unsettled work during shutdown", async () => {

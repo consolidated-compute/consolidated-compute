@@ -46,7 +46,7 @@ const ACTIVE_STEP_STATUSES: ReadonlySet<TeamRunStepStatus> = new Set([
 export interface TeamRunWorkspaceRegistry extends TeamWorkspaceStore {
   subscribeToMutations(listener: (mutation: WorkspaceMutation) => void | Promise<void>): () => void;
   subscribeToTerminationBoundaries(
-    listener: (boundary: WorkspaceTerminationBoundary) => void,
+    listener: (boundary: WorkspaceTerminationBoundary) => void | Promise<void>,
   ): () => void;
 }
 
@@ -95,6 +95,15 @@ interface StepEventResult {
   outcome: StepExecutionOutcome | null;
 }
 
+type WorkspaceTerminationOutcome = "committed" | "failed";
+
+interface WorkspaceTerminationFence {
+  status: "pending" | "committed";
+  outcome: Promise<WorkspaceTerminationOutcome>;
+  resolveOutcome: (outcome: WorkspaceTerminationOutcome) => void;
+  releaseOperation: (() => void) | null;
+}
+
 export class TeamRunService {
   private readonly repository: TeamRepository;
   private readonly workspaceRegistry: TeamRunWorkspaceRegistry;
@@ -108,7 +117,11 @@ export class TeamRunService {
   private readonly createAgentId: () => string;
   private readonly executions = new Map<string, Promise<void>>();
   private readonly terminationRequests = new Map<string, TeamRunTerminationReason>();
-  private readonly workspaceTerminationFences = new Map<string, number>();
+  private readonly workspaceTerminationFences = new Map<
+    string,
+    Map<string, WorkspaceTerminationFence>
+  >();
+  private readonly workspaceOperationTails = new Map<string, Promise<void>>();
   private admissionTail: Promise<unknown> = Promise.resolve();
   private unsubscribeWorkspaceMutations: (() => void) | null = null;
   private unsubscribeWorkspaceTerminationBoundaries: (() => void) | null = null;
@@ -211,9 +224,6 @@ export class TeamRunService {
     });
     this.unsubscribeWorkspaceMutations?.();
     this.unsubscribeWorkspaceMutations = null;
-    this.unsubscribeWorkspaceTerminationBoundaries?.();
-    this.unsubscribeWorkspaceTerminationBoundaries = null;
-
     const activeRuns = await this.repository.listActiveRuns();
     for (const run of activeRuns) this.requestTermination(run.id, "shutdown");
     await Promise.allSettled(activeRuns.map((run) => this.stopActiveRun(run.id)));
@@ -222,6 +232,10 @@ export class TeamRunService {
     for (const run of unsettledRuns) {
       await this.finishTermination(run.id, "shutdown", "Daemon shut down during Team Run");
     }
+    await this.waitForPendingWorkspaceTerminations();
+    this.unsubscribeWorkspaceTerminationBoundaries?.();
+    this.unsubscribeWorkspaceTerminationBoundaries = null;
+    this.releaseWorkspaceTerminationFences();
   }
 
   private requireAcceptingStarts(): void {
@@ -235,6 +249,87 @@ export class TeamRunService {
       () => undefined,
     );
     return result;
+  }
+
+  private async acquireWorkspaceOperation(workspaceId: string): Promise<() => void> {
+    const previous = this.workspaceOperationTails.get(workspaceId) ?? Promise.resolve();
+    let releaseCurrent!: () => void;
+    const current = new Promise<void>((resolve) => {
+      releaseCurrent = resolve;
+    });
+    this.workspaceOperationTails.set(workspaceId, current);
+    await previous;
+
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      releaseCurrent();
+      void current.then(() => {
+        if (this.workspaceOperationTails.get(workspaceId) === current) {
+          this.workspaceOperationTails.delete(workspaceId);
+        }
+        return undefined;
+      });
+    };
+  }
+
+  private pendingWorkspaceTerminationOutcomes(
+    workspaceId: string,
+  ): Promise<WorkspaceTerminationOutcome>[] {
+    const fences = this.workspaceTerminationFences.get(workspaceId);
+    return [...(fences?.values() ?? [])]
+      .filter((fence) => fence.status === "pending")
+      .map((fence) => fence.outcome);
+  }
+
+  private async withWorkspaceOperation<T>(
+    workspaceId: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    for (;;) {
+      const pendingBeforeLock = this.pendingWorkspaceTerminationOutcomes(workspaceId);
+      if (pendingBeforeLock.length > 0) {
+        await Promise.all(pendingBeforeLock);
+        continue;
+      }
+
+      const release = await this.acquireWorkspaceOperation(workspaceId);
+      const pendingAfterLock = this.pendingWorkspaceTerminationOutcomes(workspaceId);
+      if (pendingAfterLock.length > 0) {
+        release();
+        await Promise.all(pendingAfterLock);
+        continue;
+      }
+
+      try {
+        return await operation();
+      } finally {
+        release();
+      }
+    }
+  }
+
+  private async waitForPendingWorkspaceTerminations(): Promise<void> {
+    for (;;) {
+      const pending = [...this.workspaceTerminationFences.values()].flatMap((fences) =>
+        [...fences.values()]
+          .filter((fence) => fence.status === "pending")
+          .map((fence) => fence.outcome),
+      );
+      if (pending.length === 0) return;
+      await Promise.all(pending);
+    }
+  }
+
+  private releaseWorkspaceTerminationFences(): void {
+    for (const fences of this.workspaceTerminationFences.values()) {
+      for (const fence of fences.values()) {
+        if (fence.status === "pending") fence.resolveOutcome("failed");
+        fence.releaseOperation?.();
+      }
+    }
+    this.workspaceTerminationFences.clear();
   }
 
   private launchExecution(runId: string): void {
@@ -316,7 +411,7 @@ export class TeamRunService {
         workspaceRegistry: this.workspaceRegistry,
         providerCatalog: this.providerCatalog,
         featureCatalog: this.agentManager,
-        createAgent: this.createAgent,
+        createAgent: (input) => this.createStepAgent(run, active.index, input),
         agentManager: this.agentManager,
       },
       {
@@ -360,12 +455,15 @@ export class TeamRunService {
     events: AsyncGenerator<TeamStepExecutionEvent, void, void>,
   ): Promise<boolean> {
     const current = await this.requireRun(runId);
-    const isTerminal = isTerminalTeamRunStatus(current.state.status);
-    const reason = this.requestedTerminationReason(current);
-    if (!isTerminal && !reason) return false;
-    await events.return(undefined);
-    if (!isTerminal) await this.finishTermination(runId, reason ?? "cancel");
-    return true;
+    return this.withWorkspaceOperation(current.workspace.workspaceId, async () => {
+      const latest = await this.requireRun(runId);
+      const isTerminal = isTerminalTeamRunStatus(latest.state.status);
+      const reason = this.requestedTerminationReason(latest);
+      if (!isTerminal && !reason) return false;
+      await events.return(undefined);
+      if (!isTerminal) await this.finishTermination(runId, reason ?? "cancel");
+      return true;
+    });
   }
 
   private async handleStepEvent(
@@ -374,7 +472,7 @@ export class TeamRunService {
     event: TeamStepExecutionEvent,
   ): Promise<StepEventResult> {
     if (event.type === "agent_created") {
-      const persisted = await this.persistAgentCreated(runId, stepIndex, event.agentId);
+      const persisted = await this.requireRun(runId);
       const outcome = isTerminalTeamRunStatus(persisted.state.status)
         ? { status: "terminal" as const }
         : null;
@@ -451,6 +549,28 @@ export class TeamRunService {
     });
   }
 
+  private async createStepAgent(
+    run: PersistedTeamRunRecord,
+    stepIndex: number,
+    input: CreateAgentFromMcpInput,
+  ): Promise<unknown> {
+    const agentId = input.agentId;
+    if (!agentId) throw new Error(`Team Run ${run.id} step has no planned agent ID`);
+    return this.withWorkspaceOperation(run.workspace.workspaceId, async () => {
+      const current = await this.requireRun(run.id);
+      const reason = this.requestedTerminationReason(current);
+      if (isTerminalTeamRunStatus(current.state.status) || reason) {
+        if (!isTerminalTeamRunStatus(current.state.status)) {
+          await this.finishTermination(run.id, reason ?? "cancel");
+        }
+        throw new Error(`Team Run ${run.id} stopped before agent creation`);
+      }
+      const created = await this.createAgent(input);
+      await this.persistAgentCreated(run.id, stepIndex, agentId);
+      return created;
+    });
+  }
+
   private async persistPermissionState(
     runId: string,
     stepIndex: number,
@@ -492,57 +612,60 @@ export class TeamRunService {
     finalResponse: string,
   ): Promise<StepExecutionOutcome> {
     const nextPlannedAgentId = this.createAgentId();
-    let advanced = false;
-    const timestamp = this.timestamp();
-    await this.repository.updateRun(runId, (run) => {
-      if (isTerminalTeamRunStatus(run.state.status)) return unchangedRun(run);
-      const step = run.steps[stepIndex];
-      if (!step || !("plannedAgentId" in step.state) || !("agentId" in step.state)) {
-        return unchangedRun(run);
-      }
-      if (step.state.agentId === null) return unchangedRun(run);
-      const reason = this.requestedTerminationReason(run);
-      if (reason) {
-        return terminationRunUpdate(run, reason, timestamp);
-      }
-      const succeededStep: TeamRunStep = {
-        ...step,
-        state: {
-          status: "succeeded",
-          plannedAgentId: step.state.plannedAgentId,
-          agentId: step.state.agentId,
-          startedAt: step.state.startedAt,
-          endedAt: timestamp,
-        },
-      };
-      const nextStep = run.steps[stepIndex + 1];
-      if (!nextStep) {
-        return {
-          steps: replaceStep(run.steps, stepIndex, succeededStep),
+    const current = await this.requireRun(runId);
+    return this.withWorkspaceOperation(current.workspace.workspaceId, async () => {
+      let advanced = false;
+      const timestamp = this.timestamp();
+      await this.repository.updateRun(runId, (run) => {
+        if (isTerminalTeamRunStatus(run.state.status)) return unchangedRun(run);
+        const step = run.steps[stepIndex];
+        if (!step || !("plannedAgentId" in step.state) || !("agentId" in step.state)) {
+          return unchangedRun(run);
+        }
+        if (step.state.agentId === null) return unchangedRun(run);
+        const reason = this.requestedTerminationReason(run);
+        if (reason) {
+          return terminationRunUpdate(run, reason, timestamp);
+        }
+        const succeededStep: TeamRunStep = {
+          ...step,
           state: {
             status: "succeeded",
-            startedAt: requireRunStartedAt(run),
+            plannedAgentId: step.state.plannedAgentId,
+            agentId: step.state.agentId,
+            startedAt: step.state.startedAt,
             endedAt: timestamp,
           },
         };
-      }
+        const nextStep = run.steps[stepIndex + 1];
+        if (!nextStep) {
+          return {
+            steps: replaceStep(run.steps, stepIndex, succeededStep),
+            state: {
+              status: "succeeded",
+              startedAt: requireRunStartedAt(run),
+              endedAt: timestamp,
+            },
+          };
+        }
 
-      advanced = true;
-      const steps = replaceStep(run.steps, stepIndex, succeededStep);
-      steps[stepIndex + 1] = {
-        ...nextStep,
-        state: {
-          status: "creating",
-          plannedAgentId: nextPlannedAgentId,
-          startedAt: timestamp,
-        },
-      };
-      return {
-        steps,
-        state: { status: "running", startedAt: requireRunStartedAt(run) },
-      };
+        advanced = true;
+        const steps = replaceStep(run.steps, stepIndex, succeededStep);
+        steps[stepIndex + 1] = {
+          ...nextStep,
+          state: {
+            status: "creating",
+            plannedAgentId: nextPlannedAgentId,
+            startedAt: timestamp,
+          },
+        };
+        return {
+          steps,
+          state: { status: "running", startedAt: requireRunStartedAt(run) },
+        };
+      });
+      return advanced ? { status: "next", finalResponse } : { status: "terminal" };
     });
-    return advanced ? { status: "next", finalResponse } : { status: "terminal" };
   }
 
   private async stopActiveRun(runId: string): Promise<PersistedTeamRunRecord> {
@@ -627,36 +750,39 @@ export class TeamRunService {
   }
 
   private async failRun(runId: string, error: unknown): Promise<PersistedTeamRunRecord> {
-    const timestamp = this.timestamp();
     const message = boundedError(errorMessage(error));
-    return this.repository.updateRun(runId, (run) => {
-      if (isTerminalTeamRunStatus(run.state.status)) return unchangedRun(run);
-      const requestedReason = this.requestedTerminationReason(run);
-      if (requestedReason) return terminationRunUpdate(run, requestedReason, timestamp);
-      const active = findActiveStep(run);
-      const startedAt = runStartedAt(run) ?? timestamp;
-      if (!active || !("plannedAgentId" in active.step.state)) {
+    const current = await this.requireRun(runId);
+    return this.withWorkspaceOperation(current.workspace.workspaceId, async () => {
+      const timestamp = this.timestamp();
+      return this.repository.updateRun(runId, (run) => {
+        if (isTerminalTeamRunStatus(run.state.status)) return unchangedRun(run);
+        const requestedReason = this.requestedTerminationReason(run);
+        if (requestedReason) return terminationRunUpdate(run, requestedReason, timestamp);
+        const active = findActiveStep(run);
+        const startedAt = runStartedAt(run) ?? timestamp;
+        if (!active || !("plannedAgentId" in active.step.state)) {
+          return {
+            steps: run.steps,
+            state: { status: "failed", startedAt, endedAt: timestamp, error: message },
+          };
+        }
+        const agentId = "agentId" in active.step.state ? active.step.state.agentId : null;
+        const failedStep: TeamRunStep = {
+          ...active.step,
+          state: {
+            status: "failed",
+            plannedAgentId: active.step.state.plannedAgentId,
+            agentId,
+            startedAt: active.step.state.startedAt,
+            endedAt: timestamp,
+            error: message,
+          },
+        };
         return {
-          steps: run.steps,
+          steps: replaceStep(run.steps, active.index, failedStep),
           state: { status: "failed", startedAt, endedAt: timestamp, error: message },
         };
-      }
-      const agentId = "agentId" in active.step.state ? active.step.state.agentId : null;
-      const failedStep: TeamRunStep = {
-        ...active.step,
-        state: {
-          status: "failed",
-          plannedAgentId: active.step.state.plannedAgentId,
-          agentId,
-          startedAt: active.step.state.startedAt,
-          endedAt: timestamp,
-          error: message,
-        },
-      };
-      return {
-        steps: replaceStep(run.steps, active.index, failedStep),
-        state: { status: "failed", startedAt, endedAt: timestamp, error: message },
-      };
+      });
     });
   }
 
@@ -671,9 +797,13 @@ export class TeamRunService {
   private requestedTerminationReason(
     run: PersistedTeamRunRecord,
   ): TeamRunTerminationReason | undefined {
+    const fences = this.workspaceTerminationFences.get(run.workspace.workspaceId);
+    const hasCommittedWorkspaceTermination = [...(fences?.values() ?? [])].some(
+      (fence) => fence.status === "committed",
+    );
     return (
       this.terminationRequests.get(run.id) ??
-      (this.workspaceTerminationFences.has(run.workspace.workspaceId) ? "workspace" : undefined)
+      (hasCommittedWorkspaceTermination ? "workspace" : undefined)
     );
   }
 
@@ -685,14 +815,42 @@ export class TeamRunService {
     await this.stopActiveRun(run.id);
   }
 
-  private handleWorkspaceTerminationBoundary(boundary: WorkspaceTerminationBoundary): void {
-    const current = this.workspaceTerminationFences.get(boundary.workspaceId) ?? 0;
+  private handleWorkspaceTerminationBoundary(
+    boundary: WorkspaceTerminationBoundary,
+  ): void | Promise<void> {
     if (boundary.phase === "start") {
-      this.workspaceTerminationFences.set(boundary.workspaceId, current + 1);
+      let resolveOutcome!: (outcome: WorkspaceTerminationOutcome) => void;
+      const outcome = new Promise<WorkspaceTerminationOutcome>((resolve) => {
+        resolveOutcome = resolve;
+      });
+      const fence: WorkspaceTerminationFence = {
+        status: "pending",
+        outcome,
+        resolveOutcome,
+        releaseOperation: null,
+      };
+      const fences = this.workspaceTerminationFences.get(boundary.workspaceId) ?? new Map();
+      fences.set(boundary.boundaryId, fence);
+      this.workspaceTerminationFences.set(boundary.workspaceId, fences);
+      return this.acquireWorkspaceOperation(boundary.workspaceId).then((release) => {
+        fence.releaseOperation = release;
+        return undefined;
+      });
+    }
+    const fences = this.workspaceTerminationFences.get(boundary.workspaceId);
+    const fence = fences?.get(boundary.boundaryId);
+    if (!fence) return;
+    if (boundary.phase === "commit") {
+      fence.status = "committed";
+      fence.resolveOutcome("committed");
+      fence.releaseOperation?.();
+      fence.releaseOperation = null;
       return;
     }
-    if (current <= 1) this.workspaceTerminationFences.delete(boundary.workspaceId);
-    else this.workspaceTerminationFences.set(boundary.workspaceId, current - 1);
+    if (fence.status === "pending") fence.resolveOutcome("failed");
+    fence.releaseOperation?.();
+    fences?.delete(boundary.boundaryId);
+    if (fences?.size === 0) this.workspaceTerminationFences.delete(boundary.workspaceId);
   }
 
   private async requireRun(runId: string): Promise<PersistedTeamRunRecord> {

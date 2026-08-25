@@ -478,7 +478,45 @@ describe("workspace registries", () => {
 
     await registry.archive("workspace-boundary", "2026-03-03T00:00:00.000Z");
 
-    expect(events).toEqual(["start", "write", "archive", "finish"]);
+    expect(events).toEqual(["start", "write", "commit", "archive", "finish"]);
+  });
+
+  test("finishes an uncommitted termination boundary when the archive write fails", async () => {
+    const events: string[] = [];
+    let failNextWrite = false;
+    const registry = new FileBackedWorkspaceRegistry(
+      path.join(tmpDir, "projects", "failed-boundary-workspaces.json"),
+      logger,
+      {
+        writeRecords: async () => {
+          events.push("write");
+          if (failNextWrite) throw new Error("disk full");
+        },
+      },
+    );
+    await registry.initialize();
+    await registry.upsert(
+      createPersistedWorkspaceRecord({
+        workspaceId: "workspace-failed-boundary",
+        projectId: "project-one",
+        cwd: "/tmp/repo",
+        kind: "local_checkout",
+        displayName: "main",
+        createdAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      }),
+    );
+    events.length = 0;
+    registry.subscribeToTerminationBoundaries((boundary) => events.push(boundary.phase));
+    registry.subscribeToMutations((mutation) => events.push(mutation.kind));
+    failNextWrite = true;
+
+    await expect(
+      registry.archive("workspace-failed-boundary", "2026-03-03T00:00:00.000Z"),
+    ).rejects.toThrow("disk full");
+
+    expect(events).toEqual(["start", "write", "finish"]);
+    expect(await registry.get("workspace-failed-boundary")).toMatchObject({ archivedAt: null });
   });
 
   test("refreshes workspace archive timestamps when an archive is repeated", async () => {
