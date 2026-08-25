@@ -225,6 +225,47 @@ test("mcp create accepts provider-only internal input and leaves model undefined
       workspaceId: "ws-create-test",
     }),
   );
+  expect(createAgent.mock.calls[0]?.[2]).not.toHaveProperty("requireFreshAgentId");
+});
+
+test("mcp create forwards a preallocated agent ID through the fresh-ID path", async () => {
+  const agentId = "00000000-0000-4000-8000-000000000201";
+  const snapshot = {
+    id: agentId,
+    provider: "codex",
+    cwd: "/tmp/paseo-create-test",
+    runtimeInfo: null,
+  } as ManagedAgent;
+  const createAgent = vi.fn(async () => snapshot);
+  const dependencies: Parameters<typeof createAgentCommand>[0] = {
+    agentManager: {
+      createAgent,
+      getAgent: vi.fn(() => snapshot),
+    } as unknown as Parameters<typeof createAgentCommand>[0]["agentManager"],
+    agentStorage: {} as Parameters<typeof createAgentCommand>[0]["agentStorage"],
+    logger: createTestLogger(),
+    providerSnapshotManager: createProviderSnapshotManagerStub().manager,
+  };
+
+  await createAgentCommand(dependencies, {
+    kind: "mcp",
+    agentId,
+    provider: "codex",
+    cwd: "/tmp/paseo-create-test",
+    workspaceId: "ws-create-test",
+    title: "planned Team role",
+    background: true,
+    notifyOnFinish: false,
+  });
+
+  expect(createAgent).toHaveBeenCalledWith(
+    expect.objectContaining({ provider: "codex" }),
+    agentId,
+    expect.objectContaining({
+      workspaceId: "ws-create-test",
+      requireFreshAgentId: true,
+    }),
+  );
 });
 
 test("session create stamps the requested workspaceId when no worktree setup runs", async () => {

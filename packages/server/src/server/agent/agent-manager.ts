@@ -266,6 +266,7 @@ export interface CreateAgentOptions {
   // undefined is an explicit decision: the agent never appears in the sidebar.
   workspaceId: string | undefined;
   owner?: AgentOwner;
+  requireFreshAgentId?: boolean;
 }
 
 export interface AgentManagerOptions {
@@ -685,6 +686,7 @@ export class AgentManager {
   private readonly previousStatuses = new Map<string, AgentLifecycleStatus>();
   private readonly backgroundTasks = new Set<Promise<void>>();
   private readonly agentRegistrationTasks = new Set<Promise<void>>();
+  private readonly freshAgentIdsInFlight = new Set<string>();
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
   private readonly lifecycleMutationTails = new Map<string, Promise<void>>();
   private readonly agentStreamCoalescer: AgentStreamCoalescer;
@@ -1133,7 +1135,22 @@ export class AgentManager {
     agentId: string | undefined,
     options: CreateAgentOptions,
   ): Promise<ManagedAgent> {
-    return this.trackAgentRegistrationOperation(this.createAgentInternal(config, agentId, options));
+    if (!options.requireFreshAgentId || agentId === undefined) {
+      return this.trackAgentRegistrationOperation(
+        this.createAgentInternal(config, agentId, options),
+      );
+    }
+
+    const resolvedAgentId = validateAgentId(agentId, "createAgent");
+    if (this.agents.has(resolvedAgentId) || this.freshAgentIdsInFlight.has(resolvedAgentId)) {
+      return Promise.reject(new Error(`Agent with id ${resolvedAgentId} already exists`));
+    }
+
+    this.freshAgentIdsInFlight.add(resolvedAgentId);
+    const registration = this.trackAgentRegistrationOperation(
+      this.createAgentInternal(config, resolvedAgentId, options),
+    );
+    return registration.finally(() => this.freshAgentIdsInFlight.delete(resolvedAgentId));
   }
 
   private async createAgentInternal(
@@ -1143,6 +1160,12 @@ export class AgentManager {
   ): Promise<ManagedAgent> {
     this.assertAcceptingAgentRegistrations();
     const resolvedAgentId = validateAgentId(agentId ?? this.idFactory(), "createAgent");
+    if (options.requireFreshAgentId) {
+      const existing = await this.registry?.get(resolvedAgentId);
+      if (existing || this.agents.has(resolvedAgentId)) {
+        throw new Error(`Agent with id ${resolvedAgentId} already exists`);
+      }
+    }
     await this.deleteAgentState(resolvedAgentId);
     const { storedConfig, launchConfig } = await this.prepareSessionConfig(
       config,
