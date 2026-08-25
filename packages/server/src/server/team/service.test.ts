@@ -18,6 +18,7 @@ import {
   createPersistedWorkspaceRecord,
   type PersistedWorkspaceRecord,
   type WorkspaceMutation,
+  type WorkspaceTerminationBoundary,
 } from "../workspace-registry.js";
 import type { TeamProviderCatalog } from "./execution.js";
 import type { PersistedTeamDefinition, PersistedTeamRunRecord } from "./model.js";
@@ -77,7 +78,13 @@ function createWorkspace(workspaceId = "wks_team_service"): PersistedWorkspaceRe
 
 class MemoryWorkspaceRegistry implements TeamRunWorkspaceRegistry {
   private readonly listeners = new Set<(mutation: WorkspaceMutation) => void | Promise<void>>();
+  private readonly terminationBoundaryListeners = new Set<
+    (boundary: WorkspaceTerminationBoundary) => void
+  >();
   readonly workspaces = new Map<string, PersistedWorkspaceRecord>();
+  blockMutationPublication = false;
+  private releaseMutationPublication: (() => void) | null = null;
+  private readonly mutationCommitWaiters = new Set<() => void>();
 
   constructor(workspace: PersistedWorkspaceRecord) {
     this.workspaces.set(workspace.workspaceId, workspace);
@@ -94,17 +101,50 @@ class MemoryWorkspaceRegistry implements TeamRunWorkspaceRegistry {
     return () => this.listeners.delete(listener);
   }
 
+  subscribeToTerminationBoundaries(
+    listener: (boundary: WorkspaceTerminationBoundary) => void,
+  ): () => void {
+    this.terminationBoundaryListeners.add(listener);
+    return () => this.terminationBoundaryListeners.delete(listener);
+  }
+
   async archive(workspaceId: string): Promise<void> {
-    const workspace = this.workspaces.get(workspaceId);
-    if (!workspace) return;
-    const archived = { ...workspace, archivedAt: timestamp, updatedAt: timestamp };
-    this.workspaces.set(workspaceId, archived);
-    const mutation: WorkspaceMutation = {
-      kind: "archive",
-      workspaceId,
-      workspace: archived,
-    };
-    await Promise.all([...this.listeners].map((listener) => listener(mutation)));
+    this.notifyTerminationBoundary({ phase: "start", kind: "archive", workspaceId });
+    try {
+      const workspace = this.workspaces.get(workspaceId);
+      if (!workspace) return;
+      const archived = { ...workspace, archivedAt: timestamp, updatedAt: timestamp };
+      this.workspaces.set(workspaceId, archived);
+      for (const waiter of this.mutationCommitWaiters) waiter();
+      this.mutationCommitWaiters.clear();
+      if (this.blockMutationPublication) {
+        await new Promise<void>((resolve) => {
+          this.releaseMutationPublication = resolve;
+        });
+      }
+      const mutation: WorkspaceMutation = {
+        kind: "archive",
+        workspaceId,
+        workspace: archived,
+      };
+      await Promise.all([...this.listeners].map((listener) => listener(mutation)));
+    } finally {
+      this.notifyTerminationBoundary({ phase: "finish", kind: "archive", workspaceId });
+    }
+  }
+
+  async waitForMutationCommit(): Promise<void> {
+    await new Promise<void>((resolve) => this.mutationCommitWaiters.add(resolve));
+  }
+
+  unblockMutationPublication(): void {
+    this.blockMutationPublication = false;
+    this.releaseMutationPublication?.();
+    this.releaseMutationPublication = null;
+  }
+
+  private notifyTerminationBoundary(boundary: WorkspaceTerminationBoundary): void {
+    for (const listener of this.terminationBoundaryListeners) listener(boundary);
   }
 }
 
@@ -558,6 +598,37 @@ describe("TeamRunService", () => {
     });
     const canceled = await harness.service.waitForRun(run.id);
     releaseLookup?.();
+    await archiving;
+
+    expect(canceled.state.status).toBe("canceled");
+    expect(canceled.steps[1]?.state).toMatchObject({
+      status: "canceled",
+      agentId: secondAgentId,
+    });
+  });
+
+  test("fences final completion before an archived Workspace is published", async () => {
+    const harness = await createHarness();
+    const run = await startRun(harness);
+    await harness.runtime.waitForStream(firstAgentId);
+    harness.runtime.finalResponses.set(firstAgentId, "Builder finished.");
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+    });
+    await harness.runtime.waitForStream(secondAgentId);
+    harness.workspaceRegistry.blockMutationPublication = true;
+    const committed = harness.workspaceRegistry.waitForMutationCommit();
+
+    const archiving = harness.workspaceRegistry.archive("wks_team_service");
+    await committed;
+    harness.runtime.finalResponses.set(secondAgentId, "Review crossed the commit boundary.");
+    await harness.runtime.pushEvent(secondAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+    });
+    const canceled = await harness.service.waitForRun(run.id);
+    harness.workspaceRegistry.unblockMutationPublication();
     await archiving;
 
     expect(canceled.state.status).toBe("canceled");

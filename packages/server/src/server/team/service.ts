@@ -4,7 +4,7 @@ import type { Logger } from "pino";
 
 import type { AgentRunCancellationResult } from "../agent/agent-manager.js";
 import type { CreateAgentFromMcpInput } from "../agent/create-agent/create.js";
-import type { WorkspaceMutation } from "../workspace-registry.js";
+import type { WorkspaceMutation, WorkspaceTerminationBoundary } from "../workspace-registry.js";
 import {
   executeTeamStep,
   preflightTeamRun,
@@ -44,8 +44,9 @@ const ACTIVE_STEP_STATUSES: ReadonlySet<TeamRunStepStatus> = new Set([
 ] as const);
 
 export interface TeamRunWorkspaceRegistry extends TeamWorkspaceStore {
-  subscribeToMutations?(
-    listener: (mutation: WorkspaceMutation) => void | Promise<void>,
+  subscribeToMutations(listener: (mutation: WorkspaceMutation) => void | Promise<void>): () => void;
+  subscribeToTerminationBoundaries(
+    listener: (boundary: WorkspaceTerminationBoundary) => void,
   ): () => void;
 }
 
@@ -110,6 +111,7 @@ export class TeamRunService {
   private readonly workspaceTerminationFences = new Map<string, number>();
   private admissionTail: Promise<unknown> = Promise.resolve();
   private unsubscribeWorkspaceMutations: (() => void) | null = null;
+  private unsubscribeWorkspaceTerminationBoundaries: (() => void) | null = null;
   private acceptingStarts = false;
   private initialized = false;
 
@@ -136,10 +138,13 @@ export class TeamRunService {
         "Daemon restarted before the Team Run reached a durable terminal state",
       );
     }
-    this.unsubscribeWorkspaceMutations =
-      this.workspaceRegistry.subscribeToMutations?.((mutation) =>
-        this.handleWorkspaceMutation(mutation),
-      ) ?? null;
+    this.unsubscribeWorkspaceTerminationBoundaries =
+      this.workspaceRegistry.subscribeToTerminationBoundaries((boundary) =>
+        this.handleWorkspaceTerminationBoundary(boundary),
+      );
+    this.unsubscribeWorkspaceMutations = this.workspaceRegistry.subscribeToMutations((mutation) =>
+      this.handleWorkspaceMutation(mutation),
+    );
     this.initialized = true;
     this.acceptingStarts = true;
   }
@@ -206,6 +211,8 @@ export class TeamRunService {
     });
     this.unsubscribeWorkspaceMutations?.();
     this.unsubscribeWorkspaceMutations = null;
+    this.unsubscribeWorkspaceTerminationBoundaries?.();
+    this.unsubscribeWorkspaceTerminationBoundaries = null;
 
     const activeRuns = await this.repository.listActiveRuns();
     for (const run of activeRuns) this.requestTermination(run.id, "shutdown");
@@ -672,18 +679,20 @@ export class TeamRunService {
 
   private async handleWorkspaceMutation(mutation: WorkspaceMutation): Promise<void> {
     if (mutation.kind !== "archive" && mutation.kind !== "remove") return;
-    const fenceCount = this.workspaceTerminationFences.get(mutation.workspaceId) ?? 0;
-    this.workspaceTerminationFences.set(mutation.workspaceId, fenceCount + 1);
-    try {
-      const run = await this.repository.getActiveRunForWorkspace(mutation.workspaceId);
-      if (!run) return;
-      this.requestTermination(run.id, "workspace");
-      await this.stopActiveRun(run.id);
-    } finally {
-      const remaining = (this.workspaceTerminationFences.get(mutation.workspaceId) ?? 1) - 1;
-      if (remaining === 0) this.workspaceTerminationFences.delete(mutation.workspaceId);
-      else this.workspaceTerminationFences.set(mutation.workspaceId, remaining);
+    const run = await this.repository.getActiveRunForWorkspace(mutation.workspaceId);
+    if (!run) return;
+    this.requestTermination(run.id, "workspace");
+    await this.stopActiveRun(run.id);
+  }
+
+  private handleWorkspaceTerminationBoundary(boundary: WorkspaceTerminationBoundary): void {
+    const current = this.workspaceTerminationFences.get(boundary.workspaceId) ?? 0;
+    if (boundary.phase === "start") {
+      this.workspaceTerminationFences.set(boundary.workspaceId, current + 1);
+      return;
     }
+    if (current <= 1) this.workspaceTerminationFences.delete(boundary.workspaceId);
+    else this.workspaceTerminationFences.set(boundary.workspaceId, current - 1);
   }
 
   private async requireRun(runId: string): Promise<PersistedTeamRunRecord> {
