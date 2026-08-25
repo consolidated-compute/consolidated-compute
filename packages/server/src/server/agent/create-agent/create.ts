@@ -179,14 +179,16 @@ export async function createAgentCommand(
     input.kind === "session"
       ? await resolveSessionCreateAgent(dependencies, input)
       : await resolveMcpCreateAgent(dependencies, input);
+  const plannedAgentId = input.kind === "mcp" ? input.agentId : undefined;
+  const createOptions =
+    plannedAgentId === undefined
+      ? resolved.createOptions
+      : { ...resolved.createOptions, requireFreshAgentId: true };
 
   const snapshot = await dependencies.agentManager.createAgent(
     resolved.config,
-    input.kind === "mcp" ? input.agentId : undefined,
-    {
-      ...resolved.createOptions,
-      requireFreshAgentId: input.kind === "mcp" && input.agentId !== undefined,
-    },
+    plannedAgentId,
+    createOptions,
   );
 
   resolved.setupContinuation?.startAfterAgentCreate({

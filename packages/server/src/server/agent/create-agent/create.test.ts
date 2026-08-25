@@ -225,6 +225,7 @@ test("mcp create accepts provider-only internal input and leaves model undefined
       workspaceId: "ws-create-test",
     }),
   );
+  expect(createAgent.mock.calls[0]?.[2]).not.toHaveProperty("requireFreshAgentId");
 });
 
 test("mcp create forwards a preallocated agent ID through the fresh-ID path", async () => {
