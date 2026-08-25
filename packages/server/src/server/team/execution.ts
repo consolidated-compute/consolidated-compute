@@ -201,7 +201,7 @@ function resolveAcceptedModel(input: {
         message: `Model '${input.requestedModel}' is not available for provider '${input.provider}'`,
       });
     }
-    return input.requestedModel;
+    return match?.id ?? input.requestedModel;
   }
 
   const selected = input.catalog.models.find((model) => model.isDefault) ?? input.catalog.models[0];

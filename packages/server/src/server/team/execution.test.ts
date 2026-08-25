@@ -48,7 +48,7 @@ function createDefinition(): PersistedTeamDefinition {
         id: "role_builder",
         name: "Builder",
         instructions: "Implement the requested change.",
-        launch: { provider: "codex", model: "gpt-5.6" },
+        launch: { provider: "codex", model: "latest" },
       },
       {
         id: "role_reviewer",
@@ -323,7 +323,7 @@ describe("Team step execution", () => {
     expect(harness.agentStream.calls).toEqual([]);
   });
 
-  test("owns one stream through denied permission and successful completion", async () => {
+  test("owns one stream through denied permission and keeps the frozen canonical model", async () => {
     const harness = createHarness();
     const definition = createDefinition();
     const accepted = await preflightTeamRun(harness.preflightDependencies, {
@@ -331,6 +331,10 @@ describe("Team step execution", () => {
       workspaceId: "wks_team_test",
     });
     const run = createRun(definition, accepted);
+    harness.providerCatalog.models.set("codex", [
+      { provider: "codex", id: "gpt-5.6", label: "GPT-5.6" },
+      { provider: "codex", id: "gpt-5.7", label: "GPT-5.7", aliases: ["latest"] },
+    ]);
     harness.agentStream.events = [
       { type: "turn_started", provider: "codex", turnId: "turn-1" },
       {

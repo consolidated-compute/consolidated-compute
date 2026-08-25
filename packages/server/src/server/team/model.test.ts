@@ -202,7 +202,7 @@ describe("Team Run contract", () => {
     expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
   });
 
-  test("requires an explicit model preference in the accepted launch", () => {
+  test("requires a concrete accepted model for an explicit model preference", () => {
     const run = createRun();
     run.steps[0]!.snapshot.acceptedLaunch.model = null;
 
@@ -213,6 +213,14 @@ describe("Team Run contract", () => {
     expect(result.error.issues.map((issue) => issue.message)).toContain(
       "Run step snapshot must match its frozen Team role and workflow step",
     );
+  });
+
+  test("allows a canonical accepted model for an explicit alias preference", () => {
+    const team = createTeam();
+    team.roles[0]!.launch.model = "latest";
+    const run = createRun(team);
+
+    expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
   });
 
   test("allows a null accepted model when the role has no model preference", () => {

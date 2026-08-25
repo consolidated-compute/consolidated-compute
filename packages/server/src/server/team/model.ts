@@ -384,8 +384,7 @@ function stepSnapshotMatchesRole(
     step.snapshot.roleInstructions === role.instructions &&
     step.snapshot.stepInstructions === workflowStep.instructions;
   const providerMatches = step.snapshot.acceptedLaunch.provider === role.launch.provider;
-  const modelMatches =
-    role.launch.model === null || step.snapshot.acceptedLaunch.model === role.launch.model;
+  const modelMatches = role.launch.model === null || step.snapshot.acceptedLaunch.model !== null;
   return identityMatches && instructionsMatch && providerMatches && modelMatches;
 }
 
