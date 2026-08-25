@@ -101,6 +101,9 @@ interface WorkspaceTerminationFence {
   status: "pending" | "committed";
   outcome: Promise<WorkspaceTerminationOutcome>;
   resolveOutcome: (outcome: WorkspaceTerminationOutcome) => void;
+  detached: Promise<void>;
+  resolveDetached: () => void;
+  isDetached: boolean;
   releaseOperation: (() => void) | null;
 }
 
@@ -232,7 +235,6 @@ export class TeamRunService {
     for (const run of unsettledRuns) {
       await this.finishTermination(run.id, "shutdown", "Daemon shut down during Team Run");
     }
-    await this.waitForPendingWorkspaceTerminations();
     this.unsubscribeWorkspaceTerminationBoundaries?.();
     this.unsubscribeWorkspaceTerminationBoundaries = null;
     this.releaseWorkspaceTerminationFences();
@@ -310,21 +312,11 @@ export class TeamRunService {
     }
   }
 
-  private async waitForPendingWorkspaceTerminations(): Promise<void> {
-    for (;;) {
-      const pending = [...this.workspaceTerminationFences.values()].flatMap((fences) =>
-        [...fences.values()]
-          .filter((fence) => fence.status === "pending")
-          .map((fence) => fence.outcome),
-      );
-      if (pending.length === 0) return;
-      await Promise.all(pending);
-    }
-  }
-
   private releaseWorkspaceTerminationFences(): void {
     for (const fences of this.workspaceTerminationFences.values()) {
       for (const fence of fences.values()) {
+        fence.isDetached = true;
+        fence.resolveDetached();
         if (fence.status === "pending") fence.resolveOutcome("failed");
         fence.releaseOperation?.();
       }
@@ -823,19 +815,28 @@ export class TeamRunService {
       const outcome = new Promise<WorkspaceTerminationOutcome>((resolve) => {
         resolveOutcome = resolve;
       });
+      let resolveDetached!: () => void;
+      const detached = new Promise<void>((resolve) => {
+        resolveDetached = resolve;
+      });
       const fence: WorkspaceTerminationFence = {
         status: "pending",
         outcome,
         resolveOutcome,
+        detached,
+        resolveDetached,
+        isDetached: false,
         releaseOperation: null,
       };
       const fences = this.workspaceTerminationFences.get(boundary.workspaceId) ?? new Map();
       fences.set(boundary.boundaryId, fence);
       this.workspaceTerminationFences.set(boundary.workspaceId, fences);
-      return this.acquireWorkspaceOperation(boundary.workspaceId).then((release) => {
-        fence.releaseOperation = release;
+      const acquisition = this.acquireWorkspaceOperation(boundary.workspaceId).then((release) => {
+        if (fence.isDetached) release();
+        else fence.releaseOperation = release;
         return undefined;
       });
+      return Promise.race([acquisition, detached]);
     }
     const fences = this.workspaceTerminationFences.get(boundary.workspaceId);
     const fence = fences?.get(boundary.boundaryId);

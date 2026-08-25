@@ -93,6 +93,7 @@ class MemoryWorkspaceRegistry implements TeamRunWorkspaceRegistry {
   private readonly mutationWriteWaiters = new Set<() => void>();
   private readonly mutationCommitWaiters = new Set<() => void>();
   private readonly getWaiters = new Set<() => void>();
+  private readonly terminationBoundaryStartWaiters = new Set<() => void>();
 
   constructor(workspace: PersistedWorkspaceRecord) {
     this.workspaces.set(workspace.workspaceId, workspace);
@@ -203,8 +204,19 @@ class MemoryWorkspaceRegistry implements TeamRunWorkspaceRegistry {
     this.releaseMutationPublication = null;
   }
 
+  async waitForTerminationBoundaryStart(): Promise<void> {
+    await new Promise<void>((resolve) => this.terminationBoundaryStartWaiters.add(resolve));
+  }
+
   private async notifyTerminationBoundary(boundary: WorkspaceTerminationBoundary): Promise<void> {
-    await Promise.all([...this.terminationBoundaryListeners].map((listener) => listener(boundary)));
+    const notifications = [...this.terminationBoundaryListeners].map((listener) =>
+      listener(boundary),
+    );
+    if (boundary.phase === "start") {
+      for (const waiter of this.terminationBoundaryStartWaiters) waiter();
+      this.terminationBoundaryStartWaiters.clear();
+    }
+    await Promise.all(notifications);
   }
 }
 
@@ -793,6 +805,26 @@ describe("TeamRunService", () => {
     await expect(startRun(harness, "after-shutdown")).rejects.toBeInstanceOf(
       TeamRunServiceShuttingDownError,
     );
+  });
+
+  test("does not wait for an archive boundary blocked behind stalled agent creation", async () => {
+    const harness = await createHarness();
+    harness.runtime.blockCreation = true;
+    const run = await startRun(harness);
+    await harness.runtime.waitForCreations(1);
+    const boundaryStarted = harness.workspaceRegistry.waitForTerminationBoundaryStart();
+
+    const archiving = harness.workspaceRegistry.archive("wks_team_service");
+    await boundaryStarted;
+    await harness.service.shutdown();
+
+    expect((await harness.repository.getRun(run.id))?.state.status).toBe("interrupted");
+    await archiving;
+    harness.runtime.unblockCreation();
+    await expect(harness.service.waitForRun(run.id)).resolves.toMatchObject({
+      state: { status: "interrupted" },
+    });
+    expect(harness.runtime.streams).toEqual([]);
   });
 
   test("serializes run persistence with the shutdown fence", async () => {
