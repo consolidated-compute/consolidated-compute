@@ -64,6 +64,15 @@ function parseSentSessionMessage(data: string | ArrayBuffer | Uint8Array | undef
   filter?: unknown;
   page?: unknown;
   text?: string;
+  teamId?: string;
+  runId?: string;
+  expectedRevision?: number;
+  idempotencyKey?: string;
+  objective?: string;
+  definition?: unknown;
+  patch?: unknown;
+  cursor?: string;
+  limit?: number;
 } {
   if (typeof data !== "string") {
     throw new Error("Expected string WebSocket frame");
@@ -170,6 +179,62 @@ function createAgent(input: Partial<PaseoAgent> = {}): PaseoAgent {
   };
 }
 
+const team = {
+  id: "team_sdk",
+  revision: 1,
+  name: "SDK Team",
+  instructions: "Ship the objective.",
+  roles: [
+    {
+      id: "builder",
+      name: "Builder",
+      instructions: "Implement the objective.",
+      profileId: "codex-builder",
+    },
+  ],
+  workflow: [{ id: "implement", roleId: "builder", instructions: null }],
+  createdAt: "2026-08-26T12:00:00.000Z",
+  updatedAt: "2026-08-26T12:00:00.000Z",
+};
+
+const teamRun = {
+  id: "run_sdk",
+  teamId: team.id,
+  teamRevision: team.revision,
+  idempotencyKey: "sdk-retry-key",
+  teamSnapshot: team,
+  objective: "Ship the SDK contract.",
+  workspace: {
+    workspaceId: "workspace_sdk",
+    projectId: "project_sdk",
+    cwd: "/repo/sdk",
+    displayName: "main",
+  },
+  steps: [
+    {
+      snapshot: {
+        stepId: "implement",
+        roleId: "builder",
+        roleName: "Builder",
+        roleInstructions: "Implement the objective.",
+        stepInstructions: null,
+        resolvedLaunch: {
+          profileId: "codex-builder",
+          provider: "codex",
+          model: "gpt-5.6-sol",
+          modeId: null,
+          thinkingOptionId: "high",
+          featureValues: { fast_mode: false },
+        },
+      },
+      state: { status: "pending" },
+    },
+  ],
+  state: { status: "queued" },
+  createdAt: "2026-08-26T12:01:00.000Z",
+  updatedAt: "2026-08-26T12:01:00.000Z",
+};
+
 test("createPaseoClient exposes workspace list through the daemon client", async () => {
   const { client, ws } = await connectClient();
 
@@ -224,10 +289,166 @@ test("createPaseoApi borrows daemon capabilities without exposing connection own
 
   const paseo = createPaseoApi(daemonClient);
 
-  expect(Object.keys(paseo).sort()).toEqual(["agents", "config", "providers", "workspaces"]);
+  expect(Object.keys(paseo).sort()).toEqual([
+    "agents",
+    "config",
+    "providers",
+    "teams",
+    "workspaces",
+  ]);
   expect("connect" in paseo).toBe(false);
   expect("close" in paseo).toBe(false);
   expect("skills" in paseo.agents).toBe(false);
+});
+
+test("Team SDK authors profile-backed definitions through namespaced RPCs", async () => {
+  const { client, ws } = await connectClient({
+    providersSnapshotCwd: true,
+    agentProfiles: true,
+    teams: true,
+  });
+
+  const createPromise = client.teams.create({
+    name: team.name,
+    instructions: team.instructions,
+    roles: team.roles,
+    workflow: team.workflow,
+  });
+  const request = parseSentSessionMessage(ws.sent.at(-1));
+
+  expect(request).toMatchObject({
+    type: "team.create.request",
+    definition: {
+      roles: [
+        {
+          id: "builder",
+          profileId: "codex-builder",
+        },
+      ],
+    },
+  });
+
+  ws.message(
+    sessionMessage({
+      type: "team.create.response",
+      payload: { requestId: request.requestId, team },
+    }),
+  );
+
+  await expect(createPromise).resolves.toEqual({ requestId: request.requestId, team });
+  await client.close();
+});
+
+test("Team SDK gates old hosts instead of simulating Teams with agent calls", async () => {
+  const { client, ws } = await connectClient({ providersSnapshotCwd: true });
+
+  await expect(client.teams.list()).rejects.toThrow("Update the host to use Teams.");
+  expect(ws.sent).toHaveLength(1);
+  await client.close();
+});
+
+test("Team SDK starts a run and exposes its frozen resolved launch snapshot", async () => {
+  const { client, ws } = await connectClient({
+    providersSnapshotCwd: true,
+    agentProfiles: true,
+    teams: true,
+  });
+
+  const startPromise = client.teams.runs.start({
+    teamId: team.id,
+    expectedRevision: team.revision,
+    idempotencyKey: "sdk-retry-key",
+    objective: "Ship the SDK contract.",
+    workspaceId: "workspace_sdk",
+  });
+  const request = parseSentSessionMessage(ws.sent.at(-1));
+  expect(request).toMatchObject({
+    type: "team.run.start.request",
+    teamId: "team_sdk",
+    idempotencyKey: "sdk-retry-key",
+    workspaceId: "workspace_sdk",
+  });
+
+  ws.message(
+    sessionMessage({
+      type: "team.run.start.response",
+      payload: { requestId: request.requestId, run: teamRun },
+    }),
+  );
+
+  await expect(startPromise).resolves.toMatchObject({
+    run: {
+      id: "run_sdk",
+      steps: [
+        {
+          snapshot: {
+            resolvedLaunch: {
+              profileId: "codex-builder",
+              provider: "codex",
+              model: "gpt-5.6-sol",
+            },
+          },
+        },
+      ],
+    },
+  });
+  await client.close();
+});
+
+test("Team SDK preserves stable daemon RPC error codes", async () => {
+  const { client, ws } = await connectClient({
+    providersSnapshotCwd: true,
+    agentProfiles: true,
+    teams: true,
+  });
+
+  const startPromise = client.teams.runs.start({
+    teamId: team.id,
+    expectedRevision: team.revision,
+    idempotencyKey: "sdk-retry-key",
+    objective: "Ship the SDK contract.",
+    workspaceId: "workspace_sdk",
+  });
+  const request = parseSentSessionMessage(ws.sent.at(-1));
+  ws.message(
+    sessionMessage({
+      type: "rpc_error",
+      payload: {
+        requestId: request.requestId,
+        requestType: "team.run.start.request",
+        error: "Profile not found: codex-builder",
+        code: "team_profile_not_found",
+      },
+    }),
+  );
+
+  await expect(startPromise).rejects.toMatchObject({ code: "team_profile_not_found" });
+  await client.close();
+});
+
+test("Team authoring requires Agent Profiles while read-only history remains available", async () => {
+  const { client, ws } = await connectClient({ providersSnapshotCwd: true, teams: true });
+
+  await expect(
+    client.teams.create({
+      name: team.name,
+      instructions: team.instructions,
+      roles: team.roles,
+      workflow: team.workflow,
+    }),
+  ).rejects.toThrow("Update the host to use Agent Profiles with Teams.");
+
+  const listPromise = client.teams.list();
+  const request = parseSentSessionMessage(ws.sent.at(-1));
+  expect(request).toMatchObject({ type: "team.list.request" });
+  ws.message(
+    sessionMessage({
+      type: "team.list.response",
+      payload: { requestId: request.requestId, teams: [team] },
+    }),
+  );
+  await expect(listPromise).resolves.toMatchObject({ teams: [{ id: "team_sdk" }] });
+  await client.close();
 });
 
 test("agent actions list the daemon directory without exposing the low-level client", async () => {

@@ -48,6 +48,10 @@ test("runs Plan, Implement, and Review through existing Paseo Agent Profiles", a
 
   try {
     await client.connect();
+    expect(client.getLastServerInfoMessage()?.features).toMatchObject({
+      agentProfiles: true,
+      teams: true,
+    });
     const createdWorkspace = await client.createWorkspace({
       source: { kind: "directory", path: cwd },
     });
@@ -55,7 +59,7 @@ test("runs Plan, Implement, and Review through existing Paseo Agent Profiles", a
       throw new Error(createdWorkspace.error ?? "Failed to create Team test Workspace");
     }
 
-    const definition = await daemon.daemon.teamRepository.createDefinition({
+    const { team: definition } = await client.createTeam({
       name: "Delivery Team",
       instructions: "Complete the objective in order.",
       roles: [
@@ -85,14 +89,24 @@ test("runs Plan, Implement, and Review through existing Paseo Agent Profiles", a
       ],
     });
 
-    const started = await daemon.daemon.teamRunService.startRun({
+    const { run: started } = await client.startTeamRun({
       teamId: definition.id,
       expectedRevision: definition.revision,
       idempotencyKey: "plan-implement-review",
       objective: "Prove the Team execution boundary.",
       workspaceId: createdWorkspace.workspace.id,
     });
-    const completed = await daemon.daemon.teamRunService.waitForRun(started.id);
+    await daemon.daemon.teamRunService.waitForRun(started.id);
+    const { run: completed } = await client.getTeamRun(started.id);
+
+    const { run: retried } = await client.startTeamRun({
+      teamId: definition.id,
+      expectedRevision: definition.revision,
+      idempotencyKey: "plan-implement-review",
+      objective: "Prove the Team execution boundary.",
+      workspaceId: createdWorkspace.workspace.id,
+    });
+    expect(retried.id).toBe(started.id);
 
     expect(completed.state.status).toBe("succeeded");
     expect(completed.steps.map((step) => step.snapshot.resolvedLaunch)).toEqual([

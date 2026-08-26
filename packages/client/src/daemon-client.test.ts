@@ -1115,6 +1115,70 @@ test("defaults session RPC waiters to sixty seconds", async () => {
   await expect(responsePromise).rejects.toThrow("Timeout waiting for message (60000ms)");
 });
 
+test("keeps Team run admission pending beyond the default session RPC deadline", async () => {
+  useHeartbeatClock();
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_team_run_admission_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen({ features: { agentProfiles: true, teams: true } });
+  await connectPromise;
+
+  const responsePromise = client.startTeamRun({
+    teamId: "team-1",
+    expectedRevision: 1,
+    idempotencyKey: "retry-team-1",
+    objective: "Exercise provider preflight.",
+    workspaceId: "workspace-1",
+    requestId: "req-team-run-1",
+  });
+  let settled = false;
+  void responsePromise.then(
+    () => {
+      settled = true;
+      return undefined;
+    },
+    () => {
+      settled = true;
+      return undefined;
+    },
+  );
+
+  expect(parseSentFrame(mock.sent[0])).toEqual({
+    type: "team.run.start.request",
+    teamId: "team-1",
+    expectedRevision: 1,
+    idempotencyKey: "retry-team-1",
+    objective: "Exercise provider preflight.",
+    workspaceId: "workspace-1",
+    requestId: "req-team-run-1",
+  });
+
+  await vi.advanceTimersByTimeAsync(5 * 60_000);
+  expect(settled).toBe(false);
+
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "rpc_error",
+      payload: {
+        requestId: "req-team-run-1",
+        requestType: "team.run.start.request",
+        error: "Admission response received",
+      },
+    }),
+  );
+  await expect(responsePromise).rejects.toThrow("Admission response received");
+});
+
 test("honors explicit fetchAgent timeout below the session RPC default", async () => {
   useHeartbeatClock();
   const logger = createMockLogger();

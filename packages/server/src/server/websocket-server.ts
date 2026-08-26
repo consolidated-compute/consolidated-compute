@@ -99,6 +99,8 @@ import type { BrowserToolsBroker } from "./browser-tools/broker.js";
 import type { DaemonRuntimeConfig } from "./session/daemon/daemon-session.js";
 import { DirectorySyncService } from "./directory-sync/index.js";
 import type { WorkspaceLabelService } from "./workspace-labels/index.js";
+import type { TeamRepository } from "./team/repository.js";
+import type { TeamRunService } from "./team/service.js";
 import {
   APPLICATION_SOCKET_LEASE_CHECK_INTERVAL_MS,
   ApplicationSocketLease,
@@ -110,6 +112,13 @@ import {
 } from "./websocket/physical-socket.js";
 
 const WS_CLOSE_DAEMON_AUTH_FAILED = 4401;
+
+function resolveTeamServices(
+  repository: TeamRepository | undefined,
+  runService: TeamRunService | undefined,
+): { repository: TeamRepository | null; runService: TeamRunService | null } {
+  return { repository: repository ?? null, runService: runService ?? null };
+}
 
 export interface ExternalSocketMetadata {
   transport: "relay";
@@ -605,6 +614,8 @@ export class VoiceAssistantWebSocketServer {
   private readonly directorySync = new DirectorySyncService();
   private readonly pluginRuntime: SessionOptions["pluginRuntime"];
   private readonly orchestrationSkills: SessionOptions["orchestrationSkills"];
+  private readonly teamRepository: TeamRepository | null;
+  private readonly teamRunService: TeamRunService | null;
 
   constructor(
     server: HTTPServer,
@@ -652,6 +663,8 @@ export class VoiceAssistantWebSocketServer {
     pluginRuntime?: SessionOptions["pluginRuntime"],
     orchestrationSkills?: SessionOptions["orchestrationSkills"],
     workspaceLabelService?: WorkspaceLabelService,
+    teamRepository?: TeamRepository,
+    teamRunService?: TeamRunService,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.workspaceSetupRuntime = workspaceSetupRuntime;
@@ -668,6 +681,9 @@ export class VoiceAssistantWebSocketServer {
     this.hubRelationships = hubRelationships ?? null;
     this.pluginRuntime = pluginRuntime;
     this.orchestrationSkills = orchestrationSkills;
+    const teamServices = resolveTeamServices(teamRepository, teamRunService);
+    this.teamRepository = teamServices.repository;
+    this.teamRunService = teamServices.runService;
     this.agentManager = agentManager;
     this.agentStorage = agentStorage;
     this.projectRegistry = projectRegistry ?? createNoopProjectRegistry();
@@ -1433,6 +1449,8 @@ export class VoiceAssistantWebSocketServer {
       projectRegistry: this.projectRegistry,
       workspaceRegistry: this.workspaceRegistry,
       workspaceLabelService: this.workspaceLabelService ?? undefined,
+      teamRepository: this.teamRepository ?? undefined,
+      teamRunService: this.teamRunService ?? undefined,
       directorySync: this.directorySync,
       scheduleService: this.scheduleService,
       checkoutDiffManager: this.checkoutDiffManager,
@@ -1764,6 +1782,8 @@ export class VoiceAssistantWebSocketServer {
         checkoutDiscardChanges: true,
         // COMPAT(agentProfiles): added in v0.3.2, remove gate after 2027-02-11.
         agentProfiles: true,
+        // COMPAT(teams): added in v0.6.0, remove gate after 2027-02-26.
+        ...(this.teamRepository && this.teamRunService ? { teams: true } : {}),
         // COMPAT(agentConfigApply): added in v0.3.2, remove gate after 2027-02-11.
         agentConfigApply: true,
       },
