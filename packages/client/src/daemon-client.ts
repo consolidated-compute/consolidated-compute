@@ -5612,6 +5612,10 @@ export class DaemonClient {
     return this.sendNamespacedCorrelatedSessionRequest<"team.run.start.response">({
       requestId,
       message: { type: "team.run.start.request", ...message },
+      // Provider preflight has a daemon-configurable deadline. Keep the request
+      // pending until admission finishes so a client timeout cannot precede a
+      // successful run start.
+      timeout: 0,
     });
   }
 
