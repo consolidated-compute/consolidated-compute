@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactElement,
@@ -70,6 +71,7 @@ function validationMessage(
 
 export function TeamFormSheet(props: TeamFormSheetProps): ReactElement {
   const { t } = useTranslation();
+  const onClose = props.onClose;
   const controlSize: FieldControlSize = useIsCompactFormFactor() ? "md" : "sm";
   const [model] = useState(() =>
     openTeamForm({
@@ -85,8 +87,15 @@ export function TeamFormSheet(props: TeamFormSheetProps): ReactElement {
   const mutations = useTeamMutations();
   const pending = mutations.create.isPending || mutations.update.isPending;
   const formDisabled = pending || props.authoringEnabled === false;
+  const acceptsCompletionRef = useRef(true);
 
-  useEffect(() => () => model.close(), [model]);
+  useEffect(
+    () => () => {
+      acceptsCompletionRef.current = false;
+      model.close();
+    },
+    [model],
+  );
   useEffect(() => model.applyHosts(props.hosts), [model, props.hosts]);
   useEffect(() => {
     if (state.selectedServerId) model.applyProfiles(state.selectedServerId, profiles);
@@ -156,11 +165,15 @@ export function TeamFormSheet(props: TeamFormSheetProps): ReactElement {
   );
 
   const selectHost = useCallback((serverId: string) => model.setHost(serverId), [model]);
+  const close = useCallback(() => {
+    acceptsCompletionRef.current = false;
+    onClose();
+  }, [onClose]);
   const manageProfiles = useCallback(() => {
     if (!state.selectedServerId) return;
-    props.onClose();
+    close();
     router.push(buildSettingsHostSectionRoute(state.selectedServerId, "agents"));
-  }, [props, state.selectedServerId]);
+  }, [close, state.selectedServerId]);
 
   const save = useCallback(async () => {
     const submission = model.getState().submission;
@@ -169,12 +182,15 @@ export function TeamFormSheet(props: TeamFormSheetProps): ReactElement {
     try {
       if (submission.kind === "create") {
         const payload = await mutations.create.mutateAsync(submission);
+        if (!acceptsCompletionRef.current) return;
         props.onSaved(submission.serverId, payload.team);
       } else {
         const payload = await mutations.update.mutateAsync(submission);
+        if (!acceptsCompletionRef.current) return;
         props.onSaved(submission.serverId, payload.team);
       }
     } catch (error) {
+      if (!acceptsCompletionRef.current) return;
       model.setSubmitError(
         rpcErrorCode(error) === "team_revision_conflict"
           ? t("teams.errors.conflict")
@@ -187,7 +203,7 @@ export function TeamFormSheet(props: TeamFormSheetProps): ReactElement {
   const footer = useMemo(
     () => (
       <View style={styles.footer}>
-        <Button variant="secondary" onPress={props.onClose} disabled={pending}>
+        <Button variant="secondary" onPress={close} disabled={pending}>
           {t("common.actions.cancel")}
         </Button>
         <Button
@@ -201,13 +217,13 @@ export function TeamFormSheet(props: TeamFormSheetProps): ReactElement {
         </Button>
       </View>
     ),
-    [formDisabled, pending, props.mode, props.onClose, savePress, state.canSubmit, t],
+    [close, formDisabled, pending, props.mode, savePress, state.canSubmit, t],
   );
 
   return (
     <AdaptiveModalSheet
       visible
-      onClose={props.onClose}
+      onClose={close}
       header={header}
       footer={footer}
       desktopMaxWidth={680}
