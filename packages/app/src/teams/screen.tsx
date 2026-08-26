@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactElement } from "react";
 import { Pressable, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { router, type Href } from "expo-router";
@@ -22,11 +22,12 @@ import {
 } from "@/utils/host-routes";
 import { toErrorMessage } from "@/utils/error-messages";
 import { teamKey, type AggregatedTeam, type TeamHostState } from "./data";
+import { resolveActiveTeamKey, type TeamsView } from "./screen-state";
 import { TeamFormSheet } from "./team-form-sheet";
 import { useTeamMutations } from "./use-team-mutations";
 import { useTeams } from "./use-teams";
 
-export type TeamsView = { kind: "list" } | { kind: "detail"; serverId: string; teamId: string };
+export type { TeamsView } from "./screen-state";
 
 type FormState =
   | { kind: "closed" }
@@ -62,6 +63,7 @@ function TeamsScreenContent({ view }: { view: TeamsView }): ReactElement {
         null)
       : null;
   const selectedTeam = routedTeam ?? (!compact && view.kind === "list" ? data.teams[0] : null);
+  const activeTeamKey = resolveActiveTeamKey(view, selectedTeam);
 
   const openCreate = useCallback(() => setForm({ kind: "create" }), []);
   const openEdit = useCallback(
@@ -103,6 +105,7 @@ function TeamsScreenContent({ view }: { view: TeamsView }): ReactElement {
                 host.serverId === view.serverId &&
                 (host.status === "connecting" || host.status === "loading"),
             )}
+            activeTeamKey={activeTeamKey}
             onEdit={openEdit}
           />
         </View>
@@ -129,6 +132,7 @@ function TeamsScreenContent({ view }: { view: TeamsView }): ReactElement {
               loading={data.hosts.some(
                 (host) => host.status === "connecting" || host.status === "loading",
               )}
+              activeTeamKey={activeTeamKey}
               onEdit={openEdit}
             />
           </View>
@@ -344,17 +348,21 @@ function TeamDetail({
   team,
   host,
   loading,
+  activeTeamKey,
   onEdit,
 }: {
   team: AggregatedTeam | null;
   host: TeamHostState | null;
   loading: boolean;
+  activeTeamKey: string | null;
   onEdit: (team: AggregatedTeam) => void;
 }): ReactElement {
   const { t } = useTranslation();
   const { profiles } = useAgentProfiles(team?.serverId ?? null);
   const { entries } = useProvidersSnapshot(team?.serverId ?? null, { cwd: null });
   const mutations = useTeamMutations();
+  const activeTeamKeyRef = useRef(activeTeamKey);
+  activeTeamKeyRef.current = activeTeamKey;
   const [deleteFailure, setDeleteFailure] = useState<{
     teamKey: string;
     message: string;
@@ -388,7 +396,9 @@ function TeamDetail({
         teamId: team.id,
         expectedRevision: team.revision,
       });
-      router.replace(buildTeamsRoute() as Href);
+      if (activeTeamKeyRef.current === team.key) {
+        router.replace(buildTeamsRoute() as Href);
+      }
     } catch (error) {
       setDeleteFailure({
         teamKey: team.key,
