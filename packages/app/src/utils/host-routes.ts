@@ -428,6 +428,19 @@ export function buildSchedulesRoute() {
   return "/schedules" as const;
 }
 
+export function buildTeamsRoute() {
+  return "/teams" as const;
+}
+
+export function buildTeamRoute(serverId: string, teamId: string) {
+  const normalizedServerId = trimNonEmpty(serverId);
+  const normalizedTeamId = trimNonEmpty(teamId);
+  if (!normalizedServerId || !normalizedTeamId) {
+    throw new Error("buildTeamRoute requires a serverId and teamId");
+  }
+  return `/teams/${encodeSegment(normalizedServerId)}/${encodeSegment(normalizedTeamId)}` as const;
+}
+
 export function buildOperationsRoute() {
   return "/operations" as const;
 }

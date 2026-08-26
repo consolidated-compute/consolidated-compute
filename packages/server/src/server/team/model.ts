@@ -2,20 +2,32 @@ import { randomBytes } from "node:crypto";
 
 import { z } from "zod";
 
-export const TEAM_NAME_MAX_CHARS = 120;
-export const TEAM_ROLE_NAME_MAX_CHARS = 80;
-export const TEAM_INSTRUCTIONS_MAX_CHARS = 32_000;
+import {
+  TEAM_AGENT_PROFILE_ID_MAX_CHARS,
+  TEAM_INSTRUCTIONS_MAX_CHARS,
+  TEAM_MAX_ROLES,
+  TEAM_MAX_WORKFLOW_STEPS,
+  TEAM_NAME_MAX_CHARS,
+  TEAM_ROLE_NAME_MAX_CHARS,
+} from "@getpaseo/protocol/team/types";
+
+export {
+  TEAM_AGENT_PROFILE_ID_MAX_CHARS,
+  TEAM_INSTRUCTIONS_MAX_CHARS,
+  TEAM_MAX_ROLES,
+  TEAM_MAX_WORKFLOW_STEPS,
+  TEAM_NAME_MAX_CHARS,
+  TEAM_ROLE_NAME_MAX_CHARS,
+} from "@getpaseo/protocol/team/types";
+
 export const TEAM_OBJECTIVE_MAX_CHARS = 32_000;
 export const TEAM_ERROR_MAX_CHARS = 4_096;
 export const TEAM_IDEMPOTENCY_KEY_MAX_CHARS = 256;
-export const TEAM_AGENT_PROFILE_ID_MAX_CHARS = 512;
 export const TEAM_PROVIDER_ID_MAX_CHARS = 128;
 export const TEAM_MODEL_ID_MAX_CHARS = 256;
 export const TEAM_MODE_ID_MAX_CHARS = 256;
 export const TEAM_THINKING_OPTION_ID_MAX_CHARS = 256;
 export const TEAM_ENTITY_ID_MAX_CHARS = 128;
-export const TEAM_MAX_ROLES = 12;
-export const TEAM_MAX_WORKFLOW_STEPS = 24;
 export const TEAM_HANDOFF_MAX_BYTES = 4_096;
 
 function nonBlankStringSchema(max: number) {

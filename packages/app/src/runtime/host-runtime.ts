@@ -54,6 +54,7 @@ import {
 } from "@/data/push-router";
 import { mountBrowserAutomationDaemonClientHandler } from "@/desktop/browser/automation/handler";
 import { schedulesQueryBaseKey } from "@/schedules/aggregated-schedules";
+import { teamsQueryBaseKey } from "@/teams/data";
 import { dispatchComposerAgentMessage, sendQueuedComposerMessageNow } from "@/composer/actions";
 import { createMessageSubmissionWriter } from "@/composer/submission/writer";
 import { resolveComposerAttachmentSubmitFormat } from "@/composer/attachments/submit";
@@ -2109,6 +2110,7 @@ export class HostRuntimeStore {
       void invalidateCheckoutGitQueriesForServer(queryClient, serverId);
       invalidateServerDataQueriesAfterReconnect({ queryClient, serverId });
       void queryClient.invalidateQueries({ queryKey: schedulesQueryBaseKey });
+      void queryClient.invalidateQueries({ queryKey: teamsQueryBaseKey });
     }
 
     // Runtime owns directory bootstrap policy, including reconnect and delayed
