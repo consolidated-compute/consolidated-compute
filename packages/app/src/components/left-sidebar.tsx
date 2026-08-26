@@ -1,4 +1,4 @@
-import { router, usePathname } from "expo-router";
+import { router, usePathname, type Href } from "expo-router";
 import {
   Activity,
   CalendarClock,
@@ -11,6 +11,7 @@ import {
   Search,
   Server,
   Settings,
+  UsersRound,
   X,
 } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
@@ -73,6 +74,7 @@ import {
   buildSessionsRoute,
   buildSettingsAddHostRoute,
   buildSettingsRoute,
+  buildTeamsRoute,
   buildVisualRoute,
 } from "@/utils/host-routes";
 import { openHostOverview } from "@/navigation/settings-navigation";
@@ -123,6 +125,7 @@ interface SidebarLabels {
   schedules: string;
   operations: string;
   visual: string;
+  teams: string;
   closeSidebar: string;
 }
 
@@ -134,6 +137,7 @@ interface MobileSidebarProps extends SidebarSharedProps {
   handleViewSchedulesNavigate: () => void;
   handleViewOperationsNavigate: () => void;
   handleViewVisualNavigate: () => void;
+  handleViewTeamsNavigate: () => void;
 }
 
 interface DesktopSidebarProps extends SidebarSharedProps {
@@ -143,6 +147,7 @@ interface DesktopSidebarProps extends SidebarSharedProps {
   handleViewSchedules: () => void;
   handleViewOperations: () => void;
   handleViewVisual: () => void;
+  handleViewTeams: () => void;
 }
 
 export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boolean }) {
@@ -249,6 +254,10 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     router.push(buildVisualRoute());
   }, []);
 
+  const handleViewTeamsNavigate = useCallback(() => {
+    router.push(buildTeamsRoute() as Href);
+  }, []);
+
   const newWorkspaceKeys = useShortcutKeys("new-workspace");
   const labels = useMemo(
     (): SidebarLabels => ({
@@ -262,6 +271,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       schedules: t("sidebar.sections.schedules"),
       operations: t("operations.title"),
       visual: t("visual.title"),
+      teams: t("teams.title"),
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
@@ -305,6 +315,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           handleViewSchedulesNavigate={handleViewSchedulesNavigate}
           handleViewOperationsNavigate={handleViewOperationsNavigate}
           handleViewVisualNavigate={handleViewVisualNavigate}
+          handleViewTeamsNavigate={handleViewTeamsNavigate}
         />
       </RetainedPanelActivity>
     );
@@ -325,6 +336,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleViewSchedules={handleViewSchedulesNavigate}
         handleViewOperations={handleViewOperationsNavigate}
         handleViewVisual={handleViewVisualNavigate}
+        handleViewTeams={handleViewTeamsNavigate}
       />
     </RetainedPanelActivity>
   );
@@ -658,6 +670,7 @@ function MobileSidebar({
   handleViewSchedulesNavigate,
   handleViewOperationsNavigate,
   handleViewVisualNavigate,
+  handleViewTeamsNavigate,
 }: MobileSidebarProps) {
   const pathname = usePathname();
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
@@ -665,6 +678,7 @@ function MobileSidebar({
   const isSchedulesActive = pathname.includes("/schedules");
   const isOperationsActive = pathname === "/operations";
   const isVisualActive = pathname === "/visual";
+  const isTeamsActive = pathname === "/teams" || pathname.startsWith("/teams/");
   const { gesture: closeGesture, gestureRef: closeGestureRef } = useCloseAgentListGesture();
   const dragGestureHostPresented = useIsMobilePanelPresented("agent-list");
 
@@ -687,6 +701,11 @@ function MobileSidebar({
     closeSidebar();
     handleViewVisualNavigate();
   }, [closeSidebar, handleViewVisualNavigate]);
+
+  const handleViewTeams = useCallback(() => {
+    closeSidebar();
+    handleViewTeamsNavigate();
+  }, [closeSidebar, handleViewTeamsNavigate]);
 
   const handleWorkspacePress = useCallback(() => {
     closeSidebar();
@@ -747,6 +766,14 @@ function MobileSidebar({
             onPress={handleViewSchedules}
             isActive={isSchedulesActive}
             testID="sidebar-schedules"
+            variant="compact"
+          />
+          <SidebarHeaderRow
+            icon={UsersRound}
+            label={labels.teams}
+            onPress={handleViewTeams}
+            isActive={isTeamsActive}
+            testID="sidebar-teams"
             variant="compact"
           />
           <PluginSidebarItems onBeforeNavigate={closeSidebar} />
@@ -840,6 +867,7 @@ function DesktopSidebar({
   handleViewSchedules,
   handleViewOperations,
   handleViewVisual,
+  handleViewTeams,
 }: DesktopSidebarProps) {
   const ownsTopLeft = useOwnsWindowChromeCorner("top-left");
   const pathname = usePathname();
@@ -848,6 +876,7 @@ function DesktopSidebar({
   const isSchedulesActive = pathname.includes("/schedules");
   const isOperationsActive = pathname === "/operations";
   const isVisualActive = pathname === "/visual";
+  const isTeamsActive = pathname === "/teams" || pathname.startsWith("/teams/");
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
   const { width: viewportWidth } = useWindowDimensions();
@@ -992,6 +1021,14 @@ function DesktopSidebar({
               onPress={handleViewSchedules}
               isActive={isSchedulesActive}
               testID="sidebar-schedules"
+              variant="compact"
+            />
+            <SidebarHeaderRow
+              icon={UsersRound}
+              label={labels.teams}
+              onPress={handleViewTeams}
+              isActive={isTeamsActive}
+              testID="sidebar-teams"
               variant="compact"
             />
             <PluginSidebarItems />

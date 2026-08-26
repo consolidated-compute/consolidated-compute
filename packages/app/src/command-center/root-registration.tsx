@@ -13,6 +13,7 @@ import {
   Network,
   Plus,
   Settings,
+  UsersRound,
 } from "lucide-react-native";
 import { withUnistyles } from "react-native-unistyles";
 import { getIsElectronRuntime } from "@/constants/layout";
@@ -30,6 +31,7 @@ import {
   buildSchedulesRoute,
   buildSessionsRoute,
   buildSettingsRoute,
+  buildTeamsRoute,
   buildVisualRoute,
 } from "@/utils/host-routes";
 import { getShortcutOs } from "@/utils/shortcut-platform";
@@ -57,6 +59,9 @@ const ThemedKeyboard = withUnistyles(Keyboard, (theme) => ({
   color: theme.colors.foregroundMuted,
 }));
 const ThemedSettings = withUnistyles(Settings, (theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
+const ThemedUsersRound = withUnistyles(UsersRound, (theme) => ({
   color: theme.colors.foregroundMuted,
 }));
 const ThemedHome = withUnistyles(Home, (theme) => ({ color: theme.colors.foregroundMuted }));
@@ -93,6 +98,10 @@ function SchedulesIcon({ size }: CommandCenterIconProps) {
   return <ThemedCalendarClock size={size} strokeWidth={2.2} />;
 }
 
+function TeamsIcon({ size }: CommandCenterIconProps) {
+  return <ThemedUsersRound size={size} strokeWidth={2.2} />;
+}
+
 function KeyboardIcon({ size }: CommandCenterIconProps) {
   return <ThemedKeyboard size={size} strokeWidth={2.2} />;
 }
@@ -121,6 +130,7 @@ export function CommandCenterRootActions() {
   const visualRoute = useMemo<Href>(() => buildVisualRoute(), []);
   const sessionsRoute = useMemo<Href>(() => buildSessionsRoute(), []);
   const schedulesRoute = useMemo<Href>(() => buildSchedulesRoute(), []);
+  const teamsRoute = useMemo<Href>(() => buildTeamsRoute() as Href, []);
   const setShortcutsDialogOpen = useKeyboardShortcutsStore((state) => state.setShortcutsDialogOpen);
   // Narrow selector on purpose: a whole-store subscription would re-register every root action
   // each time host filters are reconciled.
@@ -263,10 +273,28 @@ export function CommandCenterRootActions() {
         },
       },
       {
-        id: "settings",
+        id: "teams",
         group: "actions",
         groupRank: 0,
         rank: 7,
+        keywords: ["teams", "roles", "workflow", "orchestration", "profiles"],
+        visibility: "always",
+        run: () => {
+          clearCommandCenterFocusRestoreElement();
+          router.push(teamsRoute);
+        },
+        presentation: {
+          kind: "action",
+          title: t("teams.title"),
+          sectionTitle: t("shell.commandCenter.actions"),
+          icon: TeamsIcon,
+        },
+      },
+      {
+        id: "settings",
+        group: "actions",
+        groupRank: 0,
+        rank: 8,
         keywords: ["settings", "preferences", "config", "configuration"],
         visibility: "always",
         run: () => {
@@ -290,7 +318,7 @@ export function CommandCenterRootActions() {
         id: "keyboard-shortcuts",
         group: "actions",
         groupRank: 0,
-        rank: 8,
+        rank: 9,
         keywords: ["keyboard", "shortcuts", "keys", "hotkeys"],
         visibility: "always",
         run: () => setShortcutsDialogOpen(true),
@@ -335,6 +363,7 @@ export function CommandCenterRootActions() {
     shortcutPlatform,
     shortcutsAvailable,
     t,
+    teamsRoute,
     visualRoute,
   ]);
 

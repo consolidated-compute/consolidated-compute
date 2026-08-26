@@ -11,6 +11,8 @@ import {
   resolveKnownHostRoute,
   buildSessionsRoute,
   buildSettingsAddHostRoute,
+  buildTeamRoute,
+  buildTeamsRoute,
   buildProjectSettingsRoute,
   buildProjectsSettingsRoute,
   decodeFilePathFromPathSegment,
@@ -211,6 +213,11 @@ describe("projects settings routes", () => {
 });
 
 describe("global routes", () => {
+  it("builds host-qualified Team routes", () => {
+    expect(buildTeamsRoute()).toBe("/teams");
+    expect(buildTeamRoute("host a", "team/1")).toBe("/teams/host%20a/team%2F1");
+  });
+
   it("buildVisualRoute returns the global Visual route", () => {
     expect(buildVisualRoute()).toBe("/visual");
   });
