@@ -2,7 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import type { TeamDefinitionDto } from "@getpaseo/protocol/team/types";
 import { teamListQueryKey } from "./data";
-import { invalidateTeamList, prepareTeamListMutation } from "./mutation-cache";
+import { invalidateTeamList, prepareTeamListMutation, upsertTeam } from "./mutation-cache";
 
 const existingTeam: TeamDefinitionDto = {
   id: "team-1",
@@ -16,6 +16,15 @@ const existingTeam: TeamDefinitionDto = {
 };
 
 describe("Team mutation cache coordination", () => {
+  it("does not duplicate a created Team already returned by a refetch", () => {
+    const createdTeam = { ...existingTeam, id: "team-2", name: "Created" };
+
+    expect(upsertTeam([existingTeam, createdTeam], createdTeam)).toEqual([
+      existingTeam,
+      createdTeam,
+    ]);
+  });
+
   it("prevents an in-flight list response from overwriting a mutation result", async () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const queryKey = teamListQueryKey("host-a");

@@ -7,7 +7,7 @@ import type {
 } from "@getpaseo/protocol/team/types";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { teamListQueryKey } from "./data";
-import { invalidateTeamList, prepareTeamListMutation } from "./mutation-cache";
+import { invalidateTeamList, prepareTeamListMutation, upsertTeam } from "./mutation-cache";
 
 export interface CreateTeamInput {
   serverId: string;
@@ -49,7 +49,7 @@ export function useTeamMutations() {
       requireClient(input.serverId).createTeam(input.definition),
     onSuccess: async (payload, input) => {
       await prepareTeamListMutation(queryClient, input.serverId);
-      updateCachedList(input.serverId, (current) => [...current, payload.team]);
+      updateCachedList(input.serverId, (current) => upsertTeam(current, payload.team));
     },
     onSettled: (_payload, _error, input) => invalidateTeamList(queryClient, input.serverId),
   });
