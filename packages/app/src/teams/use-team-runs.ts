@@ -47,7 +47,7 @@ export function useTeamRuns(serverId: string | null, teamId: string | null) {
     },
   });
   const runs = useMemo(() => flattenTeamRunPages(query.data?.pages ?? []), [query.data]);
-  return { ...query, runs };
+  return { ...query, runs, canLoad: enabled };
 }
 
 export function useTeamRun(serverId: string, runId: string, options: { enabled?: boolean } = {}) {

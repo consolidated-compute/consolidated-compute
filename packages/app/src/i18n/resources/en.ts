@@ -362,6 +362,7 @@ export const en = {
       recent: {
         title: "Recent runs",
         empty: "No runs for this Team yet",
+        offline: "Connect to this host to load Run history",
         open: "Open {{objective}}, {{status}}",
       },
       detail: {

@@ -6,6 +6,7 @@ import {
   isTerminalTeamRunStatus,
   matchesTeamRunRoute,
   newestTeamRunSnapshot,
+  teamRunHistoryPlaceholder,
   teamRunListQueryKey,
   teamRunQueryKey,
   upsertTeamRun,
@@ -133,5 +134,35 @@ describe("Team Run data", () => {
     } as const;
     expect(newestTeamRunSnapshot(target, running)).toBe(running);
     expect(newestTeamRunSnapshot(running, target)).toBe(running);
+  });
+
+  it("distinguishes unfetched offline history from a loaded empty list", () => {
+    expect(
+      teamRunHistoryPlaceholder({
+        isLoading: false,
+        isError: false,
+        runCount: 0,
+        hasLoadedData: false,
+        canLoad: false,
+      }),
+    ).toBe("offline");
+    expect(
+      teamRunHistoryPlaceholder({
+        isLoading: false,
+        isError: false,
+        runCount: 0,
+        hasLoadedData: true,
+        canLoad: false,
+      }),
+    ).toBe("empty");
+    expect(
+      teamRunHistoryPlaceholder({
+        isLoading: true,
+        isError: false,
+        runCount: 0,
+        hasLoadedData: false,
+        canLoad: true,
+      }),
+    ).toBe("none");
   });
 });

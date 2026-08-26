@@ -70,3 +70,17 @@ export function newestTeamRunSnapshot(listRun: TeamRunDto, detailRun?: TeamRunDt
   if (!detailRun) return listRun;
   return Date.parse(detailRun.updatedAt) >= Date.parse(listRun.updatedAt) ? detailRun : listRun;
 }
+
+export type TeamRunHistoryPlaceholder = "none" | "offline" | "empty";
+
+export function teamRunHistoryPlaceholder(input: {
+  isLoading: boolean;
+  isError: boolean;
+  runCount: number;
+  hasLoadedData: boolean;
+  canLoad: boolean;
+}): TeamRunHistoryPlaceholder {
+  if (input.isLoading || input.isError || input.runCount > 0) return "none";
+  if (!input.hasLoadedData && !input.canLoad) return "offline";
+  return "empty";
+}

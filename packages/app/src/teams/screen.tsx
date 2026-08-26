@@ -34,7 +34,11 @@ import {
 import { toErrorMessage } from "@/utils/error-messages";
 import { formatTimeAgo } from "@/utils/time";
 import { teamKey, type AggregatedTeam, type TeamHostState } from "./data";
-import { isTerminalTeamRunStatus, newestTeamRunSnapshot } from "./run-data";
+import {
+  isTerminalTeamRunStatus,
+  newestTeamRunSnapshot,
+  teamRunHistoryPlaceholder,
+} from "./run-data";
 import { resolveActiveTeamKey, type TeamsView } from "./screen-state";
 import { TeamFormSheet } from "./team-form-sheet";
 import { TeamRunFormSheet } from "./team-run-form-sheet";
@@ -592,6 +596,13 @@ function TeamRecentRuns({
   const { refetch, fetchNextPage } = runsQuery;
   const retry = useCallback(() => void refetch(), [refetch]);
   const loadMore = useCallback(() => void fetchNextPage(), [fetchNextPage]);
+  const placeholder = teamRunHistoryPlaceholder({
+    isLoading: runsQuery.isLoading,
+    isError: runsQuery.isError,
+    runCount: runsQuery.runs.length,
+    hasLoadedData: runsQuery.data !== undefined,
+    canLoad: runsQuery.canLoad,
+  });
   return (
     <View style={styles.detailCards}>
       {runsQuery.isLoading ? (
@@ -607,7 +618,10 @@ function TeamRecentRuns({
           </Button>
         </View>
       ) : null}
-      {!runsQuery.isLoading && !runsQuery.isError && runsQuery.runs.length === 0 ? (
+      {placeholder === "offline" ? (
+        <Text style={styles.hostMessage}>{t("teams.runs.recent.offline")}</Text>
+      ) : null}
+      {placeholder === "empty" ? (
         <Text style={styles.hostMessage}>{t("teams.runs.recent.empty")}</Text>
       ) : null}
       {runsQuery.runs.map((run) => (
