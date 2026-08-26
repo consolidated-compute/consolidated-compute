@@ -14,6 +14,8 @@ import {
   type TeamHostState,
 } from "./data";
 
+const TEAM_LIST_REFRESH_INTERVAL_MS = 5_000;
+
 export interface UseTeamsResult {
   hosts: TeamHostState[];
   teams: AggregatedTeam[];
@@ -36,7 +38,8 @@ export function useTeams(): UseTeamsResult {
       return {
         queryKey: teamListQueryKey(host.serverId),
         dataShape: "list" as const,
-        staleTimeMs: 5_000,
+        staleTimeMs: TEAM_LIST_REFRESH_INTERVAL_MS,
+        refetchInterval: TEAM_LIST_REFRESH_INTERVAL_MS,
         enabled: status === "online" && supported,
         queryFn: async () => {
           const client = runtime.getClient(host.serverId);
