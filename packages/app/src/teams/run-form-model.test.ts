@@ -195,6 +195,105 @@ describe("Team Run form model", () => {
     expect(model.getState().canSubmit).toBe(false);
   });
 
+  it("rejects explicitly referenced nonselectable models", () => {
+    const model = openTeamRunForm({
+      serverId: "host-a",
+      team: team(),
+      workspaces: [workspace],
+      profiles: [profile({ model: "hidden-model", featureValues: {} })],
+    });
+    model.setObjective("Plan");
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [
+      provider({
+        models: [
+          {
+            provider: "codex",
+            id: "hidden-model",
+            label: "Hidden",
+            isSelectable: false,
+          },
+          { provider: "codex", id: "visible-model", label: "Visible" },
+        ],
+      }),
+    ]);
+
+    expect(model.getState().roleResolutions[0]).toMatchObject({
+      model: "hidden-model",
+      status: "model_unavailable",
+    });
+  });
+
+  it("skips nonselectable models when resolving a default", () => {
+    const model = openTeamRunForm({
+      serverId: "host-a",
+      team: team(),
+      workspaces: [workspace],
+      profiles: [profile({ model: undefined, thinkingOptionId: undefined, featureValues: {} })],
+    });
+    model.setObjective("Plan");
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [
+      provider({
+        models: [
+          {
+            provider: "codex",
+            id: "hidden-default",
+            label: "Hidden default",
+            isDefault: true,
+            isSelectable: false,
+          },
+          { provider: "codex", id: "visible-model", label: "Visible" },
+        ],
+      }),
+    ]);
+
+    expect(model.getState().roleResolutions[0]).toMatchObject({
+      model: "visible-model",
+      status: "ready",
+    });
+  });
+
+  it("accepts legacy OpenCode full access through canonical profile materialization", () => {
+    const model = openTeamRunForm({
+      serverId: "host-a",
+      team: team(),
+      workspaces: [workspace],
+      profiles: [
+        profile({
+          provider: "opencode",
+          model: undefined,
+          modeId: "full-access",
+          thinkingOptionId: undefined,
+          featureValues: {},
+        }),
+      ],
+    });
+    model.setObjective("Plan");
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [
+      provider({
+        provider: "opencode",
+        models: [],
+        modes: [{ id: "build", label: "Build" }],
+        defaultModeId: null,
+      }),
+    ]);
+    const resolution = model.getState().roleResolutions[0]!;
+    expect(resolution).toMatchObject({
+      provider: "opencode",
+      modeId: "build",
+      featureValues: { auto_accept: true },
+      status: "features_loading",
+    });
+    const request = buildTeamRunFeatureRequest(
+      resolution,
+      workspace.cwd,
+      model.getState().catalogGeneration,
+    )!;
+    model.applyFeatureCatalog("planner", request.requestKey, [
+      { type: "toggle", id: "auto_accept", label: "Auto Accept", value: false },
+    ]);
+    expect(model.getState().roleResolutions[0]?.status).toBe("ready");
+  });
+
   it("blocks unavailable or invalid feature settings", () => {
     const model = openTeamRunForm({
       serverId: "host-a",

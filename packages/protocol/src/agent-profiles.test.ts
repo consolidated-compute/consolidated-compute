@@ -39,4 +39,22 @@ describe("materializeAgentProfile", () => {
       featureValues: {},
     });
   });
+
+  test("normalizes legacy OpenCode full access into its canonical launch settings", () => {
+    expect(
+      materializeAgentProfile({
+        id: "legacy-opencode",
+        name: "Legacy OpenCode",
+        provider: "opencode",
+        modeId: "full-access",
+        featureValues: { auto_accept: false, custom: "kept" },
+      }),
+    ).toEqual({
+      provider: "opencode",
+      modelId: "",
+      modeId: "build",
+      thinkingOptionId: "",
+      featureValues: { auto_accept: true, custom: "kept" },
+    });
+  });
 });

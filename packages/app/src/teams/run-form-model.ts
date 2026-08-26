@@ -1,7 +1,12 @@
-import type { AgentFeature, ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
+import type {
+  AgentFeature,
+  AgentModelDefinition,
+  ProviderSnapshotEntry,
+} from "@getpaseo/protocol/agent-types";
 import { materializeAgentProfile } from "@getpaseo/protocol/agent-profiles";
 import type { AgentProfile } from "@getpaseo/protocol/messages";
 import { TEAM_OBJECTIVE_MAX_CHARS, type TeamDefinitionDto } from "@getpaseo/protocol/team/types";
+import { filterSelectableModels } from "@/provider-selection/model-catalog";
 import type { WorkspaceDescriptor } from "@/stores/session-store";
 
 export interface TeamRunFormDisplay {
@@ -145,10 +150,8 @@ function generateIdempotencyKey(): string {
   return `team-run-${crypto.randomUUID()}`;
 }
 
-function findModel(entry: ProviderSnapshotEntry, requested: string) {
-  return entry.models?.find(
-    (model) => model.id === requested || model.aliases?.includes(requested),
-  );
+function findModel(models: readonly AgentModelDefinition[], requested: string) {
+  return models.find((model) => model.id === requested || model.aliases?.includes(requested));
 }
 
 function providerReadinessStatus(
@@ -298,11 +301,12 @@ function resolveProvider(
   const readinessStatus = providerReadinessStatus(provider);
   if (readinessStatus) return { ...base, status: readinessStatus };
   const readyProvider = provider as ProviderSnapshotEntry;
+  const selectableModels = filterSelectableModels(readyProvider.models ?? null) ?? [];
 
   const requestedModel = materialized.modelId;
   const model = requestedModel
-    ? findModel(readyProvider, requestedModel)
-    : (readyProvider.models?.find((entry) => entry.isDefault) ?? readyProvider.models?.[0]);
+    ? findModel(selectableModels, requestedModel)
+    : (selectableModels.find((entry) => entry.isDefault) ?? selectableModels[0]);
   const selectionStatus = providerSelectionStatus(readyProvider, materialized, model);
   if (selectionStatus) return { ...base, status: selectionStatus };
   return {
