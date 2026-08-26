@@ -58,6 +58,26 @@ import {
   BrowserAutomationExecuteRequestSchema,
   BrowserAutomationExecuteResponseSchema,
 } from "./browser-automation/rpc-schemas.js";
+import {
+  TeamCreateRequestSchema,
+  TeamCreateResponseSchema,
+  TeamDeleteRequestSchema,
+  TeamDeleteResponseSchema,
+  TeamGetRequestSchema,
+  TeamGetResponseSchema,
+  TeamListRequestSchema,
+  TeamListResponseSchema,
+  TeamRunCancelRequestSchema,
+  TeamRunCancelResponseSchema,
+  TeamRunGetRequestSchema,
+  TeamRunGetResponseSchema,
+  TeamRunListRequestSchema,
+  TeamRunListResponseSchema,
+  TeamRunStartRequestSchema,
+  TeamRunStartResponseSchema,
+  TeamUpdateRequestSchema,
+  TeamUpdateResponseSchema,
+} from "./team/rpc-schemas.js";
 import { BrowserAutomationHostCapabilitySchema } from "./browser-automation/capabilities.js";
 import {
   PaseoConfigRawSchema,
@@ -2973,6 +2993,15 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   WorkspaceLabelDeleteInspectRequestSchema,
   WorkspaceRecoveryInspectRequestSchema,
   WorkspaceRecoveryRestoreRequestSchema,
+  TeamCreateRequestSchema,
+  TeamListRequestSchema,
+  TeamGetRequestSchema,
+  TeamUpdateRequestSchema,
+  TeamDeleteRequestSchema,
+  TeamRunStartRequestSchema,
+  TeamRunListRequestSchema,
+  TeamRunGetRequestSchema,
+  TeamRunCancelRequestSchema,
   SetVoiceModeMessageSchema,
   SendAgentMessageRequestSchema,
   WaitForFinishRequestSchema,
@@ -3428,6 +3457,8 @@ export const ServerInfoStatusPayloadSchema = z
         // agentProfiles to one is silently dropped. The client hides the feature
         // rather than letting a save appear to succeed.
         agentProfiles: z.boolean().optional(),
+        // COMPAT(teams): added in v0.6.0, remove gate after 2027-02-26.
+        teams: z.boolean().optional(),
         // COMPAT(agentConfigApply): added in v0.3.2, remove gate after 2027-02-11.
         agentConfigApply: z.boolean().optional(),
       })
@@ -6280,6 +6311,15 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   WorkspacePinSetResponseSchema,
   WorkspaceRecoveryInspectResponseSchema,
   WorkspaceRecoveryRestoreResponseSchema,
+  TeamCreateResponseSchema,
+  TeamListResponseSchema,
+  TeamGetResponseSchema,
+  TeamUpdateResponseSchema,
+  TeamDeleteResponseSchema,
+  TeamRunStartResponseSchema,
+  TeamRunListResponseSchema,
+  TeamRunGetResponseSchema,
+  TeamRunCancelResponseSchema,
   WaitForFinishResponseMessageSchema,
   AgentPermissionRequestMessageSchema,
   AgentPermissionResolvedMessageSchema,

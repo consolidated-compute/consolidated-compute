@@ -21,6 +21,7 @@ import type {
 } from "@getpaseo/protocol/messages";
 import { DaemonClient } from "./daemon-client.js";
 import type {
+  DeleteTeamInput,
   FetchAgentsEntry,
   FetchAgentsOptions,
   FetchAgentsPageInfo,
@@ -29,7 +30,15 @@ import type {
   FetchAgentTimelinePayload,
   FetchAgentTimelineProjection,
   WaitForFinishResult,
+  ListTeamRunsInput,
+  StartTeamRunInput,
+  UpdateTeamInput,
 } from "./daemon-client.js";
+import type {
+  TeamDefinitionDto,
+  TeamDefinitionInputDto,
+  TeamRunDto,
+} from "@getpaseo/protocol/team/types";
 
 /**
  * Coding turns routinely run for minutes, so the handle waits far longer than
@@ -354,11 +363,40 @@ export interface PaseoConfigActions {
   ): Promise<{ requestId: string; config: MutableDaemonConfig }>;
 }
 
+export type PaseoTeam = TeamDefinitionDto;
+export type PaseoTeamRun = TeamRunDto;
+export type PaseoTeamUpdateOptions = UpdateTeamInput;
+export type PaseoTeamDeleteOptions = DeleteTeamInput;
+export type PaseoTeamRunStartOptions = StartTeamRunInput;
+export type PaseoTeamRunListOptions = ListTeamRunsInput;
+export type PaseoTeamCreateOptions = TeamDefinitionInputDto & { requestId?: string };
+
+export interface PaseoTeamActions {
+  create(options: PaseoTeamCreateOptions): Promise<{ requestId: string; team: PaseoTeam }>;
+  list(requestId?: string): Promise<{ requestId: string; teams: PaseoTeam[] }>;
+  get(teamId: string, requestId?: string): Promise<{ requestId: string; team: PaseoTeam }>;
+  update(options: PaseoTeamUpdateOptions): Promise<{ requestId: string; team: PaseoTeam }>;
+  delete(
+    options: PaseoTeamDeleteOptions,
+  ): Promise<{ requestId: string; teamId: string; revision: number }>;
+  readonly runs: {
+    start(options: PaseoTeamRunStartOptions): Promise<{ requestId: string; run: PaseoTeamRun }>;
+    list(options?: PaseoTeamRunListOptions): Promise<{
+      requestId: string;
+      runs: PaseoTeamRun[];
+      nextCursor: string | null;
+    }>;
+    get(runId: string, requestId?: string): Promise<{ requestId: string; run: PaseoTeamRun }>;
+    cancel(runId: string, requestId?: string): Promise<{ requestId: string; run: PaseoTeamRun }>;
+  };
+}
+
 export interface PaseoApi {
   readonly workspaces: PaseoWorkspaceActions;
   readonly agents: PaseoAgentActions;
   readonly providers: PaseoProviderActions;
   readonly config: PaseoConfigActions;
+  readonly teams: PaseoTeamActions;
 }
 
 export interface PaseoClient extends PaseoApi {
@@ -460,6 +498,19 @@ export function createPaseoApi(daemonClient: DaemonClient): PaseoApi {
     config: {
       get: (requestId) => daemonClient.getDaemonConfig(requestId),
       patch: (patch, requestId) => daemonClient.patchDaemonConfig(patch, requestId),
+    },
+    teams: {
+      create: ({ requestId, ...definition }) => daemonClient.createTeam(definition, requestId),
+      list: (requestId) => daemonClient.listTeams(requestId),
+      get: (teamId, requestId) => daemonClient.getTeam(teamId, requestId),
+      update: (options) => daemonClient.updateTeam(options),
+      delete: (options) => daemonClient.deleteTeam(options),
+      runs: {
+        start: (options) => daemonClient.startTeamRun(options),
+        list: (options) => daemonClient.listTeamRuns(options),
+        get: (runId, requestId) => daemonClient.getTeamRun(runId, requestId),
+        cancel: (runId, requestId) => daemonClient.cancelTeamRun(runId, requestId),
+      },
     },
   };
 }

@@ -155,6 +155,7 @@ import type {
   BrowserAutomationExecuteRequest,
   BrowserAutomationExecuteResponse,
 } from "@getpaseo/protocol/browser-automation/rpc-schemas";
+import type { TeamDefinitionInputDto, TeamDefinitionPatchDto } from "@getpaseo/protocol/team/types";
 
 export interface Logger {
   debug(obj: object, msg?: string): void;
@@ -181,6 +182,35 @@ interface ImportAgentInputBase {
   cwd?: string;
   workspaceId?: string;
   labels?: Record<string, string>;
+}
+
+export interface UpdateTeamInput {
+  teamId: string;
+  expectedRevision: number;
+  patch: TeamDefinitionPatchDto;
+  requestId?: string;
+}
+
+export interface DeleteTeamInput {
+  teamId: string;
+  expectedRevision: number;
+  requestId?: string;
+}
+
+export interface StartTeamRunInput {
+  teamId: string;
+  expectedRevision: number;
+  idempotencyKey: string;
+  objective: string;
+  workspaceId: string;
+  requestId?: string;
+}
+
+export interface ListTeamRunsInput {
+  teamId?: string;
+  cursor?: string;
+  limit?: number;
+  requestId?: string;
 }
 
 export type ImportAgentInput =
@@ -5534,6 +5564,82 @@ export class DaemonClient {
     });
   }
 
+  async createTeam(definition: TeamDefinitionInputDto, requestId?: string) {
+    this.requireTeamsSupport({ requiresAgentProfiles: true });
+    return this.sendNamespacedCorrelatedSessionRequest<"team.create.response">({
+      requestId,
+      message: { type: "team.create.request", definition },
+    });
+  }
+
+  async listTeams(requestId?: string) {
+    this.requireTeamsSupport();
+    return this.sendNamespacedCorrelatedSessionRequest<"team.list.response">({
+      requestId,
+      message: { type: "team.list.request" },
+    });
+  }
+
+  async getTeam(teamId: string, requestId?: string) {
+    this.requireTeamsSupport();
+    return this.sendNamespacedCorrelatedSessionRequest<"team.get.response">({
+      requestId,
+      message: { type: "team.get.request", teamId },
+    });
+  }
+
+  async updateTeam(input: UpdateTeamInput) {
+    this.requireTeamsSupport({ requiresAgentProfiles: true });
+    const { requestId, ...message } = input;
+    return this.sendNamespacedCorrelatedSessionRequest<"team.update.response">({
+      requestId,
+      message: { type: "team.update.request", ...message },
+    });
+  }
+
+  async deleteTeam(input: DeleteTeamInput) {
+    this.requireTeamsSupport();
+    const { requestId, ...message } = input;
+    return this.sendNamespacedCorrelatedSessionRequest<"team.delete.response">({
+      requestId,
+      message: { type: "team.delete.request", ...message },
+    });
+  }
+
+  async startTeamRun(input: StartTeamRunInput) {
+    this.requireTeamsSupport({ requiresAgentProfiles: true });
+    const { requestId, ...message } = input;
+    return this.sendNamespacedCorrelatedSessionRequest<"team.run.start.response">({
+      requestId,
+      message: { type: "team.run.start.request", ...message },
+    });
+  }
+
+  async listTeamRuns(input: ListTeamRunsInput = {}) {
+    this.requireTeamsSupport();
+    const { requestId, ...message } = input;
+    return this.sendNamespacedCorrelatedSessionRequest<"team.run.list.response">({
+      requestId,
+      message: { type: "team.run.list.request", ...message },
+    });
+  }
+
+  async getTeamRun(runId: string, requestId?: string) {
+    this.requireTeamsSupport();
+    return this.sendNamespacedCorrelatedSessionRequest<"team.run.get.response">({
+      requestId,
+      message: { type: "team.run.get.request", runId },
+    });
+  }
+
+  async cancelTeamRun(runId: string, requestId?: string) {
+    this.requireTeamsSupport();
+    return this.sendNamespacedCorrelatedSessionRequest<"team.run.cancel.response">({
+      requestId,
+      message: { type: "team.run.cancel.request", runId },
+    });
+  }
+
   // ============================================================================
   // Internals
   // ============================================================================
@@ -5544,6 +5650,20 @@ export class DaemonClient {
 
   getLastServerInfoMessage(): ServerInfoStatusPayload | null {
     return this.lastServerInfoMessage;
+  }
+
+  private requireTeamsSupport(options?: { requiresAgentProfiles?: boolean }): void {
+    // COMPAT(teams): added in v0.6.0, remove gate after 2027-02-26.
+    if (this.lastServerInfoMessage?.features?.teams !== true) {
+      throw new Error("Update the host to use Teams.");
+    }
+    // COMPAT(agentProfiles): added in v0.3.2, remove gate after 2027-02-11.
+    if (
+      options?.requiresAgentProfiles === true &&
+      this.lastServerInfoMessage.features.agentProfiles !== true
+    ) {
+      throw new Error("Update the host to use Agent Profiles with Teams.");
+    }
   }
 
   private requireHubRelationshipSupport(): void {

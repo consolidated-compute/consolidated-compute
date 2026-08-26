@@ -1,0 +1,219 @@
+import { z } from "zod";
+
+export const TeamResolvedLaunchDtoSchema = z.object({
+  profileId: z.string(),
+  provider: z.string(),
+  model: z.string().nullable(),
+  modeId: z.string().nullable(),
+  thinkingOptionId: z.string().nullable(),
+  featureValues: z.record(z.string(), z.unknown()),
+});
+
+export const TeamRoleDtoSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  instructions: z.string(),
+  profileId: z.string(),
+});
+
+export const TeamWorkflowStepDtoSchema = z.object({
+  id: z.string(),
+  roleId: z.string(),
+  instructions: z.string().nullable(),
+});
+
+export const TeamDefinitionInputDtoSchema = z.object({
+  name: z.string(),
+  instructions: z.string(),
+  roles: z.array(TeamRoleDtoSchema),
+  workflow: z.array(TeamWorkflowStepDtoSchema),
+});
+
+export const TeamDefinitionPatchDtoSchema = TeamDefinitionInputDtoSchema.partial();
+
+export const TeamDefinitionDtoSchema = TeamDefinitionInputDtoSchema.extend({
+  id: z.string(),
+  revision: z.number().int(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const TeamRunWorkspaceDtoSchema = z.object({
+  workspaceId: z.string(),
+  projectId: z.string(),
+  cwd: z.string(),
+  displayName: z.string(),
+});
+
+export const TeamRunStepSnapshotDtoSchema = z.object({
+  stepId: z.string(),
+  roleId: z.string(),
+  roleName: z.string(),
+  roleInstructions: z.string(),
+  stepInstructions: z.string().nullable(),
+  resolvedLaunch: TeamResolvedLaunchDtoSchema,
+});
+
+const PendingStepStateDtoSchema = z.object({ status: z.literal("pending") });
+const CreatingStepStateDtoSchema = z.object({
+  status: z.literal("creating"),
+  plannedAgentId: z.string(),
+  startedAt: z.string(),
+});
+const RunningStepStateDtoSchema = z.object({
+  status: z.literal("running"),
+  plannedAgentId: z.string(),
+  agentId: z.string(),
+  startedAt: z.string(),
+});
+const WaitingForPermissionStepStateDtoSchema = z.object({
+  status: z.literal("waiting_for_permission"),
+  plannedAgentId: z.string(),
+  agentId: z.string(),
+  startedAt: z.string(),
+});
+const StoppingStepStateDtoSchema = z.object({
+  status: z.literal("stopping"),
+  plannedAgentId: z.string(),
+  agentId: z.string().nullable(),
+  startedAt: z.string(),
+  stopRequestedAt: z.string(),
+});
+const SucceededStepStateDtoSchema = z.object({
+  status: z.literal("succeeded"),
+  plannedAgentId: z.string(),
+  agentId: z.string(),
+  startedAt: z.string(),
+  endedAt: z.string(),
+});
+const FailedStepStateDtoSchema = z.object({
+  status: z.literal("failed"),
+  plannedAgentId: z.string(),
+  agentId: z.string().nullable(),
+  startedAt: z.string(),
+  endedAt: z.string(),
+  error: z.string(),
+});
+const CanceledStepStateDtoSchema = z.object({
+  status: z.literal("canceled"),
+  plannedAgentId: z.string(),
+  agentId: z.string().nullable(),
+  startedAt: z.string(),
+  endedAt: z.string(),
+});
+const InterruptedStepStateDtoSchema = z.object({
+  status: z.literal("interrupted"),
+  plannedAgentId: z.string(),
+  agentId: z.string().nullable(),
+  startedAt: z.string(),
+  endedAt: z.string(),
+  error: z.string(),
+});
+const StopFailedStepStateDtoSchema = z.object({
+  status: z.literal("stop_failed"),
+  plannedAgentId: z.string(),
+  agentId: z.string(),
+  startedAt: z.string(),
+  stopRequestedAt: z.string(),
+  error: z.string(),
+});
+
+export const TeamRunStepStateDtoSchema = z.discriminatedUnion("status", [
+  PendingStepStateDtoSchema,
+  CreatingStepStateDtoSchema,
+  RunningStepStateDtoSchema,
+  WaitingForPermissionStepStateDtoSchema,
+  StoppingStepStateDtoSchema,
+  SucceededStepStateDtoSchema,
+  FailedStepStateDtoSchema,
+  CanceledStepStateDtoSchema,
+  InterruptedStepStateDtoSchema,
+  StopFailedStepStateDtoSchema,
+]);
+
+export const TeamRunStepDtoSchema = z.object({
+  snapshot: TeamRunStepSnapshotDtoSchema,
+  state: TeamRunStepStateDtoSchema,
+});
+
+const QueuedRunStateDtoSchema = z.object({ status: z.literal("queued") });
+const RunningRunStateDtoSchema = z.object({
+  status: z.literal("running"),
+  startedAt: z.string(),
+});
+const WaitingForPermissionRunStateDtoSchema = z.object({
+  status: z.literal("waiting_for_permission"),
+  startedAt: z.string(),
+});
+const StoppingRunStateDtoSchema = z.object({
+  status: z.literal("stopping"),
+  startedAt: z.string(),
+  stopRequestedAt: z.string(),
+});
+const SucceededRunStateDtoSchema = z.object({
+  status: z.literal("succeeded"),
+  startedAt: z.string(),
+  endedAt: z.string(),
+});
+const FailedRunStateDtoSchema = z.object({
+  status: z.literal("failed"),
+  startedAt: z.string(),
+  endedAt: z.string(),
+  error: z.string(),
+});
+const CanceledRunStateDtoSchema = z.object({
+  status: z.literal("canceled"),
+  startedAt: z.string().nullable(),
+  endedAt: z.string(),
+});
+const InterruptedRunStateDtoSchema = z.object({
+  status: z.literal("interrupted"),
+  startedAt: z.string().nullable(),
+  endedAt: z.string(),
+  error: z.string(),
+});
+const StopFailedRunStateDtoSchema = z.object({
+  status: z.literal("stop_failed"),
+  startedAt: z.string(),
+  stopRequestedAt: z.string(),
+  error: z.string(),
+});
+
+export const TeamRunStateDtoSchema = z.discriminatedUnion("status", [
+  QueuedRunStateDtoSchema,
+  RunningRunStateDtoSchema,
+  WaitingForPermissionRunStateDtoSchema,
+  StoppingRunStateDtoSchema,
+  SucceededRunStateDtoSchema,
+  FailedRunStateDtoSchema,
+  CanceledRunStateDtoSchema,
+  InterruptedRunStateDtoSchema,
+  StopFailedRunStateDtoSchema,
+]);
+
+export const TeamRunDtoSchema = z.object({
+  id: z.string(),
+  teamId: z.string(),
+  teamRevision: z.number().int(),
+  idempotencyKey: z.string(),
+  teamSnapshot: TeamDefinitionDtoSchema,
+  objective: z.string(),
+  workspace: TeamRunWorkspaceDtoSchema,
+  steps: z.array(TeamRunStepDtoSchema),
+  state: TeamRunStateDtoSchema,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export type TeamResolvedLaunchDto = z.infer<typeof TeamResolvedLaunchDtoSchema>;
+export type TeamRoleDto = z.infer<typeof TeamRoleDtoSchema>;
+export type TeamWorkflowStepDto = z.infer<typeof TeamWorkflowStepDtoSchema>;
+export type TeamDefinitionInputDto = z.infer<typeof TeamDefinitionInputDtoSchema>;
+export type TeamDefinitionPatchDto = z.infer<typeof TeamDefinitionPatchDtoSchema>;
+export type TeamDefinitionDto = z.infer<typeof TeamDefinitionDtoSchema>;
+export type TeamRunWorkspaceDto = z.infer<typeof TeamRunWorkspaceDtoSchema>;
+export type TeamRunStepSnapshotDto = z.infer<typeof TeamRunStepSnapshotDtoSchema>;
+export type TeamRunStepStateDto = z.infer<typeof TeamRunStepStateDtoSchema>;
+export type TeamRunStepDto = z.infer<typeof TeamRunStepDtoSchema>;
+export type TeamRunStateDto = z.infer<typeof TeamRunStateDtoSchema>;
+export type TeamRunDto = z.infer<typeof TeamRunDtoSchema>;

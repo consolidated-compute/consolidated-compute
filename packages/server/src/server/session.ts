@@ -76,6 +76,9 @@ import {
   WorkspaceLabelStorageUncertainError,
   type WorkspaceLabelService,
 } from "./workspace-labels/index.js";
+import type { TeamRepository } from "./team/repository.js";
+import type { TeamRunService } from "./team/service.js";
+import { TeamSession } from "./team/session.js";
 
 import { AgentManager, AgentRunCancellationError } from "./agent/agent-manager.js";
 import { buildTimelinePromptIndex } from "./agent/timeline-prompt-index.js";
@@ -455,6 +458,8 @@ export interface SessionOptions {
   workspaceRegistry: WorkspaceRegistry;
   directorySync?: DirectorySyncService;
   workspaceLabelService?: WorkspaceLabelService;
+  teamRepository?: TeamRepository;
+  teamRunService?: TeamRunService;
   filesystem?: SessionFileSystem;
   scheduleService: ScheduleService;
   checkoutDiffManager: CheckoutDiffManager;
@@ -627,6 +632,15 @@ function resolveWorkspaceLabelService(
   return service ?? null;
 }
 
+function resolveTeamSession(
+  repository: TeamRepository | undefined,
+  runService: TeamRunService | undefined,
+  emit: (message: SessionOutboundMessage) => void,
+): TeamSession | null {
+  if (!repository || !runService) return null;
+  return new TeamSession({ repository, runService, emit });
+}
+
 function workspaceLabelErrorCode(error: unknown): string {
   if (
     error instanceof WorkspaceLabelError ||
@@ -694,6 +708,7 @@ export class Session {
   private readonly agentUpdates: AgentUpdatesService;
   private workspaceUpdatesSubscription: WorkspaceUpdatesSubscriptionState | null = null;
   private readonly workspaceLabelService: WorkspaceLabelService | null;
+  private readonly teamSession: TeamSession | null;
   private workspaceLabelSubscription: {
     owner: object;
     id: string;
@@ -761,6 +776,8 @@ export class Session {
       workspaceRegistry,
       directorySync,
       workspaceLabelService,
+      teamRepository,
+      teamRunService,
       filesystem,
       scheduleService,
       checkoutDiffManager,
@@ -834,6 +851,9 @@ export class Session {
     this.workspaceRegistry = workspaceRegistry;
     this.directorySync = resolveDirectorySync(directorySync);
     this.workspaceLabelService = resolveWorkspaceLabelService(workspaceLabelService);
+    this.teamSession = resolveTeamSession(teamRepository, teamRunService, (message) =>
+      this.emit(message),
+    );
     this.filesystem = filesystem ?? nodeSessionFileSystem;
     this.github = github ?? createGitHubService();
     this.renameCurrentBranch = renameCurrentBranch ?? renameCurrentBranchDefault;
@@ -1914,8 +1934,7 @@ export class Session {
       this.dispatchAgentLifecycleMessage(msg) ??
       this.dispatchAgentConfigMessage(msg) ??
       this.dispatchCheckoutMessage(msg) ??
-      this.dispatchWorkspaceRecoveryMessage(msg) ??
-      this.dispatchWorkspaceLabelMessage(msg) ??
+      this.dispatchWorkspaceSupportMessage(msg) ??
       this.dispatchWorkspaceAndProjectMessage(msg) ??
       this.dispatchWorkspaceFileMessage(msg, source) ??
       this.dispatchProviderMessage(msg) ??
@@ -1926,6 +1945,33 @@ export class Session {
       this.dispatchScheduleMessage(msg) ??
       this.dispatchMiscMessage(msg);
     if (promise) await promise;
+  }
+
+  private dispatchWorkspaceSupportMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    return (
+      this.dispatchWorkspaceRecoveryMessage(msg) ??
+      this.dispatchTeamMessage(msg) ??
+      this.dispatchWorkspaceLabelMessage(msg)
+    );
+  }
+
+  private dispatchTeamMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (!msg.type.startsWith("team.")) return undefined;
+    const dispatched = this.teamSession?.dispatch(msg);
+    if (dispatched) return dispatched;
+    const requestId = sessionRequestId(msg);
+    if (requestId) {
+      this.emit({
+        type: "rpc_error",
+        payload: {
+          requestId,
+          requestType: msg.type,
+          error: "Update the host to use Teams.",
+          code: "teams_unsupported",
+        },
+      });
+    }
+    return Promise.resolve();
   }
 
   private dispatchOrchestrationSkillsMessage(
