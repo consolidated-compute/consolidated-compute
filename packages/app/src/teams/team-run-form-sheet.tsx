@@ -80,9 +80,10 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
     [state.workspaces],
   );
   const close = useCallback(() => {
+    if (pending) return;
     cancelCompletion();
     onClose();
-  }, [cancelCompletion, onClose]);
+  }, [cancelCompletion, onClose, pending]);
 
   const footer = useMemo(
     () => (
@@ -113,6 +114,7 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
       desktopMaxWidth={680}
       snapPoints={TEAM_RUN_SHEET_SNAP_POINTS}
       testID="team-run-form-sheet"
+      dismissible={!pending}
     >
       <View style={styles.body}>
         <SelectField

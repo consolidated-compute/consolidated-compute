@@ -12,6 +12,24 @@ export interface CompactSheetSafeAreaPadding {
   footerPaddingBottom?: number;
 }
 
+export interface AdaptiveModalDismissalBehavior {
+  acceptsDismissRequest: boolean;
+  backdropPressBehavior: "close" | "none";
+  enablePanDownToClose: boolean;
+  showCloseButton: boolean;
+}
+
+export function getAdaptiveModalDismissalBehavior(
+  dismissible: boolean,
+): AdaptiveModalDismissalBehavior {
+  return {
+    acceptsDismissRequest: dismissible,
+    backdropPressBehavior: dismissible ? "close" : "none",
+    enablePanDownToClose: dismissible,
+    showCloseButton: dismissible,
+  };
+}
+
 interface BottomSheetVisibleContentHeightInput {
   containerHeight: number;
   contentPosition: number;

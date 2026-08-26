@@ -26,6 +26,7 @@ import {
   useIsolatedBottomSheetVisibility,
 } from "@/components/ui/isolated-bottom-sheet-modal";
 import {
+  getAdaptiveModalDismissalBehavior,
   getBottomSheetVisibleContentHeight,
   getCompactSheetSafeAreaPadding,
 } from "@/components/adaptive-modal-sheet-layout";
@@ -214,6 +215,7 @@ const styles = StyleSheet.create((theme) => ({
 }));
 
 const WEB_EXIT_DURATION_MS = 160;
+const IGNORE_DISMISS_REQUEST = () => undefined;
 
 function SheetBackground({ style }: BottomSheetBackgroundProps) {
   const { theme } = useUnistyles();
@@ -450,6 +452,8 @@ export interface AdaptiveModalSheetProps {
   contentStyle?: StyleProp<ViewStyle>;
   /** Size compact sheet content to the live snap height instead of its largest snap point. */
   sizeContentToCurrentSnapPoint?: boolean;
+  /** Whether user-driven close controls and gestures can dismiss the sheet. */
+  dismissible?: boolean;
 }
 
 export function AdaptiveModalSheet({
@@ -467,12 +471,14 @@ export function AdaptiveModalSheet({
   presentation,
   contentStyle,
   sizeContentToCurrentSnapPoint = false,
+  dismissible = true,
 }: AdaptiveModalSheetProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
   const isMobile = useIsCompactFormFactor();
   const insets = useSafeAreaInsets();
   const isKeyboardVisible = useKeyboardVisibility();
+  const dismissal = getAdaptiveModalDismissalBehavior(dismissible);
   const resolvedSnapPoints = useMemo(() => snapPoints ?? ["65%", "90%"], [snapPoints]);
   const compactSafeAreaPadding = useMemo(
     () =>
@@ -544,9 +550,15 @@ export function AdaptiveModalSheet({
 
   const renderBackdrop = useCallback(
     (props: React.ComponentProps<typeof BottomSheetBackdrop>) => (
-      <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} opacity={0.45} />
+      <BottomSheetBackdrop
+        {...props}
+        disappearsOnIndex={-1}
+        appearsOnIndex={0}
+        opacity={0.45}
+        pressBehavior={dismissal.backdropPressBehavior}
+      />
     ),
-    [],
+    [dismissal.backdropPressBehavior],
   );
 
   const desktopCardStyle = useMemo(
@@ -572,10 +584,10 @@ export function AdaptiveModalSheet({
       if (event.key !== "Escape") return false;
       event.preventDefault();
       event.stopPropagation();
-      onClose();
+      if (dismissal.acceptsDismissRequest) onClose();
       return true;
     },
-    [onClose],
+    [dismissal.acceptsDismissRequest, onClose],
   );
   const setWebOverlayScope = useWebOverlayRegistration({
     active: isWeb && !isMobile && visible,
@@ -615,7 +627,12 @@ export function AdaptiveModalSheet({
   if (isMobile) {
     const sheetContent = (
       <>
-        <SheetHeaderView header={header} onClose={onClose} testID={testID} />
+        <SheetHeaderView
+          header={header}
+          onClose={onClose}
+          showCloseButton={dismissal.showCloseButton}
+          testID={testID}
+        />
         {scrollable ? (
           <BottomSheetScrollView
             style={sizeContentToCurrentSnapPoint ? styles.bottomSheetVisibleScroll : undefined}
@@ -641,7 +658,7 @@ export function AdaptiveModalSheet({
         onChange={handleSheetChange}
         onDismiss={handleDismiss}
         backdropComponent={renderBackdrop}
-        enablePanDownToClose
+        enablePanDownToClose={dismissal.enablePanDownToClose}
         backgroundComponent={SheetBackground}
         handleIndicatorStyle={handleIndicatorStyle}
         keyboardBehavior="extend"
@@ -660,7 +677,11 @@ export function AdaptiveModalSheet({
 
   const cardInner = (
     <OverlayLayerProvider layer={modalLayer}>
-      <SheetHeaderView header={header} onClose={onClose} />
+      <SheetHeaderView
+        header={header}
+        onClose={onClose}
+        showCloseButton={dismissal.showCloseButton}
+      />
       {scrollable ? (
         <View style={styles.desktopScrollContainer}>
           <ScrollView
@@ -682,8 +703,11 @@ export function AdaptiveModalSheet({
   const desktopContent = (
     <View style={desktopOverlayStyle} testID={testID}>
       <Pressable
-        accessibilityLabel={t("common.actions.dismiss")}
+        accessibilityLabel={
+          dismissal.acceptsDismissRequest ? t("common.actions.dismiss") : undefined
+        }
         style={ABSOLUTE_FILL_STYLE}
+        disabled={!dismissal.acceptsDismissRequest}
         onPress={onClose}
       />
       <View
@@ -709,7 +733,7 @@ export function AdaptiveModalSheet({
       transparent
       animationType="fade"
       visible={visible}
-      onRequestClose={onClose}
+      onRequestClose={dismissal.acceptsDismissRequest ? onClose : IGNORE_DISMISS_REQUEST}
       onDismiss={notifyNativeModalDismiss}
       hardwareAccelerated
     >

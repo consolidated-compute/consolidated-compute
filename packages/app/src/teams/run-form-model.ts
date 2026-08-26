@@ -119,6 +119,12 @@ export interface TeamRunFeatureRequest {
   };
 }
 
+export interface TeamRunFeatureProbe {
+  requestKey: string;
+  roleIds: string[];
+  config: TeamRunFeatureRequest["config"];
+}
+
 export function buildTeamRunWorkspaceOptions(
   workspaces: readonly WorkspaceDescriptor[],
 ): TeamRunWorkspaceOption[] {
@@ -195,9 +201,28 @@ export function buildTeamRunFeatureRequest(
   };
   return {
     roleId: resolution.roleId,
-    requestKey: JSON.stringify([catalogGeneration, resolution.roleId, config]),
+    requestKey: JSON.stringify([catalogGeneration, config]),
     config,
   };
+}
+
+export function buildTeamRunFeatureProbes(
+  requests: readonly TeamRunFeatureRequest[],
+): TeamRunFeatureProbe[] {
+  const probes = new Map<string, TeamRunFeatureProbe>();
+  for (const request of requests) {
+    const existing = probes.get(request.requestKey);
+    if (existing) {
+      existing.roleIds.push(request.roleId);
+      continue;
+    }
+    probes.set(request.requestKey, {
+      requestKey: request.requestKey,
+      roleIds: [request.roleId],
+      config: request.config,
+    });
+  }
+  return [...probes.values()];
 }
 
 function hasInvalidFeatureValue(

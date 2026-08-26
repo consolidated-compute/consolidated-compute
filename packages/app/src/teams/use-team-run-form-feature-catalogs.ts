@@ -3,6 +3,7 @@ import type { AgentFeature } from "@getpaseo/protocol/agent-types";
 import { useFetchQueries } from "@/data/query";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import {
+  buildTeamRunFeatureProbes,
   buildTeamRunFeatureRequest,
   type TeamRunFormModel,
   type TeamRunFormState,
@@ -23,15 +24,16 @@ export function useTeamRunFormFeatureCatalogs(model: TeamRunFormModel, state: Te
       }),
     [state.catalogGeneration, state.roleResolutions, state.selectedWorkspaceCwd],
   );
+  const probes = useMemo(() => buildTeamRunFeatureProbes(requests), [requests]);
   const queries = useFetchQueries<readonly AgentFeature[]>(
-    requests.map((request) => ({
-      queryKey: ["teamRunFeatures", state.serverId, request.requestKey],
+    probes.map((probe) => ({
+      queryKey: ["teamRunFeatures", state.serverId, probe.requestKey],
       dataShape: "value" as const,
       staleTimeMs: 0,
       enabled: Boolean(client && connected),
       queryFn: async () => {
         if (!client) throw new Error("Host is offline");
-        const payload = await client.listProviderFeatures(request.config);
+        const payload = await client.listProviderFeatures(probe.config);
         if (payload.error) throw new Error(payload.error);
         return payload.features ?? [];
       },
@@ -39,15 +41,19 @@ export function useTeamRunFormFeatureCatalogs(model: TeamRunFormModel, state: Te
   );
 
   useEffect(() => {
-    requests.forEach((request, index) => {
+    probes.forEach((probe, index) => {
       const query = queries[index];
       if (query?.data) {
-        model.applyFeatureCatalog(request.roleId, request.requestKey, query.data);
+        probe.roleIds.forEach((roleId) =>
+          model.applyFeatureCatalog(roleId, probe.requestKey, query.data),
+        );
       } else if (query?.isError) {
-        model.applyFeatureCatalog(request.roleId, request.requestKey, null);
+        probe.roleIds.forEach((roleId) =>
+          model.applyFeatureCatalog(roleId, probe.requestKey, null),
+        );
       }
     });
-  }, [model, queries, requests]);
+  }, [model, probes, queries]);
 
   return { connected };
 }

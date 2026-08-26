@@ -5,8 +5,9 @@ import type { TeamDefinitionDto } from "@getpaseo/protocol/team/types";
 import { TEAM_OBJECTIVE_MAX_CHARS } from "@getpaseo/protocol/team/types";
 import type { WorkspaceDescriptor } from "@/stores/session-store";
 import {
-  buildTeamRunWorkspaceOptions,
+  buildTeamRunFeatureProbes,
   buildTeamRunFeatureRequest,
+  buildTeamRunWorkspaceOptions,
   openTeamRunForm,
   type TeamRunWorkspaceOption,
 } from "./run-form-model";
@@ -278,6 +279,36 @@ describe("Team Run form model", () => {
     expect(model.getState().roleResolutions[0]?.status).toBe("features_loading");
     model.applyFeatureCatalog("planner", refreshedRequest.requestKey, [webFeature]);
     expect(model.getState().roleResolutions[0]?.status).toBe("ready");
+  });
+
+  it("deduplicates identical feature probes across roles", () => {
+    const resolution = {
+      roleId: "planner",
+      roleName: "Planner",
+      profileId: "architect",
+      profileName: "Architect",
+      provider: "codex",
+      model: "gpt-5.6",
+      modeId: "plan",
+      thinkingOptionId: "high",
+      featureValues: { web: true },
+      status: "ready",
+    } as const;
+    const planner = buildTeamRunFeatureRequest(resolution, workspace.cwd, 4)!;
+    const reviewer = buildTeamRunFeatureRequest(
+      { ...resolution, roleId: "reviewer", roleName: "Reviewer" },
+      workspace.cwd,
+      4,
+    )!;
+
+    expect(planner.requestKey).toBe(reviewer.requestKey);
+    expect(buildTeamRunFeatureProbes([planner, reviewer])).toEqual([
+      {
+        requestKey: planner.requestKey,
+        roleIds: ["planner", "reviewer"],
+        config: planner.config,
+      },
+    ]);
   });
 
   it("validates thinking against the resolved default model", () => {
