@@ -249,4 +249,22 @@ describe("Team form model", () => {
       submission: null,
     });
   });
+
+  it("preserves a failed-save error through background inputs until the user edits", () => {
+    const form = openTeamForm({
+      mode: "edit",
+      hosts: [{ serverId: "host-a", label: "A" }],
+      selectedServerId: "host-a",
+      team,
+      profilesByServerId: { "host-a": profiles },
+    });
+
+    form.setSubmitError("Save failed");
+    form.applyHosts([{ serverId: "host-a", label: "Renamed host" }]);
+    form.applyProfiles("host-a", [{ ...profiles[0]!, name: "Renamed profile" }, profiles[1]!]);
+    expect(form.getState().submitError).toBe("Save failed");
+
+    form.setName("Delivery updated");
+    expect(form.getState().submitError).toBeNull();
+  });
 });

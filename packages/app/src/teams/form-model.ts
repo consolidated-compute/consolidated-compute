@@ -317,8 +317,14 @@ export function openTeamForm(
 
   state = deriveState(state);
 
-  function publish(next: TeamFormState): void {
-    state = deriveState({ ...next, submitError: null });
+  function publish(
+    next: TeamFormState,
+    publishOptions: { preserveSubmitError?: boolean } = {},
+  ): void {
+    state = deriveState({
+      ...next,
+      submitError: publishOptions.preserveSubmitError ? next.submitError : null,
+    });
     for (const listener of listeners) listener();
   }
 
@@ -343,22 +349,25 @@ export function openTeamForm(
       return () => listeners.delete(listener);
     },
     close: () => listeners.clear(),
-    applyHosts: (hosts) => publish({ ...state, hosts: [...hosts] }),
+    applyHosts: (hosts) => publish({ ...state, hosts: [...hosts] }, { preserveSubmitError: true }),
     applyProfiles: (serverId, profiles) => {
       profileCatalogs.set(serverId, profiles);
       if (serverId !== state.selectedServerId) return;
       const isInitialResolution = profiles !== null && !resolvedProfileCatalogs.has(serverId);
       if (profiles !== null) resolvedProfileCatalogs.add(serverId);
-      publish({
-        ...state,
-        profiles: profiles ? [...profiles] : null,
-        roles: isInitialResolution
-          ? state.roles.map((role) => ({
-              ...role,
-              profileDisplay: role.profileId ? profileDisplay(profiles, role.profileId) : null,
-            }))
-          : state.roles,
-      });
+      publish(
+        {
+          ...state,
+          profiles: profiles ? [...profiles] : null,
+          roles: isInitialResolution
+            ? state.roles.map((role) => ({
+                ...role,
+                profileDisplay: role.profileId ? profileDisplay(profiles, role.profileId) : null,
+              }))
+            : state.roles,
+        },
+        { preserveSubmitError: true },
+      );
     },
     setHost: (serverId) => {
       if (state.mode === "edit" || serverId === state.selectedServerId) return;

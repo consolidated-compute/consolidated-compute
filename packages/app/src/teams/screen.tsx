@@ -355,12 +355,16 @@ function TeamDetail({
   const { profiles } = useAgentProfiles(team?.serverId ?? null);
   const { entries } = useProvidersSnapshot(team?.serverId ?? null, { cwd: null });
   const mutations = useTeamMutations();
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteFailure, setDeleteFailure] = useState<{
+    teamKey: string;
+    message: string;
+  } | null>(null);
   const profileById = useMemo(
     () => new Map((profiles ?? []).map((profile) => [profile.id, profile])),
     [profiles],
   );
   const editable = Boolean(team && host?.status === "ready" && host.canAuthor);
+  const deleteError = team && deleteFailure?.teamKey === team.key ? deleteFailure.message : null;
 
   const edit = useCallback(() => {
     if (team) onEdit(team);
@@ -377,7 +381,7 @@ function TeamDetail({
       destructive: true,
     });
     if (!confirmed) return;
-    setDeleteError(null);
+    setDeleteFailure(null);
     try {
       await mutations.remove.mutateAsync({
         serverId: team.serverId,
@@ -386,11 +390,13 @@ function TeamDetail({
       });
       router.replace(buildTeamsRoute() as Href);
     } catch (error) {
-      setDeleteError(
-        rpcErrorCode(error) === "team_revision_conflict"
-          ? t("teams.errors.conflict")
-          : toErrorMessage(error),
-      );
+      setDeleteFailure({
+        teamKey: team.key,
+        message:
+          rpcErrorCode(error) === "team_revision_conflict"
+            ? t("teams.errors.conflict")
+            : toErrorMessage(error),
+      });
     }
   }, [mutations.remove, t, team]);
 

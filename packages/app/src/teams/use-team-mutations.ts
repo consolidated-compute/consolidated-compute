@@ -7,6 +7,7 @@ import type {
 } from "@getpaseo/protocol/team/types";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { teamListQueryKey } from "./data";
+import { invalidateTeamList, prepareTeamListMutation } from "./mutation-cache";
 
 export interface CreateTeamInput {
   serverId: string;
@@ -46,9 +47,11 @@ export function useTeamMutations() {
   const create = useMutation({
     mutationFn: async (input: CreateTeamInput) =>
       requireClient(input.serverId).createTeam(input.definition),
-    onSuccess: (payload, input) => {
+    onSuccess: async (payload, input) => {
+      await prepareTeamListMutation(queryClient, input.serverId);
       updateCachedList(input.serverId, (current) => [...current, payload.team]);
     },
+    onSettled: (_payload, _error, input) => invalidateTeamList(queryClient, input.serverId),
   });
 
   const update = useMutation({
@@ -58,11 +61,13 @@ export function useTeamMutations() {
         expectedRevision: input.expectedRevision,
         patch: input.patch,
       }),
-    onSuccess: (payload, input) => {
+    onSuccess: async (payload, input) => {
+      await prepareTeamListMutation(queryClient, input.serverId);
       updateCachedList(input.serverId, (current) =>
         current.map((team) => (team.id === payload.team.id ? payload.team : team)),
       );
     },
+    onSettled: (_payload, _error, input) => invalidateTeamList(queryClient, input.serverId),
   });
 
   const remove = useMutation({
@@ -71,11 +76,13 @@ export function useTeamMutations() {
         teamId: input.teamId,
         expectedRevision: input.expectedRevision,
       }),
-    onSuccess: (_payload, input) => {
+    onSuccess: async (_payload, input) => {
+      await prepareTeamListMutation(queryClient, input.serverId);
       updateCachedList(input.serverId, (current) =>
         current.filter((team) => team.id !== input.teamId),
       );
     },
+    onSettled: (_payload, _error, input) => invalidateTeamList(queryClient, input.serverId),
   });
 
   return { create, update, remove };
