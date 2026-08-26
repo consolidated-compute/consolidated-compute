@@ -8,6 +8,7 @@ import {
   TEAM_MAX_ROLES,
   TEAM_MAX_WORKFLOW_STEPS,
   TEAM_NAME_MAX_CHARS,
+  TEAM_OBJECTIVE_MAX_CHARS,
   TEAM_ROLE_NAME_MAX_CHARS,
 } from "@getpaseo/protocol/team/types";
 
@@ -17,10 +18,10 @@ export {
   TEAM_MAX_ROLES,
   TEAM_MAX_WORKFLOW_STEPS,
   TEAM_NAME_MAX_CHARS,
+  TEAM_OBJECTIVE_MAX_CHARS,
   TEAM_ROLE_NAME_MAX_CHARS,
 } from "@getpaseo/protocol/team/types";
 
-export const TEAM_OBJECTIVE_MAX_CHARS = 32_000;
 export const TEAM_ERROR_MAX_CHARS = 4_096;
 export const TEAM_IDEMPOTENCY_KEY_MAX_CHARS = 256;
 export const TEAM_PROVIDER_ID_MAX_CHARS = 128;

@@ -12,6 +12,7 @@ import {
   buildSessionsRoute,
   buildSettingsAddHostRoute,
   buildTeamRoute,
+  buildTeamRunRoute,
   buildTeamsRoute,
   buildProjectSettingsRoute,
   buildProjectsSettingsRoute,
@@ -216,6 +217,9 @@ describe("global routes", () => {
   it("builds host-qualified Team routes", () => {
     expect(buildTeamsRoute()).toBe("/teams");
     expect(buildTeamRoute("host a", "team/1")).toBe("/teams/host%20a/team%2F1");
+    expect(buildTeamRunRoute("host a", "team/1", "run#1")).toBe(
+      "/teams/host%20a/team%2F1/runs/run%231",
+    );
   });
 
   it("buildVisualRoute returns the global Visual route", () => {

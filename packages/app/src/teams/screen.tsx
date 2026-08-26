@@ -2,29 +2,44 @@ import { useCallback, useMemo, useRef, useState, type ReactElement } from "react
 import { Pressable, ScrollView, Text, View, type PressableStateCallbackType } from "react-native";
 import { useIsFocused } from "@react-navigation/native";
 import { router, type Href } from "expo-router";
-import { Bot, ChevronRight, Pencil, Plus, RefreshCw, Trash2, Users } from "lucide-react-native";
+import {
+  Bot,
+  ChevronRight,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Users,
+} from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
 import type { AgentProfile } from "@getpaseo/protocol/messages";
-import type { TeamDefinitionDto } from "@getpaseo/protocol/team/types";
+import type { TeamDefinitionDto, TeamRunDto } from "@getpaseo/protocol/team/types";
 import { AgentProfileGlyph, buildAgentProfileTags, useAgentProfiles } from "@/agent-profiles";
 import { BackHeader } from "@/components/headers/back-header";
 import { MenuHeader } from "@/components/headers/menu-header";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import {
   buildSettingsHostSectionRoute,
   buildTeamRoute,
+  buildTeamRunRoute,
   buildTeamsRoute,
 } from "@/utils/host-routes";
 import { toErrorMessage } from "@/utils/error-messages";
+import { formatTimeAgo } from "@/utils/time";
 import { teamKey, type AggregatedTeam, type TeamHostState } from "./data";
+import { isTerminalTeamRunStatus, newestTeamRunSnapshot } from "./run-data";
 import { resolveActiveTeamKey, type TeamsView } from "./screen-state";
 import { TeamFormSheet } from "./team-form-sheet";
+import { TeamRunFormSheet } from "./team-run-form-sheet";
 import { useTeamMutations } from "./use-team-mutations";
+import { useTeamRun, useTeamRuns } from "./use-team-runs";
 import { useTeams } from "./use-teams";
 
 export type { TeamsView } from "./screen-state";
@@ -33,6 +48,8 @@ type FormState =
   | { kind: "closed" }
   | { kind: "create" }
   | { kind: "edit"; serverId: string; team: TeamDefinitionDto };
+
+type RunFormState = { kind: "closed" } | { kind: "open"; team: AggregatedTeam };
 
 function rpcErrorCode(error: unknown): string | null {
   if (!error || typeof error !== "object" || !("code" in error)) return null;
@@ -50,6 +67,7 @@ function TeamsScreenContent({ view }: { view: TeamsView }): ReactElement {
   const compact = useIsCompactFormFactor();
   const data = useTeams();
   const [form, setForm] = useState<FormState>({ kind: "closed" });
+  const [runForm, setRunForm] = useState<RunFormState>({ kind: "closed" });
   const eligibleHosts = useMemo(
     () =>
       data.hosts
@@ -71,6 +89,16 @@ function TeamsScreenContent({ view }: { view: TeamsView }): ReactElement {
     [],
   );
   const closeForm = useCallback(() => setForm({ kind: "closed" }), []);
+  const openRun = useCallback((team: AggregatedTeam) => setRunForm({ kind: "open", team }), []);
+  const closeRun = useCallback(() => setRunForm({ kind: "closed" }), []);
+  const runStarted = useCallback(
+    (run: TeamRunDto) => {
+      if (runForm.kind !== "open") return;
+      setRunForm({ kind: "closed" });
+      router.push(buildTeamRunRoute(runForm.team.serverId, run.teamId, run.id) as Href);
+    },
+    [runForm],
+  );
   const openTeam = useCallback((team: AggregatedTeam) => {
     router.push(buildTeamRoute(team.serverId, team.id) as Href);
   }, []);
@@ -107,6 +135,7 @@ function TeamsScreenContent({ view }: { view: TeamsView }): ReactElement {
             )}
             activeTeamKey={activeTeamKey}
             onEdit={openEdit}
+            onRun={openRun}
           />
         </View>
       ) : (
@@ -134,6 +163,7 @@ function TeamsScreenContent({ view }: { view: TeamsView }): ReactElement {
               )}
               activeTeamKey={activeTeamKey}
               onEdit={openEdit}
+              onRun={openRun}
             />
           </View>
         </View>
@@ -174,6 +204,15 @@ function TeamsScreenContent({ view }: { view: TeamsView }): ReactElement {
           )}
           onClose={closeForm}
           onSaved={saved}
+        />
+      ) : null}
+      {runForm.kind === "open" ? (
+        <TeamRunFormSheet
+          key={`run:${runForm.team.serverId}:${runForm.team.id}:${runForm.team.revision}`}
+          serverId={runForm.team.serverId}
+          team={runForm.team}
+          onClose={closeRun}
+          onStarted={runStarted}
         />
       ) : null}
     </>
@@ -350,12 +389,14 @@ function TeamDetail({
   loading,
   activeTeamKey,
   onEdit,
+  onRun,
 }: {
   team: AggregatedTeam | null;
   host: TeamHostState | null;
   loading: boolean;
   activeTeamKey: string | null;
   onEdit: (team: AggregatedTeam) => void;
+  onRun: (team: AggregatedTeam) => void;
 }): ReactElement {
   const { t } = useTranslation();
   const { profiles } = useAgentProfiles(team?.serverId ?? null);
@@ -377,6 +418,16 @@ function TeamDetail({
   const edit = useCallback(() => {
     if (team) onEdit(team);
   }, [onEdit, team]);
+  const startRun = useCallback(() => {
+    if (team) onRun(team);
+  }, [onRun, team]);
+  const openRunDetail = useCallback(
+    (run: TeamRunDto) => {
+      if (!team) return;
+      router.push(buildTeamRunRoute(team.serverId, team.id, run.id) as Href);
+    },
+    [team],
+  );
   const manageProfiles = useCallback(() => {
     if (team) router.push(buildSettingsHostSectionRoute(team.serverId, "agents"));
   }, [team]);
@@ -434,6 +485,16 @@ function TeamDetail({
           <Text style={styles.detailHost}>{team.serverName}</Text>
         </View>
         <View style={styles.detailActions}>
+          <Button
+            variant="default"
+            size="sm"
+            leftIcon={Play}
+            onPress={startRun}
+            disabled={!editable}
+            testID={`team-run-open-${team.serverId}-${team.id}`}
+          >
+            {t("teams.runs.actions.runTeam")}
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -506,11 +567,111 @@ function TeamDetail({
           })}
         </View>
       </DetailSection>
+      <DetailSection title={t("teams.runs.recent.title")}>
+        <TeamRecentRuns serverId={team.serverId} teamId={team.id} onOpen={openRunDetail} />
+      </DetailSection>
       <Button variant="outline" onPress={manageProfiles} testID="team-detail-manage-profiles">
         {t("teams.actions.manageProfiles")}
       </Button>
       {deleteError ? <Text style={styles.error}>{deleteError}</Text> : null}
     </ScrollView>
+  );
+}
+
+function TeamRecentRuns({
+  serverId,
+  teamId,
+  onOpen,
+}: {
+  serverId: string;
+  teamId: string;
+  onOpen: (run: TeamRunDto) => void;
+}): ReactElement {
+  const { t } = useTranslation();
+  const runsQuery = useTeamRuns(serverId, teamId);
+  const { refetch, fetchNextPage } = runsQuery;
+  const retry = useCallback(() => void refetch(), [refetch]);
+  const loadMore = useCallback(() => void fetchNextPage(), [fetchNextPage]);
+  return (
+    <View style={styles.detailCards}>
+      {runsQuery.isLoading ? (
+        <View style={styles.runsLoading}>
+          <LoadingSpinner size="small" color={styles.spinner.color} />
+        </View>
+      ) : null}
+      {runsQuery.isError ? (
+        <View style={styles.hostMessageRow}>
+          <Text style={styles.hostMessage}>{toErrorMessage(runsQuery.error)}</Text>
+          <Button variant="ghost" size="sm" onPress={retry}>
+            {t("teams.actions.retry")}
+          </Button>
+        </View>
+      ) : null}
+      {!runsQuery.isLoading && !runsQuery.isError && runsQuery.runs.length === 0 ? (
+        <Text style={styles.hostMessage}>{t("teams.runs.recent.empty")}</Text>
+      ) : null}
+      {runsQuery.runs.map((run) => (
+        <TeamRunRow key={run.id} serverId={serverId} run={run} onOpen={onOpen} />
+      ))}
+      {runsQuery.hasNextPage ? (
+        <Button
+          variant="outline"
+          size="sm"
+          onPress={loadMore}
+          disabled={runsQuery.isFetchingNextPage}
+          loading={runsQuery.isFetchingNextPage}
+        >
+          {t("teams.runs.actions.loadMore")}
+        </Button>
+      ) : null}
+    </View>
+  );
+}
+
+function TeamRunRow({
+  serverId,
+  run,
+  onOpen,
+}: {
+  serverId: string;
+  run: TeamRunDto;
+  onOpen: (run: TeamRunDto) => void;
+}): ReactElement {
+  const { t } = useTranslation();
+  const activeRunQuery = useTeamRun(serverId, run.id, {
+    enabled: !isTerminalTeamRunStatus(run.state.status),
+  });
+  const displayedRun = newestTeamRunSnapshot(run, activeRunQuery.data);
+  const handlePress = useCallback(() => onOpen(displayedRun), [displayedRun, onOpen]);
+  const style = useCallback(
+    ({ pressed, hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
+      styles.runRow,
+      (pressed || hovered) && styles.teamRowHovered,
+    ],
+    [],
+  );
+  return (
+    <Pressable
+      onPress={handlePress}
+      style={style}
+      accessibilityRole="button"
+      accessibilityLabel={t("teams.runs.recent.open", {
+        objective: displayedRun.objective,
+        status: t(`teams.runs.status.${displayedRun.state.status}`),
+      })}
+      testID={`team-run-row-${run.id}`}
+    >
+      <View style={styles.teamRowText}>
+        <Text style={styles.teamName} numberOfLines={1}>
+          {displayedRun.objective}
+        </Text>
+        <Text style={styles.teamMeta} numberOfLines={1}>
+          {displayedRun.workspace.displayName} · {formatTimeAgo(new Date(displayedRun.createdAt))}
+        </Text>
+      </View>
+      <StatusBadge label={t(`teams.runs.status.${displayedRun.state.status}`)} />
+      <ChevronRight size={16} color={styles.chevron.color} />
+    </Pressable>
   );
 }
 
@@ -658,6 +819,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   detailTitleRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "flex-start",
     justifyContent: "space-between",
     gap: theme.spacing[4],
@@ -669,7 +831,14 @@ const styles = StyleSheet.create((theme) => ({
     fontWeight: theme.fontWeight.semibold,
   },
   detailHost: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
-  detailActions: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
+  detailActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    flexShrink: 1,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: theme.spacing[2],
+  },
   notice: {
     color: theme.colors.foregroundMuted,
     backgroundColor: theme.colors.surface1,
@@ -726,5 +895,16 @@ const styles = StyleSheet.create((theme) => ({
   workflowContent: { flex: 1, minWidth: 0, gap: theme.spacing[1] },
   workflowRole: { color: theme.colors.foreground, fontWeight: theme.fontWeight.medium },
   workflowInstructions: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
+  runsLoading: { minHeight: 72, alignItems: "center", justifyContent: "center" },
+  runRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    padding: theme.spacing[3],
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface1,
+  },
   error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm },
 }));
