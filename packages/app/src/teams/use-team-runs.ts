@@ -11,6 +11,7 @@ import {
 } from "./run-data";
 
 const TEAM_RUN_PAGE_LIMIT = 20;
+const TEAM_RUN_LIST_REFRESH_INTERVAL_MS = 5_000;
 const ACTIVE_TEAM_RUN_REFRESH_INTERVAL_MS = 2_000;
 
 export type TeamRunPage = TeamRunPageData;
@@ -35,6 +36,7 @@ export function useTeamRuns(serverId: string | null, teamId: string | null) {
     enabled,
     initialPageParam: null,
     staleTimeMs: 0,
+    refetchInterval: TEAM_RUN_LIST_REFRESH_INTERVAL_MS,
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     queryFn: async ({ pageParam }) => {
       if (!client || !teamId) throw new Error("Host is offline");
