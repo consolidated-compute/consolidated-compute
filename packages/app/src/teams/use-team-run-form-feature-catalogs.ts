@@ -14,10 +14,14 @@ export function useTeamRunFormFeatureCatalogs(model: TeamRunFormModel, state: Te
   const requests = useMemo(
     () =>
       state.roleResolutions.flatMap((resolution) => {
-        const request = buildTeamRunFeatureRequest(resolution, state.selectedWorkspaceCwd);
+        const request = buildTeamRunFeatureRequest(
+          resolution,
+          state.selectedWorkspaceCwd,
+          state.catalogGeneration,
+        );
         return request ? [request] : [];
       }),
-    [state.roleResolutions, state.selectedWorkspaceCwd],
+    [state.catalogGeneration, state.roleResolutions, state.selectedWorkspaceCwd],
   );
   const queries = useFetchQueries<readonly AgentFeature[]>(
     requests.map((request) => ({

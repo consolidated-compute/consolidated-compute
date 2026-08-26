@@ -65,6 +65,7 @@ export interface TeamRunFormState {
   selectedWorkspaceId: string | null;
   selectedWorkspaceDisplay: TeamRunFormDisplay | null;
   selectedWorkspaceCwd: string | null;
+  catalogGeneration: number;
   objective: string;
   roleResolutions: TeamRunRoleResolution[];
   validationIssue: TeamRunFormValidationIssue | null;
@@ -179,6 +180,7 @@ function providerSelectionStatus(
 export function buildTeamRunFeatureRequest(
   resolution: TeamRunRoleResolution,
   cwd: string | null,
+  catalogGeneration: number,
 ): TeamRunFeatureRequest | null {
   if (!cwd || !resolution.provider || Object.keys(resolution.featureValues).length === 0) {
     return null;
@@ -193,7 +195,7 @@ export function buildTeamRunFeatureRequest(
   };
   return {
     roleId: resolution.roleId,
-    requestKey: JSON.stringify([resolution.roleId, config]),
+    requestKey: JSON.stringify([catalogGeneration, resolution.roleId, config]),
     config,
   };
 }
@@ -296,6 +298,7 @@ function resolveRoles(input: {
   profiles: readonly AgentProfile[] | null;
   providerEntries: readonly ProviderSnapshotEntry[] | null;
   selectedWorkspaceCwd: string | null;
+  catalogGeneration: number;
   featureCatalogs: ReadonlyMap<string, FeatureCatalogResult>;
 }): TeamRunRoleResolution[] {
   return input.team.roles.map((role) => {
@@ -304,7 +307,11 @@ function resolveRoles(input: {
       ? resolveProvider(profile, input.providerEntries)
       : profile.resolution;
     if (resolution.status !== "ready") return resolution;
-    const request = buildTeamRunFeatureRequest(resolution, input.selectedWorkspaceCwd);
+    const request = buildTeamRunFeatureRequest(
+      resolution,
+      input.selectedWorkspaceCwd,
+      input.catalogGeneration,
+    );
     if (!request) return resolution;
     const catalog = input.featureCatalogs.get(role.id);
     if (!catalog || catalog.requestKey !== request.requestKey) {
@@ -360,6 +367,7 @@ export function openTeamRunForm(
     selectedWorkspaceId: initialWorkspace?.workspaceId ?? null,
     selectedWorkspaceDisplay: initialWorkspace?.display ?? null,
     selectedWorkspaceCwd: initialWorkspace?.cwd ?? null,
+    catalogGeneration: 0,
     objective: "",
     roleResolutions: [],
     validationIssue: null,
@@ -379,6 +387,7 @@ export function openTeamRunForm(
           ? providerEntries
           : null,
       selectedWorkspaceCwd: next.selectedWorkspaceCwd,
+      catalogGeneration: next.catalogGeneration,
       featureCatalogs,
     });
     const draft = { ...next, roleResolutions };
@@ -418,10 +427,16 @@ export function openTeamRunForm(
     },
     applyWorkspaces: (workspaces) => {
       const nextWorkspaces = [...workspaces];
+      const selectedWasAvailable = state.workspaces.some(
+        (workspace) => workspace.workspaceId === state.selectedWorkspaceId,
+      );
       const selected = nextWorkspaces.find(
         (workspace) => workspace.workspaceId === state.selectedWorkspaceId,
       );
-      if (selected && selected.cwd !== state.selectedWorkspaceCwd) {
+      const selectionContextChanged =
+        Boolean(selected) !== selectedWasAvailable ||
+        (selected !== undefined && selected.cwd !== state.selectedWorkspaceCwd);
+      if (selectionContextChanged) {
         providerWorkspaceId = null;
         providerWorkspaceCwd = null;
         providerEntries = null;
@@ -429,7 +444,10 @@ export function openTeamRunForm(
       publish({
         ...state,
         workspaces: nextWorkspaces,
-        selectedWorkspaceCwd: selected?.cwd ?? state.selectedWorkspaceCwd,
+        selectedWorkspaceCwd: selected?.cwd ?? null,
+        catalogGeneration: selectionContextChanged
+          ? state.catalogGeneration + 1
+          : state.catalogGeneration,
       });
     },
     applyProfiles: (nextProfiles) => {
@@ -446,7 +464,7 @@ export function openTeamRunForm(
       providerWorkspaceId = workspaceId;
       providerWorkspaceCwd = workspaceCwd;
       providerEntries = entries;
-      publish(state);
+      publish({ ...state, catalogGeneration: state.catalogGeneration + 1 });
     },
     applyFeatureCatalog: (roleId, requestKey, features) => {
       const current = featureCatalogs.get(roleId);
@@ -464,6 +482,7 @@ export function openTeamRunForm(
         selectedWorkspaceId: workspaceId,
         selectedWorkspaceDisplay: display,
         selectedWorkspaceCwd: workspace?.cwd ?? null,
+        catalogGeneration: state.catalogGeneration + 1,
         submitError: null,
       });
     },

@@ -123,6 +123,7 @@ describe("Team Run form model", () => {
     const request = buildTeamRunFeatureRequest(
       model.getState().roleResolutions[0]!,
       workspace.cwd,
+      model.getState().catalogGeneration,
     )!;
     model.applyFeatureCatalog("planner", request.requestKey, [webFeature]);
 
@@ -205,6 +206,7 @@ describe("Team Run form model", () => {
     const request = buildTeamRunFeatureRequest(
       model.getState().roleResolutions[0]!,
       workspace.cwd,
+      model.getState().catalogGeneration,
     )!;
     model.applyFeatureCatalog("planner", request.requestKey, []);
     expect(model.getState().roleResolutions[0]?.status).toBe("feature_unavailable");
@@ -226,12 +228,14 @@ describe("Team Run form model", () => {
     const originalRequest = buildTeamRunFeatureRequest(
       model.getState().roleResolutions[0]!,
       workspace.cwd,
+      model.getState().catalogGeneration,
     )!;
 
     model.applyProfiles([profile({ featureValues: { shell: true } })]);
     const changedRequest = buildTeamRunFeatureRequest(
       model.getState().roleResolutions[0]!,
       workspace.cwd,
+      model.getState().catalogGeneration,
     )!;
     expect(changedRequest.requestKey).not.toBe(originalRequest.requestKey);
 
@@ -241,6 +245,38 @@ describe("Team Run form model", () => {
     model.applyFeatureCatalog("planner", changedRequest.requestKey, [
       { type: "toggle", id: "shell", label: "Shell", value: false },
     ]);
+    expect(model.getState().roleResolutions[0]?.status).toBe("ready");
+  });
+
+  it("requires a fresh feature result after the provider catalog refreshes", () => {
+    const model = openTeamRunForm({
+      serverId: "host-a",
+      team: team(),
+      workspaces: [workspace],
+      profiles: [profile()],
+    });
+    model.setObjective("Plan");
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    const originalRequest = buildTeamRunFeatureRequest(
+      model.getState().roleResolutions[0]!,
+      workspace.cwd,
+      model.getState().catalogGeneration,
+    )!;
+    model.applyFeatureCatalog("planner", originalRequest.requestKey, [webFeature]);
+    expect(model.getState().roleResolutions[0]?.status).toBe("ready");
+
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    const refreshedRequest = buildTeamRunFeatureRequest(
+      model.getState().roleResolutions[0]!,
+      workspace.cwd,
+      model.getState().catalogGeneration,
+    )!;
+    expect(refreshedRequest.requestKey).not.toBe(originalRequest.requestKey);
+    expect(model.getState().roleResolutions[0]?.status).toBe("features_loading");
+
+    model.applyFeatureCatalog("planner", originalRequest.requestKey, [webFeature]);
+    expect(model.getState().roleResolutions[0]?.status).toBe("features_loading");
+    model.applyFeatureCatalog("planner", refreshedRequest.requestKey, [webFeature]);
     expect(model.getState().roleResolutions[0]?.status).toBe("ready");
   });
 

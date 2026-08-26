@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState, type ReactElement } from "react";
 import { ScrollView, Text, View } from "react-native";
+import { useIsFocused } from "@react-navigation/native";
 import { router, type Href } from "expo-router";
 import { Bot, RefreshCw, Square } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
@@ -32,8 +33,9 @@ export function TeamRunScreen({
   runId: string;
 }): ReactElement {
   const { t } = useTranslation();
+  const isFocused = useIsFocused();
   const connected = useHostRuntimeIsConnected(serverId);
-  const query = useTeamRun(serverId, runId);
+  const query = useTeamRun(serverId, runId, { enabled: isFocused });
   const { refetch } = query;
   const mutations = useTeamRunMutations();
   const [cancelError, setCancelError] = useState<string | null>(null);
