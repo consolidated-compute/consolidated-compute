@@ -214,6 +214,36 @@ describe("Team Run form model", () => {
     expect(model.getState().roleResolutions[0]?.status).toBe("feature_unavailable");
   });
 
+  it("ignores a late feature result after the selected profile changes", () => {
+    const model = openTeamRunForm({
+      serverId: "host-a",
+      team: team(),
+      workspaces: [workspace],
+      profiles: [profile()],
+    });
+    model.setObjective("Plan");
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    const originalRequest = buildTeamRunFeatureRequest(
+      model.getState().roleResolutions[0]!,
+      workspace.cwd,
+    )!;
+
+    model.applyProfiles([profile({ featureValues: { shell: true } })]);
+    const changedRequest = buildTeamRunFeatureRequest(
+      model.getState().roleResolutions[0]!,
+      workspace.cwd,
+    )!;
+    expect(changedRequest.requestKey).not.toBe(originalRequest.requestKey);
+
+    model.applyFeatureCatalog("planner", originalRequest.requestKey, [webFeature]);
+    expect(model.getState().roleResolutions[0]?.status).toBe("features_loading");
+
+    model.applyFeatureCatalog("planner", changedRequest.requestKey, [
+      { type: "toggle", id: "shell", label: "Shell", value: false },
+    ]);
+    expect(model.getState().roleResolutions[0]?.status).toBe("ready");
+  });
+
   it("validates thinking against the resolved default model", () => {
     const model = openTeamRunForm({
       serverId: "host-a",
@@ -311,5 +341,22 @@ describe("Team Run form model", () => {
     model.setObjective("x".repeat(TEAM_OBJECTIVE_MAX_CHARS + 1));
     model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
     expect(model.getState().validationIssue).toBe("objective_too_long");
+  });
+
+  it("rejects every late adapter input after close", () => {
+    const model = openTeamRunForm({
+      serverId: "host-a",
+      team: team(),
+      workspaces: [workspace],
+      profiles: [profile()],
+    });
+    const stateAtClose = model.getState();
+    model.close();
+    model.setObjective("Late objective");
+    model.applyWorkspaces([]);
+    model.applyProfiles([]);
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    model.applyFeatureCatalog("planner", "late", []);
+    expect(model.getState()).toBe(stateAtClose);
   });
 });

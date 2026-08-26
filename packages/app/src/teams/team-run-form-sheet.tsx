@@ -1,16 +1,7 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type ReactElement,
-} from "react";
+import { useCallback, useMemo, useSyncExternalStore, type ReactElement } from "react";
 import { Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
-import type { AgentFeature } from "@getpaseo/protocol/agent-types";
 import {
   TEAM_OBJECTIVE_MAX_CHARS,
   type TeamDefinitionDto,
@@ -22,19 +13,13 @@ import type { FieldControlSize } from "@/components/ui/control-geometry";
 import { Field, FormTextInput } from "@/components/ui/form-field";
 import { SelectField, type SelectFieldOption } from "@/components/ui/select-field";
 import { useIsCompactFormFactor } from "@/constants/layout";
-import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
-import { useFetchQueries } from "@/data/query";
-import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useHostWorkspaces } from "@/stores/session-store-hooks";
 import { useAgentProfiles } from "@/agent-profiles";
-import { toErrorMessage } from "@/utils/error-messages";
-import {
-  buildTeamRunWorkspaceOptions,
-  buildTeamRunFeatureRequest,
-  openTeamRunForm,
-  type TeamRunFormValidationIssue,
-} from "./run-form-model";
-import { useTeamRunMutations } from "./use-team-run-mutations";
+import { buildTeamRunWorkspaceOptions, type TeamRunFormValidationIssue } from "./run-form-model";
+import { useTeamRunFormFeatureCatalogs } from "./use-team-run-form-feature-catalogs";
+import { useTeamRunFormModel } from "./use-team-run-form-model";
+import { useTeamRunFormProviderSnapshot } from "./use-team-run-form-provider-snapshot";
+import { useTeamRunFormSubmission } from "./use-team-run-form-submission";
 
 export interface TeamRunFormSheetProps {
   serverId: string;
@@ -54,6 +39,7 @@ function validationMessage(
 
 export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
   const { t } = useTranslation();
+  const onClose = props.onClose;
   const controlSize: FieldControlSize = useIsCompactFormFactor() ? "md" : "sm";
   const liveWorkspaces = useHostWorkspaces(props.serverId);
   const workspaceOptions = useMemo(
@@ -61,80 +47,19 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
     [liveWorkspaces],
   );
   const { profiles } = useAgentProfiles(props.serverId);
-  const [model] = useState(() =>
-    openTeamRunForm({
-      serverId: props.serverId,
-      team: props.team,
-      workspaces: workspaceOptions,
-      profiles,
-    }),
-  );
-  const state = useSyncExternalStore(model.subscribe, model.getState, model.getState);
-  const client = useHostRuntimeClient(props.serverId);
-  const connected = useHostRuntimeIsConnected(props.serverId);
-  const providerSnapshot = useProvidersSnapshot(props.serverId, {
-    cwd: state.selectedWorkspaceCwd,
-    enabled: state.selectedWorkspaceCwd !== null,
+  const model = useTeamRunFormModel({
+    serverId: props.serverId,
+    team: props.team,
+    workspaces: workspaceOptions,
+    profiles,
   });
-  const mutations = useTeamRunMutations();
-  const pending = mutations.start.isPending;
-  const acceptsCompletionRef = useRef(true);
-  const featureRequests = useMemo(
-    () =>
-      state.roleResolutions.flatMap((resolution) => {
-        const request = buildTeamRunFeatureRequest(resolution, state.selectedWorkspaceCwd);
-        return request ? [request] : [];
-      }),
-    [state.roleResolutions, state.selectedWorkspaceCwd],
-  );
-  const featureQueries = useFetchQueries<readonly AgentFeature[]>(
-    featureRequests.map((request) => ({
-      queryKey: ["teamRunFeatures", props.serverId, request.requestKey],
-      dataShape: "value" as const,
-      staleTimeMs: 0,
-      enabled: Boolean(client && connected),
-      queryFn: async () => {
-        if (!client) throw new Error("Host is offline");
-        const payload = await client.listProviderFeatures(request.config);
-        if (payload.error) throw new Error(payload.error);
-        return payload.features ?? [];
-      },
-    })),
-  );
-
-  useEffect(
-    () => () => {
-      acceptsCompletionRef.current = false;
-      model.close();
-    },
-    [model],
-  );
-  useEffect(() => model.applyWorkspaces(workspaceOptions), [model, workspaceOptions]);
-  useEffect(() => model.applyProfiles(profiles), [model, profiles]);
-  useEffect(() => {
-    if (!state.selectedWorkspaceId || !state.selectedWorkspaceCwd) return;
-    model.applyProviderCatalog(
-      state.selectedWorkspaceId,
-      state.selectedWorkspaceCwd,
-      providerSnapshot.entries ?? (providerSnapshot.error ? [] : null),
-    );
-  }, [
+  const state = useSyncExternalStore(model.subscribe, model.getState, model.getState);
+  useTeamRunFormProviderSnapshot(model, state);
+  const { connected } = useTeamRunFormFeatureCatalogs(model, state);
+  const { cancelCompletion, pending, startPress } = useTeamRunFormSubmission(
     model,
-    providerSnapshot.entries,
-    providerSnapshot.error,
-    state.selectedWorkspaceCwd,
-    state.selectedWorkspaceId,
-  ]);
-  useEffect(() => {
-    featureRequests.forEach((request, index) => {
-      const query = featureQueries[index];
-      if (query?.data) {
-        model.applyFeatureCatalog(request.roleId, request.requestKey, query.data);
-      } else if (query?.isError) {
-        model.applyFeatureCatalog(request.roleId, request.requestKey, null);
-      }
-    });
-  }, [featureQueries, featureRequests, model]);
+    props.onStarted,
+  );
 
   const header = useMemo<SheetHeader>(
     () => ({
@@ -155,23 +80,9 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
     [state.workspaces],
   );
   const close = useCallback(() => {
-    acceptsCompletionRef.current = false;
-    props.onClose();
-  }, [props]);
-  const start = useCallback(async () => {
-    const submission = model.getState().submission;
-    if (!submission) return;
-    model.setSubmitError(null);
-    try {
-      const payload = await mutations.start.mutateAsync(submission);
-      if (!acceptsCompletionRef.current) return;
-      props.onStarted(payload.run);
-    } catch (error) {
-      if (!acceptsCompletionRef.current) return;
-      model.setSubmitError(toErrorMessage(error));
-    }
-  }, [model, mutations.start, props]);
-  const startPress = useCallback(() => void start(), [start]);
+    cancelCompletion();
+    onClose();
+  }, [cancelCompletion, onClose]);
 
   const footer = useMemo(
     () => (

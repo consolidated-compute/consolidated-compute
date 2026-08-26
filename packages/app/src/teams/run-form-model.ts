@@ -369,6 +369,7 @@ export function openTeamRunForm(
   };
 
   const publish = (next: TeamRunFormState): void => {
+    if (closed) return;
     const roleResolutions = resolveRoles({
       team: next.team,
       profiles,
@@ -399,7 +400,7 @@ export function openTeamRunForm(
       canSubmit: submission !== null,
       submission,
     };
-    if (!closed) listeners.forEach((listener) => listener());
+    listeners.forEach((listener) => listener());
   };
 
   publish(state);
