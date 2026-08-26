@@ -12,7 +12,12 @@ import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
 import type { AgentProfile } from "@getpaseo/protocol/messages";
-import type { TeamDefinitionDto } from "@getpaseo/protocol/team/types";
+import {
+  TEAM_INSTRUCTIONS_MAX_CHARS,
+  TEAM_NAME_MAX_CHARS,
+  TEAM_ROLE_NAME_MAX_CHARS,
+  type TeamDefinitionDto,
+} from "@getpaseo/protocol/team/types";
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
 import { AgentProfileGlyph, buildAgentProfileTags, useAgentProfiles } from "@/agent-profiles";
 import { Button } from "@/components/ui/button";
@@ -236,6 +241,7 @@ export function TeamFormSheet(props: TeamFormSheetProps): ReactElement {
             initialValue={state.name}
             onChangeText={model.setName}
             placeholder={t("teams.form.namePlaceholder")}
+            maxLength={TEAM_NAME_MAX_CHARS}
             editable={!formDisabled}
             size={controlSize}
             accessibilityLabel={t("teams.form.name")}
@@ -247,6 +253,7 @@ export function TeamFormSheet(props: TeamFormSheetProps): ReactElement {
             initialValue={state.instructions}
             onChangeText={model.setInstructions}
             placeholder={t("teams.form.instructionsPlaceholder")}
+            maxLength={TEAM_INSTRUCTIONS_MAX_CHARS}
             multiline
             numberOfLines={4}
             editable={!formDisabled}
@@ -264,7 +271,7 @@ export function TeamFormSheet(props: TeamFormSheetProps): ReactElement {
             size="sm"
             leftIcon={Plus}
             onPress={model.addRole}
-            disabled={formDisabled}
+            disabled={formDisabled || !state.canAddRole}
             testID="team-form-add-role"
           >
             {t("teams.actions.addRole")}
@@ -301,7 +308,7 @@ export function TeamFormSheet(props: TeamFormSheetProps): ReactElement {
             size="sm"
             leftIcon={Plus}
             onPress={model.addStep}
-            disabled={formDisabled || state.roles.length === 0}
+            disabled={formDisabled || state.roles.length === 0 || !state.canAddStep}
             testID="team-form-add-step"
           >
             {t("teams.actions.addStep")}
@@ -423,6 +430,7 @@ function TeamRoleEditor({
           initialValue={role.name}
           onChangeText={setName}
           placeholder={t("teams.form.roleNamePlaceholder")}
+          maxLength={TEAM_ROLE_NAME_MAX_CHARS}
           editable={!pending}
           size={controlSize}
           accessibilityLabel={t("teams.form.roleName")}
@@ -452,6 +460,7 @@ function TeamRoleEditor({
           initialValue={role.instructions}
           onChangeText={setInstructions}
           placeholder={t("teams.form.roleInstructionsPlaceholder")}
+          maxLength={TEAM_INSTRUCTIONS_MAX_CHARS}
           multiline
           numberOfLines={3}
           editable={!pending}
@@ -560,6 +569,7 @@ function TeamStepEditor({
           initialValue={step.instructions}
           onChangeText={setInstructions}
           placeholder={t("teams.form.stepInstructionsPlaceholder")}
+          maxLength={TEAM_INSTRUCTIONS_MAX_CHARS}
           multiline
           numberOfLines={3}
           editable={!pending}

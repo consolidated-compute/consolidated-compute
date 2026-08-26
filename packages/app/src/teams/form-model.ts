@@ -4,6 +4,14 @@ import type {
   TeamDefinitionInputDto,
   TeamDefinitionPatchDto,
 } from "@getpaseo/protocol/team/types";
+import {
+  TEAM_AGENT_PROFILE_ID_MAX_CHARS,
+  TEAM_INSTRUCTIONS_MAX_CHARS,
+  TEAM_MAX_ROLES,
+  TEAM_MAX_WORKFLOW_STEPS,
+  TEAM_NAME_MAX_CHARS,
+  TEAM_ROLE_NAME_MAX_CHARS,
+} from "@getpaseo/protocol/team/types";
 
 export interface TeamFormHost {
   serverId: string;
@@ -33,13 +41,21 @@ export type TeamFormValidationIssue =
   | "host_required"
   | "profiles_loading"
   | "name_required"
+  | "name_too_long"
   | "instructions_required"
+  | "instructions_too_long"
   | "role_required"
+  | "too_many_roles"
   | "role_name_required"
+  | "role_name_too_long"
   | "role_instructions_required"
+  | "role_instructions_too_long"
   | "role_profile_required"
+  | "role_profile_too_long"
   | "role_profile_missing"
   | "workflow_required"
+  | "too_many_steps"
+  | "step_instructions_too_long"
   | "workflow_role_required";
 
 export type TeamFormSubmission =
@@ -67,6 +83,8 @@ export interface TeamFormState {
   profiles: AgentProfile[] | null;
   validationIssue: TeamFormValidationIssue | null;
   canSubmit: boolean;
+  canAddRole: boolean;
+  canAddStep: boolean;
   submission: TeamFormSubmission | null;
   submitError: string | null;
 }
@@ -121,9 +139,7 @@ function profileDisplay(
   profileId: string,
 ): TeamFormDisplay {
   const profile = findProfile(profiles, profileId);
-  return profile
-    ? { label: profile.name }
-    : { label: profileId, description: "Missing Agent Profile" };
+  return { label: profile?.name ?? profileId };
 }
 
 function definitionFromState(state: TeamFormState): TeamDefinitionInputDto {
@@ -148,6 +164,24 @@ function definitionsMatch(left: TeamDefinitionInputDto, right: TeamDefinitionInp
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function validateRole(
+  role: TeamFormRole,
+  profiles: readonly AgentProfile[],
+): TeamFormValidationIssue | null {
+  if (!role.name.trim()) return "role_name_required";
+  if (role.name.length > TEAM_ROLE_NAME_MAX_CHARS) return "role_name_too_long";
+  if (!role.instructions.trim()) return "role_instructions_required";
+  if (role.instructions.length > TEAM_INSTRUCTIONS_MAX_CHARS) {
+    return "role_instructions_too_long";
+  }
+  if (!role.profileId.trim()) return "role_profile_required";
+  if (role.profileId.length > TEAM_AGENT_PROFILE_ID_MAX_CHARS) {
+    return "role_profile_too_long";
+  }
+  if (!findProfile(profiles, role.profileId)) return "role_profile_missing";
+  return null;
+}
+
 function validateState(state: TeamFormState): TeamFormValidationIssue | null {
   if (
     !state.selectedServerId ||
@@ -157,15 +191,20 @@ function validateState(state: TeamFormState): TeamFormValidationIssue | null {
   }
   if (state.profiles === null) return "profiles_loading";
   if (!state.name.trim()) return "name_required";
+  if (state.name.length > TEAM_NAME_MAX_CHARS) return "name_too_long";
   if (!state.instructions.trim()) return "instructions_required";
+  if (state.instructions.length > TEAM_INSTRUCTIONS_MAX_CHARS) return "instructions_too_long";
   if (state.roles.length === 0) return "role_required";
+  if (state.roles.length > TEAM_MAX_ROLES) return "too_many_roles";
   for (const role of state.roles) {
-    if (!role.name.trim()) return "role_name_required";
-    if (!role.instructions.trim()) return "role_instructions_required";
-    if (!role.profileId.trim()) return "role_profile_required";
-    if (!findProfile(state.profiles, role.profileId)) return "role_profile_missing";
+    const issue = validateRole(role, state.profiles);
+    if (issue) return issue;
   }
   if (state.workflow.length === 0) return "workflow_required";
+  if (state.workflow.length > TEAM_MAX_WORKFLOW_STEPS) return "too_many_steps";
+  if (state.workflow.some((step) => step.instructions.length > TEAM_INSTRUCTIONS_MAX_CHARS)) {
+    return "step_instructions_too_long";
+  }
   const roleIds = new Set(state.roles.map((role) => role.id));
   if (state.workflow.some((step) => !roleIds.has(step.roleId))) return "workflow_role_required";
   return null;
@@ -179,6 +218,11 @@ export function openTeamForm(
   const listeners = new Set<() => void>();
   const profileCatalogs = new Map<string, readonly AgentProfile[] | null>(
     Object.entries(snapshot.profilesByServerId ?? {}),
+  );
+  const resolvedProfileCatalogs = new Set(
+    [...profileCatalogs.entries()]
+      .filter(([, profiles]) => profiles !== null)
+      .map(([serverId]) => serverId),
   );
   const selectedServerId =
     snapshot.mode === "edit"
@@ -224,6 +268,8 @@ export function openTeamForm(
     profiles: initialProfiles ? [...initialProfiles] : null,
     validationIssue: null,
     canSubmit: false,
+    canAddRole: true,
+    canAddStep: true,
     submission: null,
     submitError: null,
   };
@@ -263,6 +309,8 @@ export function openTeamForm(
       ...next,
       validationIssue,
       canSubmit: submission !== null,
+      canAddRole: next.roles.length < TEAM_MAX_ROLES,
+      canAddStep: next.workflow.length < TEAM_MAX_WORKFLOW_STEPS,
       submission,
     };
   }
@@ -299,13 +347,17 @@ export function openTeamForm(
     applyProfiles: (serverId, profiles) => {
       profileCatalogs.set(serverId, profiles);
       if (serverId !== state.selectedServerId) return;
+      const isInitialResolution = profiles !== null && !resolvedProfileCatalogs.has(serverId);
+      if (profiles !== null) resolvedProfileCatalogs.add(serverId);
       publish({
         ...state,
         profiles: profiles ? [...profiles] : null,
-        roles: state.roles.map((role) => ({
-          ...role,
-          profileDisplay: role.profileId ? profileDisplay(profiles, role.profileId) : null,
-        })),
+        roles: isInitialResolution
+          ? state.roles.map((role) => ({
+              ...role,
+              profileDisplay: role.profileId ? profileDisplay(profiles, role.profileId) : null,
+            }))
+          : state.roles,
       });
     },
     setHost: (serverId) => {
@@ -320,7 +372,8 @@ export function openTeamForm(
     },
     setName: (name) => publish({ ...state, name }),
     setInstructions: (instructions) => publish({ ...state, instructions }),
-    addRole: () =>
+    addRole: () => {
+      if (!state.canAddRole) return;
       publish({
         ...state,
         roles: [
@@ -333,7 +386,8 @@ export function openTeamForm(
             profileDisplay: null,
           },
         ],
-      }),
+      });
+    },
     removeRole: (roleId) =>
       publish({
         ...state,
@@ -345,7 +399,8 @@ export function openTeamForm(
       updateRole(roleId, (role) => ({ ...role, instructions })),
     setRoleProfile: (roleId, profileId, display) =>
       updateRole(roleId, (role) => ({ ...role, profileId, profileDisplay: display })),
-    addStep: () =>
+    addStep: () => {
+      if (!state.canAddStep) return;
       publish({
         ...state,
         workflow: [
@@ -356,7 +411,8 @@ export function openTeamForm(
             instructions: "",
           },
         ],
-      }),
+      });
+    },
     removeStep: (stepId) =>
       publish({ ...state, workflow: state.workflow.filter((step) => step.id !== stepId) }),
     setStepRole: (stepId, roleId) => updateStep(stepId, (step) => ({ ...step, roleId })),

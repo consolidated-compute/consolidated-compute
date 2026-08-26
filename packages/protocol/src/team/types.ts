@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+export const TEAM_NAME_MAX_CHARS = 120;
+export const TEAM_ROLE_NAME_MAX_CHARS = 80;
+export const TEAM_INSTRUCTIONS_MAX_CHARS = 32_000;
+export const TEAM_AGENT_PROFILE_ID_MAX_CHARS = 512;
+export const TEAM_MAX_ROLES = 12;
+export const TEAM_MAX_WORKFLOW_STEPS = 24;
+
 export const TeamResolvedLaunchDtoSchema = z.object({
   profileId: z.string(),
   provider: z.string(),
