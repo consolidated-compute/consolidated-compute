@@ -29,7 +29,18 @@ export const TeamDefinitionInputDtoSchema = z.object({
   workflow: z.array(TeamWorkflowStepDtoSchema),
 });
 
-export const TeamDefinitionPatchDtoSchema = TeamDefinitionInputDtoSchema.partial();
+const TeamDefinitionPatchFieldsDtoSchema = TeamDefinitionInputDtoSchema.partial();
+
+export const TeamDefinitionPatchDtoSchema = z.union([
+  TeamDefinitionPatchFieldsDtoSchema.extend({ name: TeamDefinitionInputDtoSchema.shape.name }),
+  TeamDefinitionPatchFieldsDtoSchema.extend({
+    instructions: TeamDefinitionInputDtoSchema.shape.instructions,
+  }),
+  TeamDefinitionPatchFieldsDtoSchema.extend({ roles: TeamDefinitionInputDtoSchema.shape.roles }),
+  TeamDefinitionPatchFieldsDtoSchema.extend({
+    workflow: TeamDefinitionInputDtoSchema.shape.workflow,
+  }),
+]);
 
 export const TeamDefinitionDtoSchema = TeamDefinitionInputDtoSchema.extend({
   id: z.string(),

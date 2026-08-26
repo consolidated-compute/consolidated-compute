@@ -87,6 +87,20 @@ describe("Team wire contracts", () => {
     expect(TeamRunDtoSchema.parse({ ...run, serverId: "must-not-cross-the-wire" })).toEqual(run);
   });
 
+  test("requires Team updates to include at least one authored field", () => {
+    const request = {
+      type: "team.update.request",
+      requestId: "request_update",
+      teamId: "team_1",
+      expectedRevision: 3,
+    } as const;
+
+    expect(() => SessionInboundMessageSchema.parse({ ...request, patch: {} })).toThrow();
+    expect(
+      SessionInboundMessageSchema.parse({ ...request, patch: { name: "Ship carefully" } }),
+    ).toMatchObject({ patch: { name: "Ship carefully" } });
+  });
+
   test("accepts bounded namespaced Team Run list requests", () => {
     expect(
       SessionInboundMessageSchema.parse({
