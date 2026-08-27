@@ -898,6 +898,7 @@ function RootStack() {
         <Stack.Screen name="schedules" />
         <Stack.Screen name="teams/index" />
         <Stack.Screen name="teams/[serverId]/[teamId]" />
+        <Stack.Screen name="teams/[serverId]/[teamId]/runs/[runId]" />
         <Stack.Screen name="pair-scan" />
       </Stack.Protected>
       <Stack.Screen name="h/[serverId]" />

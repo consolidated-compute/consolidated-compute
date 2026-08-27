@@ -1,8 +1,29 @@
 import { describe, expect, it } from "vitest";
 import {
+  getAdaptiveModalDismissalBehavior,
   getBottomSheetVisibleContentHeight,
   getCompactSheetSafeAreaPadding,
 } from "@/components/adaptive-modal-sheet-layout";
+
+describe("getAdaptiveModalDismissalBehavior", () => {
+  it("disables every user dismissal surface together", () => {
+    expect(getAdaptiveModalDismissalBehavior(false)).toEqual({
+      acceptsDismissRequest: false,
+      backdropPressBehavior: "none",
+      enablePanDownToClose: false,
+      showCloseButton: false,
+    });
+  });
+
+  it("keeps sheets dismissible by default", () => {
+    expect(getAdaptiveModalDismissalBehavior(true)).toEqual({
+      acceptsDismissRequest: true,
+      backdropPressBehavior: "close",
+      enablePanDownToClose: true,
+      showCloseButton: true,
+    });
+  });
+});
 
 describe("getCompactSheetSafeAreaPadding", () => {
   it("adds the bottom inset to compact sheet footers", () => {

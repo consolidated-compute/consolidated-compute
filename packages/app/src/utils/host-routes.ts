@@ -441,6 +441,15 @@ export function buildTeamRoute(serverId: string, teamId: string) {
   return `/teams/${encodeSegment(normalizedServerId)}/${encodeSegment(normalizedTeamId)}` as const;
 }
 
+export function buildTeamRunRoute(serverId: string, teamId: string, runId: string) {
+  const teamRoute = buildTeamRoute(serverId, teamId);
+  const normalizedRunId = trimNonEmpty(runId);
+  if (!normalizedRunId) {
+    throw new Error("buildTeamRunRoute requires a runId");
+  }
+  return `${teamRoute}/runs/${encodeSegment(normalizedRunId)}` as const;
+}
+
 export function buildOperationsRoute() {
   return "/operations" as const;
 }

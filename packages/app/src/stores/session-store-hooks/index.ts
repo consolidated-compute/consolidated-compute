@@ -139,6 +139,14 @@ export function useWorkspaceKeys(serverId: string | null): string[] {
   );
 }
 
+export function useHostWorkspaces(serverId: string | null): WorkspaceDescriptor[] {
+  return useStoreWithEqualityFn(
+    useSessionStore,
+    (state) => (serverId ? Array.from(state.sessions[serverId]?.workspaces.values() ?? []) : []),
+    workspaceEqualityFns.deep,
+  );
+}
+
 export function useRecommendedProjectPaths(serverId: string | null): string[] {
   return useStoreWithEqualityFn(
     useSessionStore,

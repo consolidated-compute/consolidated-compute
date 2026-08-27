@@ -1,10 +1,14 @@
 import {
   keepPreviousData,
   skipToken,
+  useInfiniteQuery,
   useQueries,
   useQuery,
+  type InfiniteData,
   type QueryKey,
   type QueryClient,
+  type UseInfiniteQueryOptions,
+  type UseInfiniteQueryResult,
   type UseQueryOptions,
   type UseQueryResult,
 } from "@tanstack/react-query";
@@ -34,6 +38,20 @@ type FetchQueryInput<TQueryFnData, TError, TData, TQueryKey extends QueryKey> = 
   staleTimeMs: number;
 };
 
+type FetchInfiniteQueryInput<
+  TQueryFnData,
+  TError,
+  TData,
+  TQueryKey extends QueryKey,
+  TPageParam,
+> = Omit<
+  UseInfiniteQueryOptions<TQueryFnData, TError, TData, TQueryKey, TPageParam>,
+  "placeholderData" | "refetchOnMount" | "staleTime"
+> & {
+  dataShape: "list";
+  staleTimeMs: number;
+};
+
 export function useReplicaQuery<
   TQueryFnData,
   TError = Error,
@@ -59,6 +77,37 @@ export function useFetchQueries<TData>(
   inputs: FetchQueryInput<TData, Error, TData, QueryKey>[],
 ): UseQueryResult<TData, Error>[] {
   return useQueries({ queries: inputs.map((input) => fetchQueryOptions(input)) });
+}
+
+export function useFetchInfiniteQuery<
+  TQueryFnData,
+  TError = Error,
+  TData = InfiniteData<TQueryFnData>,
+  TQueryKey extends QueryKey = QueryKey,
+  TPageParam = unknown,
+>(
+  input: FetchInfiniteQueryInput<TQueryFnData, TError, TData, TQueryKey, TPageParam>,
+  queryClient?: QueryClient,
+): UseInfiniteQueryResult<TData, TError> {
+  if (!Number.isFinite(input.staleTimeMs)) {
+    throw new Error("Fetch queries must declare a finite staleTimeMs.");
+  }
+  const { dataShape, meta, staleTimeMs, ...options } = input;
+  return useInfiniteQuery(
+    {
+      ...options,
+      meta: {
+        ...meta,
+        serverDataPolicy: {
+          class: "fetch",
+          dataShape,
+        },
+      },
+      refetchOnMount: "always",
+      staleTime: staleTimeMs,
+    },
+    queryClient,
+  );
 }
 
 function replicaQueryOptions<
