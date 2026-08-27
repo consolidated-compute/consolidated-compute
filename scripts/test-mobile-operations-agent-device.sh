@@ -265,39 +265,29 @@ fi
 # Expo's development-client shell has platform- and runtime-dependent prompts.
 # Reuse the repository's conditional Maestro choreography before the strict
 # Agent Device replay starts asserting product state.
+DEV_CLIENT_REPLAY_LOG="${ARTIFACTS_DIR}/dev-client-replay.log"
 AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" replay \
   "${DEV_CLIENT_FLOW}" \
   --maestro \
   "${TARGET_ARGS[@]}" \
   --metro-host "${DEVICE_HOST}" \
   --metro-port "${METRO_PORT}" \
-  --timeout 180000
+  --timeout 180000 | tee "${DEV_CLIENT_REPLAY_LOG}"
 
 DEV_CLIENT_SESSION="$(
-  AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" session list --json | node -e '
-    let input = "";
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk) => {
-      input += chunk;
-    });
-    process.stdin.on("end", () => {
-      const result = JSON.parse(input);
-      const sessions = result.data?.sessions;
-      const replaySessions = Array.isArray(sessions)
-        ? sessions.filter(
-            (session) =>
-              typeof session.name === "string" &&
-              (session.name === "default" || session.name.endsWith(":default")),
-          )
-        : [];
-      if (replaySessions.length !== 1) {
-        throw new Error(
-          `Expected one Agent Device replay session, found ${replaySessions.length}.`,
-        );
-      }
-      process.stdout.write(replaySessions[0].name);
-    });
-  '
+  node -e '
+    const output = require("node:fs").readFileSync(process.argv[1], "utf8");
+    const sessions = Array.from(
+      output.matchAll(/pass --session (\S+) on your next command/g),
+      (match) => match[1],
+    );
+    if (sessions.length !== 1) {
+      throw new Error(
+        `Expected one scoped Agent Device replay session, found ${sessions.length}.`,
+      );
+    }
+    process.stdout.write(sessions[0]);
+  ' "${DEV_CLIENT_REPLAY_LOG}"
 )"
 
 # Maestro replay keeps its returned session active so callers can continue it.
