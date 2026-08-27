@@ -201,7 +201,7 @@ test("mobile Operations, Visual, and Teams stay isolated from the upstream runne
   assert.match(operationsRunner, /\.dev\/teams-agent-device-e2e/);
   assert.match(operationsRunner, /\.dev\/teams-agent-device-artifacts/);
   assert.match(operationsRunner, /DEFAULT_METRO_PORT=8084/);
-  assert.match(operationsRunner, /simctl privacy "\$\{PRIVACY_DEVICE\}" reset all "\$\{APP_ID\}"/);
+  assert.match(operationsRunner, /EXPO_PUBLIC_PASEO_E2E_DISABLE_PUSH_NOTIFICATIONS=1/);
   assert.match(operationsRunner, /EXPO_PUBLIC_PASEO_E2E_VISUAL_MOTION_PROBE=1/);
   assert.match(
     operationsRunner,
@@ -214,14 +214,14 @@ test("mobile Operations replays keep one cross-platform contract", () => {
   const iosReplay = readFileSync(iosOperationsReplayPath, "utf8");
   const androidReplay = readFileSync(androidOperationsReplayPath, "utf8");
   const normalizePlatform = (source) =>
-    source
-      .replace(/^context platform=(ios|android)/, "context platform=native")
-      .replace(/^settings permission reset notifications\n/m, "");
+    source.replace(/^context platform=(ios|android)/, "context platform=native");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
-  assert.doesNotMatch(iosReplay, /settings permission reset notifications/);
-  assert.match(androidReplay, /settings permission reset notifications/);
-  assert.match(iosReplay, /alert wait 45000\nalert dismiss/);
+  assert.doesNotMatch(iosReplay, /settings permission reset notifications|alert (wait|dismiss)/);
+  assert.doesNotMatch(
+    androidReplay,
+    /settings permission reset notifications|alert (wait|dismiss)/,
+  );
   assert.match(iosReplay, /wait "id=\\"menu-button\\"" 45000/);
 });
 
@@ -231,12 +231,14 @@ test("mobile Visual replays keep one cross-platform accessibility contract", () 
   const normalizePlatform = (source) =>
     source
       .replace(/^context platform=(ios|android)/, "context platform=native")
-      .replace(/^settings permission reset notifications\n/m, "")
       .replace(/^settings animations off\n/m, "");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
-  assert.doesNotMatch(iosReplay, /settings permission reset notifications/);
-  assert.match(androidReplay, /settings permission reset notifications/);
+  assert.doesNotMatch(iosReplay, /settings permission reset notifications|alert (wait|dismiss)/);
+  assert.doesNotMatch(
+    androidReplay,
+    /settings permission reset notifications|alert (wait|dismiss)/,
+  );
   assert.match(iosReplay, /open "\$\{APP_ID\}" "paseo:\/\/visual" --relaunch/);
   assert.doesNotMatch(iosReplay, /settings animations off/);
   assert.match(androidReplay, /settings animations off/);
@@ -258,13 +260,14 @@ test("mobile Teams replays keep one cross-platform run contract", () => {
   const iosReplay = readFileSync(iosTeamsReplayPath, "utf8");
   const androidReplay = readFileSync(androidTeamsReplayPath, "utf8");
   const normalizePlatform = (source) =>
-    source
-      .replace(/^context platform=(ios|android)/, "context platform=native")
-      .replace(/^settings permission reset notifications\n/m, "");
+    source.replace(/^context platform=(ios|android)/, "context platform=native");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
-  assert.doesNotMatch(iosReplay, /settings permission reset notifications/);
-  assert.match(androidReplay, /settings permission reset notifications/);
+  assert.doesNotMatch(iosReplay, /settings permission reset notifications|alert (wait|dismiss)/);
+  assert.doesNotMatch(
+    androidReplay,
+    /settings permission reset notifications|alert (wait|dismiss)/,
+  );
   assert.match(iosReplay, /team-detail-\$\{PRIMARY_SERVER_ID\}-\$\{PRIMARY_TEAM_ID\}/);
   assert.match(iosReplay, /orientation landscape-left/);
   assert.match(iosReplay, /home\nopen "\$\{APP_ID\}"/);
@@ -302,6 +305,7 @@ test("mobile Operations, Visual, and Teams bound Android replay resources", () =
 
   assert.match(source, /ram-size: 2048M/);
   assert.match(source, /heap-size: 512M/);
+  assert.match(source, /PASEO_MOBILE_E2E_DEVICE: emulator-5554/);
   assert.match(
     source,
     /script: \|\n\s+adb install -r[^\n]+\n\s+bash scripts\/run-mobile-operations-matrix\.sh/,

@@ -45,6 +45,12 @@ if [[ "${MATRIX_SURFACE}" == "visual" ]]; then
   fi
 fi
 
+if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
+  # Push registration is outside these surface contracts, and its native
+  # permission prompt is not deterministic across simulator runtimes.
+  export EXPO_PUBLIC_PASEO_E2E_DISABLE_PUSH_NOTIFICATIONS=1
+fi
+
 STATE_DIR="${PASEO_MOBILE_E2E_STATE_DIR:-${DEFAULT_STATE_DIR}}"
 ARTIFACTS_DIR="${PASEO_MOBILE_E2E_ARTIFACTS_DIR:-${DEFAULT_ARTIFACTS_DIR}}"
 METRO_PORT="${PASEO_MOBILE_E2E_METRO_PORT:-${DEFAULT_METRO_PORT}}"
@@ -235,11 +241,6 @@ AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" boot "${BOOT_ARGS[@]
 if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
   RESET_DEVICE_SETTINGS=1
   if [[ "${PLATFORM}" == "ios" ]]; then
-    # Current simctl runtimes omit the notifications service. Resetting all
-    # permissions by bundle ID preserves the fresh-prompt contract without
-    # relying on Agent Device's unavailable notifications-only command.
-    PRIVACY_DEVICE="${DEVICE:-booted}"
-    xcrun simctl privacy "${PRIVACY_DEVICE}" reset all "${APP_ID}"
     xcrun simctl ui booted content_size accessibility-extra-extra-extra-large
   else
     if ! command -v adb >/dev/null 2>&1; then
