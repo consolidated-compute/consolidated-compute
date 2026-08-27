@@ -1,5 +1,7 @@
 import { once } from "node:events";
 import { PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import type { AgentProfile } from "@getpaseo/protocol/messages";
+import { connectDaemonClient } from "../packages/app/e2e/support/helpers/daemon-client-loader.js";
 import {
   startIsolatedHostDaemon,
   type IsolatedHostDaemon,
@@ -14,16 +16,30 @@ import {
   seedWorkspace,
   type SeededWorkspace,
 } from "../packages/app/e2e/support/helpers/seed-client.js";
+import {
+  connectTeamsClient,
+  type TeamsDaemonClient,
+} from "../packages/app/e2e/support/helpers/teams.js";
 import { seedParentWithCrossWorkspaceSubagent } from "../packages/app/e2e/support/helpers/subagents.js";
 
 const PRIMARY_SERVER_ID = "srv_mobile_operations_primary";
 const SECONDARY_SERVER_ID = "srv_mobile_operations_secondary";
+const PRIMARY_TEAM_ROLE_ID = "planner";
+const PRIMARY_TEAM_STEP_ID = "plan";
+
+interface AgentProfilesDaemonClient {
+  connect(): Promise<void>;
+  close(): Promise<void>;
+  patchDaemonConfig(config: { agentProfiles: AgentProfile[] }): Promise<unknown>;
+}
 
 async function main(): Promise<void> {
   const primaryDaemon = await startIsolatedHostDaemon(PRIMARY_SERVER_ID);
   let secondaryDaemon: IsolatedHostDaemon | null = null;
   let primary: SeededWorkspace | null = null;
   let secondary: SeededWorkspace | null = null;
+  let profilesClient: AgentProfilesDaemonClient | null = null;
+  let teamsClient: TeamsDaemonClient | null = null;
 
   try {
     secondaryDaemon = await startIsolatedHostDaemon(SECONDARY_SERVER_ID);
@@ -36,6 +52,41 @@ async function main(): Promise<void> {
       repoPrefix: "paseo-mobile-operations-secondary-",
       title: "Mobile Operations Secondary",
       port: secondaryDaemon.port,
+    });
+    profilesClient = await connectDaemonClient<AgentProfilesDaemonClient>({
+      clientIdPrefix: "mobile-teams-profiles",
+      port: primaryDaemon.port,
+    });
+    await profilesClient.patchDaemonConfig({
+      agentProfiles: [
+        {
+          id: "mobile-planner",
+          name: "Mobile Planner",
+          provider: "mock",
+          model: "ten-second-stream",
+          modeId: "load-test",
+        },
+      ],
+    });
+    teamsClient = await connectTeamsClient({ port: primaryDaemon.port });
+    const mobileTeam = await teamsClient.createTeam({
+      name: "Mobile Delivery Team",
+      instructions: "Prove a native Team Run can pause and resume.",
+      roles: [
+        {
+          id: PRIMARY_TEAM_ROLE_ID,
+          name: "Planner",
+          instructions: "Emit synthetic plan approval.",
+          profileId: "mobile-planner",
+        },
+      ],
+      workflow: [
+        {
+          id: PRIMARY_TEAM_STEP_ID,
+          roleId: PRIMARY_TEAM_ROLE_ID,
+          instructions: null,
+        },
+      ],
     });
     const primaryParent = await primary.client.createAgent({
       provider: "mock",
@@ -123,6 +174,9 @@ async function main(): Promise<void> {
           reviewAgentId: reviewAgent.id,
           questionAgentId: questionAgent.id,
           providerSubagentId: OPERATIONS_DUPLICATE_PROVIDER_SUBAGENT_ID,
+          teamId: mobileTeam.team.id,
+          teamRoleId: PRIMARY_TEAM_ROLE_ID,
+          teamStepId: PRIMARY_TEAM_STEP_ID,
         },
         secondary: {
           serverId: SECONDARY_SERVER_ID,
@@ -135,6 +189,10 @@ async function main(): Promise<void> {
     );
     await Promise.race([once(process, "SIGINT"), once(process, "SIGTERM")]);
   } finally {
+    await Promise.allSettled([
+      teamsClient?.close() ?? Promise.resolve(),
+      profilesClient?.close() ?? Promise.resolve(),
+    ]);
     await Promise.allSettled([
       primary?.cleanup() ?? Promise.resolve(),
       secondary?.cleanup() ?? Promise.resolve(),

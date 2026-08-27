@@ -122,10 +122,12 @@ export function TeamRunScreen({
           </View>
         </View>
         <View style={styles.runStatus} accessibilityLiveRegion="polite" testID="team-run-status">
-          <StatusBadge
-            label={t(`teams.runs.status.${run.state.status}`)}
-            variant={teamRunStatusBadgeVariant(run.state.status)}
-          />
+          <View testID={`team-run-status-${run.state.status}`}>
+            <StatusBadge
+              label={t(`teams.runs.status.${run.state.status}`)}
+              variant={teamRunStatusBadgeVariant(run.state.status)}
+            />
+          </View>
         </View>
         <DetailSection title={t("teams.runs.detail.objective")}>
           <Text style={styles.bodyText}>{run.objective}</Text>
@@ -224,7 +226,10 @@ function RunStepCard({
         </View>
         <View style={styles.stepTitleText}>
           <Text style={styles.cardTitle}>{step.snapshot.roleName}</Text>
-          <View style={styles.stepBadge}>
+          <View
+            style={styles.stepBadge}
+            testID={`team-run-step-status-${step.snapshot.stepId}-${step.state.status}`}
+          >
             <StatusBadge
               label={t(`teams.runs.status.${step.state.status}`)}
               variant={teamRunStatusBadgeVariant(step.state.status)}
@@ -232,7 +237,13 @@ function RunStepCard({
           </View>
         </View>
         {agentId ? (
-          <Button variant="ghost" size="sm" leftIcon={Bot} onPress={openAgent}>
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={Bot}
+            onPress={openAgent}
+            testID={`team-run-step-agent-${step.snapshot.stepId}`}
+          >
             {t("teams.runs.actions.openAgent")}
           </Button>
         ) : null}

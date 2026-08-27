@@ -54,7 +54,15 @@ Visual reuses that two-host fixture and cached native app with a separate replay
 PASEO_MOBILE_E2E_PLATFORM=ios npm run test:e2e:mobile:visual
 ```
 
-The Visual replay cold-opens `/visual`, checks rotation and resume, drills into host-qualified Workspace and managed-agent targets, records accessibility attributes for managed and provider-native nodes, and captures light, dark, large-text, and reduced-motion evidence. Android disables the system animation scales. The iOS bundle uses an E2E-only reduced-motion override because Agent Device cannot change that simulator setting. Both replays assert that the Visual working clock is inactive. The scheduled workflow runs Operations and Visual even if one replay fails, then reports the platform job as failed after retaining both evidence directories.
+The Visual replay cold-opens `/visual`, checks rotation and resume, drills into host-qualified Workspace and managed-agent targets, records accessibility attributes for managed and provider-native nodes, and captures light, dark, large-text, and reduced-motion evidence. Android disables the system animation scales. The iOS bundle uses an E2E-only reduced-motion override because Agent Device cannot change that simulator setting. Both replays assert that the Visual working clock is inactive.
+
+Teams reuses the fixture with a profile-backed Team, its own state and artifact directories, and Metro port `8084`:
+
+```bash
+PASEO_MOBILE_E2E_PLATFORM=ios npm run test:e2e:mobile:teams
+```
+
+The replay checks the Team list and detail at large text, rotates and resumes the detail route, starts a run against the seeded Workspace, opens the waiting agent, accepts its plan permission, and returns to a succeeded frozen run. The scheduled workflow runs Operations, Visual, and Teams independently on iOS and Android, retains every evidence directory, then fails the platform job if any replay failed.
 
 When replay diverges, read its ranked selector suggestions. Edit the script deliberately and rerun it from the beginning. `--update` is retained for compatibility but no longer rewrites scripts.
 

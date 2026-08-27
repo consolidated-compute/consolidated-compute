@@ -21,6 +21,14 @@ const androidOperationsReplayPath = new URL(
   "packages/app/e2e/mobile/operations-agent-device/operations-matrix.android.ad",
   repoRoot,
 );
+const iosTeamsReplayPath = new URL(
+  "packages/app/e2e/mobile/teams-agent-device/teams-matrix.ios.ad",
+  repoRoot,
+);
+const androidTeamsReplayPath = new URL(
+  "packages/app/e2e/mobile/teams-agent-device/teams-matrix.android.ad",
+  repoRoot,
+);
 const iosVisualReplayPath = new URL(
   "packages/app/e2e/mobile/visual-agent-device/visual-matrix.ios.ad",
   repoRoot,
@@ -150,7 +158,7 @@ test("change gating allows superseded workflow runs to cancel", () => {
   }
 });
 
-test("mobile Operations and Visual keep native device jobs off pull requests", () => {
+test("mobile Operations, Visual, and Teams keep native device jobs off pull requests", () => {
   const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
   const jobs = jobBlocks(source);
   const validation = jobs.get("validate")?.join("\n") ?? "";
@@ -170,7 +178,7 @@ test("mobile Operations and Visual keep native device jobs off pull requests", (
   }
 });
 
-test("mobile Operations and Visual stay isolated from each other and the upstream runner", () => {
+test("mobile Operations, Visual, and Teams stay isolated from the upstream runner", () => {
   const genericRunner = readFileSync(genericMobileRunnerPath, "utf8");
   const operationsRunner = readFileSync(operationsMobileRunnerPath, "utf8");
 
@@ -188,6 +196,9 @@ test("mobile Operations and Visual stay isolated from each other and the upstrea
   assert.match(operationsRunner, /\.dev\/visual-agent-device-e2e/);
   assert.match(operationsRunner, /\.dev\/visual-agent-device-artifacts/);
   assert.match(operationsRunner, /DEFAULT_METRO_PORT=8083/);
+  assert.match(operationsRunner, /\.dev\/teams-agent-device-e2e/);
+  assert.match(operationsRunner, /\.dev\/teams-agent-device-artifacts/);
+  assert.match(operationsRunner, /DEFAULT_METRO_PORT=8084/);
   assert.match(operationsRunner, /EXPO_PUBLIC_PASEO_E2E_VISUAL_MOTION_PROBE=1/);
   assert.match(
     operationsRunner,
@@ -234,7 +245,23 @@ test("mobile Visual replays keep one cross-platform accessibility contract", () 
   assert.match(iosReplay, /visual-dark-large-text-reduced-motion\.png/);
 });
 
-test("mobile Operations and Visual reuse native development apps", () => {
+test("mobile Teams replays keep one cross-platform run contract", () => {
+  const iosReplay = readFileSync(iosTeamsReplayPath, "utf8");
+  const androidReplay = readFileSync(androidTeamsReplayPath, "utf8");
+  const normalizePlatform = (source) =>
+    source.replace(/^context platform=(ios|android)/, "context platform=native");
+
+  assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
+  assert.match(iosReplay, /team-detail-\$\{PRIMARY_SERVER_ID\}-\$\{PRIMARY_TEAM_ID\}/);
+  assert.match(iosReplay, /orientation landscape-left/);
+  assert.match(iosReplay, /home\nopen "\$\{APP_ID\}"/);
+  assert.match(iosReplay, /team-run-role-status-\$\{PRIMARY_TEAM_ROLE_ID\}-ready/);
+  assert.match(iosReplay, /team-run-status-waiting_for_permission/);
+  assert.match(iosReplay, /permission-request-accept/);
+  assert.match(iosReplay, /team-run-status-succeeded/);
+});
+
+test("mobile Operations, Visual, and Teams reuse native development apps", () => {
   const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
 
   assert.match(source, /actions\/cache\/restore@[a-f0-9]{40}/);
@@ -248,17 +275,19 @@ test("mobile Operations and Visual reuse native development apps", () => {
   assert.match(source, /packages\/expo-two-way-audio\/android\/\*\*/);
   assert.match(source, /npm run test:e2e:mobile:operations/);
   assert.match(source, /npm run test:e2e:mobile:visual/);
+  assert.match(source, /npm run test:e2e:mobile:teams/);
   assert.match(source, /EVIDENCE_ROOT\/operations/);
   assert.match(source, /EVIDENCE_ROOT\/visual/);
+  assert.match(source, /EVIDENCE_ROOT\/teams/);
   assert.doesNotMatch(source, /hashFiles\('\.github\/workflows\/mobile-operations\.yml'/);
 });
 
-test("mobile Operations and Visual bound Android replay resources", () => {
+test("mobile Operations, Visual, and Teams bound Android replay resources", () => {
   const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
 
   assert.match(source, /ram-size: 2048M/);
   assert.match(source, /heap-size: 512M/);
-  assert.equal(source.match(/NODE_OPTIONS=--max-old-space-size=2048/g)?.length, 2);
+  assert.equal(source.match(/NODE_OPTIONS=--max-old-space-size=2048/g)?.length, 3);
 });
 
 test("fork delivery and write-back jobs stay quarantined", () => {

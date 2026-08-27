@@ -25,8 +25,13 @@ case "${MATRIX_SURFACE}" in
     DEFAULT_ARTIFACTS_DIR="${REPO_ROOT}/.dev/visual-agent-device-artifacts"
     DEFAULT_METRO_PORT=8083
     ;;
+  teams)
+    DEFAULT_STATE_DIR="${REPO_ROOT}/.dev/teams-agent-device-e2e"
+    DEFAULT_ARTIFACTS_DIR="${REPO_ROOT}/.dev/teams-agent-device-artifacts"
+    DEFAULT_METRO_PORT=8084
+    ;;
   *)
-    echo "PASEO_MOBILE_E2E_MATRIX_SURFACE must be operations or visual (received ${MATRIX_SURFACE})." >&2
+    echo "PASEO_MOBILE_E2E_MATRIX_SURFACE must be operations, visual, or teams (received ${MATRIX_SURFACE})." >&2
     exit 2
     ;;
 esac
@@ -132,6 +137,9 @@ if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
       fixture.primary.workspaceId,
       fixture.primary.parentAgentId,
       fixture.primary.providerSubagentId,
+      fixture.primary.teamId,
+      fixture.primary.teamRoleId,
+      fixture.primary.teamStepId,
       fixture.secondary.port,
       fixture.secondary.serverId,
       fixture.secondary.workspaceId,
@@ -145,6 +153,9 @@ if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
     PRIMARY_WORKSPACE_ID \
     PRIMARY_AGENT_ID \
     PRIMARY_PROVIDER_SUBAGENT_ID \
+    PRIMARY_TEAM_ID \
+    PRIMARY_TEAM_ROLE_ID \
+    PRIMARY_TEAM_STEP_ID \
     SECONDARY_PORT \
     SECONDARY_SERVER_ID \
     SECONDARY_WORKSPACE_ID \
@@ -155,6 +166,9 @@ if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
   export AD_VAR_PRIMARY_WORKSPACE_ID="${PRIMARY_WORKSPACE_ID}"
   export AD_VAR_PRIMARY_AGENT_ID="${PRIMARY_AGENT_ID}"
   export AD_VAR_PRIMARY_PROVIDER_SUBAGENT_ID="${PRIMARY_PROVIDER_SUBAGENT_ID}"
+  export AD_VAR_PRIMARY_TEAM_ID="${PRIMARY_TEAM_ID}"
+  export AD_VAR_PRIMARY_TEAM_ROLE_ID="${PRIMARY_TEAM_ROLE_ID}"
+  export AD_VAR_PRIMARY_TEAM_STEP_ID="${PRIMARY_TEAM_STEP_ID}"
   export AD_VAR_SECONDARY_HOST="${DEVICE_HOST}"
   export AD_VAR_SECONDARY_PORT="${SECONDARY_PORT}"
   export AD_VAR_SECONDARY_SERVER_ID="${SECONDARY_SERVER_ID}"

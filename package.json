@@ -42,6 +42,7 @@
     "dev:app": "cross-env PASEO_LISTEN=127.0.0.1:6768 EXPO_PORT=8081 ./scripts/dev-app.sh",
     "test:e2e:mobile": "./scripts/test-mobile-agent-device.sh",
     "test:e2e:mobile:operations": "./scripts/test-mobile-operations-agent-device.sh",
+    "test:e2e:mobile:teams": "cross-env PASEO_MOBILE_E2E_MATRIX_SURFACE=teams ./scripts/test-mobile-operations-agent-device.sh",
     "test:e2e:mobile:visual": "cross-env PASEO_MOBILE_E2E_MATRIX_SURFACE=visual ./scripts/test-mobile-operations-agent-device.sh",
     "dev:website": "npm run dev --workspace=@getpaseo/website",
     "postinstall": "node scripts/postinstall-patches.mjs",

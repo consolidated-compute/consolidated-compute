@@ -174,6 +174,7 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
                 style={
                   resolution.status === "ready" ? styles.readyStatus : styles.unavailableStatus
                 }
+                testID={`team-run-role-status-${resolution.roleId}-${resolution.status}`}
               >
                 {t(`teams.runs.profileStates.${resolution.status}`)}
               </Text>
