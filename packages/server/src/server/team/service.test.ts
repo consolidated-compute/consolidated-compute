@@ -14,6 +14,7 @@ import type {
 } from "../agent/agent-sdk-types.js";
 import type { CreateAgentFromMcpInput } from "../agent/create-agent/create.js";
 import { createTestLogger } from "../../test-utils/test-logger.js";
+import { AssignmentRepository } from "../assignment/repository.js";
 import {
   createPersistedWorkspaceRecord,
   type PersistedWorkspaceRecord,
@@ -381,6 +382,7 @@ class MemoryAgentRuntime {
 
 interface Harness {
   repository: TeamRepository;
+  assignments: AssignmentRepository;
   definition: PersistedTeamDefinition;
   workspaceRegistry: MemoryWorkspaceRegistry;
   providerCatalog: MemoryProviderCatalog;
@@ -413,6 +415,11 @@ describe("TeamRunService", () => {
     const definitions = await repository.listDefinitions();
     const definition =
       definitions.definitions[0] ?? (await repository.createDefinition(createDefinitionInput()));
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(timestamp),
+      activeRunStore: repository,
+    });
     const workspaceRegistry = new MemoryWorkspaceRegistry(options?.workspace ?? createWorkspace());
     const providerCatalog = new MemoryProviderCatalog();
     const daemonConfigStore = new MemoryDaemonConfigStore();
@@ -420,6 +427,7 @@ describe("TeamRunService", () => {
     const ids = [firstAgentId, secondAgentId, unusedAgentId];
     const service = new TeamRunService({
       repository,
+      assignmentRepository: assignments,
       workspaceRegistry,
       providerCatalog,
       daemonConfigStore,
@@ -438,6 +446,7 @@ describe("TeamRunService", () => {
     if (options?.initialize !== false) await service.initialize();
     return {
       repository,
+      assignments,
       definition,
       workspaceRegistry,
       providerCatalog,
@@ -456,6 +465,55 @@ describe("TeamRunService", () => {
       workspaceId: "wks_team_service",
     });
   }
+
+  async function startAssignmentRun(
+    harness: Harness,
+    assignment: { id: string; revision: number },
+    idempotencyKey = "assignment-start-1",
+  ) {
+    return harness.service.startAssignmentRun({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      idempotencyKey,
+      assignmentId: assignment.id,
+      expectedAssignmentRevision: assignment.revision,
+      workspaceId: "wks_team_service",
+    });
+  }
+
+  test("admits Assignment intent and launches only after its frozen run is durable", async () => {
+    const harness = await createHarness();
+    const assignment = await harness.assignments.createAssignment({
+      title: "Service admission",
+      objective: "Run the Team from durable Assignment intent.",
+      workItem: null,
+    });
+
+    const run = await startAssignmentRun(harness, assignment);
+    await harness.runtime.waitForCreations(1);
+
+    expect(run).toMatchObject({
+      objective: assignment.objective,
+      assignmentId: assignment.id,
+      assignmentRevision: assignment.revision,
+      assignmentSnapshot: assignment,
+    });
+    expect(run.steps[0]!.snapshot.inputArtifactIds).toEqual([]);
+    expect(run.steps[1]!.snapshot.inputArtifactIds).toEqual([
+      run.steps[0]!.snapshot.outputArtifact!.id,
+    ]);
+
+    await harness.assignments.patchAssignment({
+      assignmentId: assignment.id,
+      expectedRevision: assignment.revision,
+      patch: { objective: "Changed after admission." },
+    });
+    await expect(harness.repository.getRun(run.id)).resolves.toMatchObject({
+      objective: assignment.objective,
+      assignmentRevision: assignment.revision,
+      assignmentSnapshot: assignment,
+    });
+  });
 
   test("runs reached steps in order and hands only the previous final response forward", async () => {
     const harness = await createHarness();

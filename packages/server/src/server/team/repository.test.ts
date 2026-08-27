@@ -5,17 +5,27 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { writeJsonFileAtomic } from "../atomic-file.js";
+import {
+  AssignmentHasActiveRunError,
+  AssignmentNotFoundError,
+  AssignmentRepository,
+  AssignmentRevisionConflictError,
+  AssignmentStateConflictError,
+} from "../assignment/repository.js";
 import type { PersistedTeamDefinition, PersistedTeamRunRecord } from "./model.js";
 import {
   TEAM_RUN_PAGE_MAX_LIMIT,
   TeamRepository,
   TeamHasActiveRunError,
+  TeamAssignmentHasActiveRunError,
   TeamRepositoryIdError,
   TeamRevisionConflictError,
+  TeamRunIdempotencyConflictError,
   TeamRunPageError,
   TeamStorageCorruptError,
   TeamWorkspaceHasActiveRunError,
   type CreateTeamDefinitionInput,
+  type CreateAssignmentTeamRunInput,
   type CreateTeamRunInput,
   type TeamRepositoryChange,
 } from "./repository.js";
@@ -93,6 +103,20 @@ function createRunInput(
         state: { status: "pending" as const },
       };
     }),
+  };
+}
+
+function createAssignmentRunInput(
+  definition: PersistedTeamDefinition,
+  assignment: { id: string; revision: number },
+  idempotencyKey = "assignment-start-1",
+  workspaceId = "wks_assignment_012345",
+): CreateAssignmentTeamRunInput {
+  const { objective: _, ...runInput } = createRunInput(definition, idempotencyKey, workspaceId);
+  return {
+    ...runInput,
+    assignmentId: assignment.id,
+    expectedAssignmentRevision: assignment.revision,
   };
 }
 
@@ -436,6 +460,253 @@ describe("TeamRepository runs", () => {
     await expect(new TeamRepository({ paseoHome }).getRun(run.id)).resolves.toEqual(run);
   });
 
+  test("durably admits a frozen Assignment with a preallocated sequential Artifact plan", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const assignment = await assignments.createAssignment({
+      title: "Assignment-backed Team Run",
+      objective: "Deliver the Assignment objective.",
+      workItem: null,
+    });
+    const run = await repository.createAssignmentRun(
+      createAssignmentRunInput(definition, assignment),
+      assignments,
+    );
+
+    expect(run).toMatchObject({
+      objective: assignment.objective,
+      assignmentId: assignment.id,
+      assignmentRevision: assignment.revision,
+      assignmentSnapshot: assignment,
+      steps: [
+        {
+          snapshot: {
+            inputArtifactIds: [],
+            outputArtifact: {
+              id: expect.stringMatching(/^aart_[0-9a-f]{16}$/),
+              kind: "team_step_output",
+              title: "Builder output",
+              mediaType: "text/markdown",
+            },
+          },
+        },
+        {
+          snapshot: {
+            inputArtifactIds: [run.steps[0]!.snapshot.outputArtifact!.id],
+            outputArtifact: {
+              id: expect.stringMatching(/^aart_[0-9a-f]{16}$/),
+              kind: "team_step_output",
+              title: "Reviewer output",
+              mediaType: "text/markdown",
+            },
+          },
+        },
+      ],
+    });
+    expect(run.steps[1]!.snapshot.outputArtifact!.id).not.toBe(
+      run.steps[0]!.snapshot.outputArtifact!.id,
+    );
+
+    currentTimestamp = secondTimestamp;
+    await assignments.patchAssignment({
+      assignmentId: assignment.id,
+      expectedRevision: 1,
+      patch: { objective: "Edited after acceptance." },
+    });
+    await repository.updateDefinition({
+      teamId: definition.id,
+      expectedRevision: 1,
+      patch: { name: "Edited Team" },
+    });
+    await expect(repository.getRun(run.id)).resolves.toEqual(run);
+  });
+
+  test("rejects missing, stale, and terminal Assignments before creating a run", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const missingInput = createAssignmentRunInput(definition, {
+      id: "asgn_0000000000000000",
+      revision: 1,
+    });
+    await expect(repository.createAssignmentRun(missingInput, assignments)).rejects.toBeInstanceOf(
+      AssignmentNotFoundError,
+    );
+
+    const stale = await assignments.createAssignment({
+      title: "Stale Assignment",
+      objective: "This revision will become stale.",
+      workItem: null,
+    });
+    await assignments.patchAssignment({
+      assignmentId: stale.id,
+      expectedRevision: 1,
+      patch: { title: "New revision" },
+    });
+    await expect(
+      repository.createAssignmentRun(
+        createAssignmentRunInput(definition, stale, "stale", "wks_stale_assignment"),
+        assignments,
+      ),
+    ).rejects.toBeInstanceOf(AssignmentRevisionConflictError);
+
+    const terminal = await assignments.createAssignment({
+      title: "Terminal Assignment",
+      objective: "This Assignment will be completed before admission.",
+      workItem: null,
+    });
+    const completed = await assignments.completeAssignment({
+      assignmentId: terminal.id,
+      expectedRevision: 1,
+    });
+    await expect(
+      repository.createAssignmentRun(
+        createAssignmentRunInput(definition, completed, "terminal", "wks_terminal_assignment"),
+        assignments,
+      ),
+    ).rejects.toBeInstanceOf(AssignmentStateConflictError);
+    await expect(repository.listRuns()).resolves.toMatchObject({ runs: [], issues: [] });
+  });
+
+  test("shares one mutation boundary with concurrent Assignment edits", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const assignment = await assignments.createAssignment({
+      title: "Concurrent Assignment",
+      objective: "Do not admit a stale snapshot.",
+      workItem: null,
+    });
+    const input = createAssignmentRunInput(definition, assignment);
+
+    const [edited, admitted] = await Promise.allSettled([
+      assignments.patchAssignment({
+        assignmentId: assignment.id,
+        expectedRevision: 1,
+        patch: { title: "Edited first" },
+      }),
+      repository.createAssignmentRun(input, assignments),
+    ]);
+
+    expect(edited.status).toBe("fulfilled");
+    expect(admitted).toMatchObject({
+      status: "rejected",
+      reason: { code: "assignment_revision_conflict", actualRevision: 2 },
+    });
+    await expect(repository.listRuns()).resolves.toMatchObject({ runs: [], issues: [] });
+  });
+
+  test("atomically permits only one active run per Assignment", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const assignment = await assignments.createAssignment({
+      title: "Single active run",
+      objective: "Admit exactly one active run.",
+      workItem: null,
+    });
+
+    const outcomes = await Promise.allSettled([
+      repository.createAssignmentRun(
+        createAssignmentRunInput(definition, assignment, "first", "wks_assignment_first"),
+        assignments,
+      ),
+      repository.createAssignmentRun(
+        createAssignmentRunInput(definition, assignment, "second", "wks_assignment_second"),
+        assignments,
+      ),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+    const rejected = outcomes.find((outcome) => outcome.status === "rejected");
+    expect((rejected as PromiseRejectedResult).reason).toBeInstanceOf(
+      TeamAssignmentHasActiveRunError,
+    );
+  });
+
+  test("rejects conflicting reuse of Assignment-backed idempotency inputs", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const assignment = await assignments.createAssignment({
+      title: "Idempotent Assignment",
+      objective: "Bind every immutable admission input.",
+      workItem: null,
+    });
+    const input = createAssignmentRunInput(definition, assignment);
+    const run = await repository.createAssignmentRun(input, assignments);
+
+    await expect(repository.createAssignmentRun(input, assignments)).resolves.toEqual(run);
+    const conflicts = [
+      { ...input, workspace: { ...input.workspace, workspaceId: "wks_other_workspace" } },
+      { ...input, expectedRevision: input.expectedRevision + 1 },
+      { ...input, expectedAssignmentRevision: input.expectedAssignmentRevision + 1 },
+      { ...input, assignmentId: "asgn_fedcba9876543210" },
+    ];
+    for (const conflict of conflicts) {
+      await expect(repository.createAssignmentRun(conflict, assignments)).rejects.toBeInstanceOf(
+        TeamRunIdempotencyConflictError,
+      );
+    }
+  });
+
+  test("allows active Assignment edits but fences terminal transitions", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const assignment = await assignments.createAssignment({
+      title: "Lifecycle-fenced Assignment",
+      objective: "Remain open while the run is active.",
+      workItem: null,
+    });
+    const run = await repository.createAssignmentRun(
+      createAssignmentRunInput(definition, assignment),
+      assignments,
+    );
+    const edited = await assignments.patchAssignment({
+      assignmentId: assignment.id,
+      expectedRevision: 1,
+      patch: { title: "Edit allowed during execution" },
+    });
+
+    await expect(
+      assignments.completeAssignment({
+        assignmentId: assignment.id,
+        expectedRevision: edited.revision,
+      }),
+    ).rejects.toEqual(new AssignmentHasActiveRunError(assignment.id, run.id));
+    await expect(
+      assignments.cancelAssignment({
+        assignmentId: assignment.id,
+        expectedRevision: edited.revision,
+      }),
+    ).rejects.toEqual(new AssignmentHasActiveRunError(assignment.id, run.id));
+    currentTimestamp = secondTimestamp;
+    await repository.updateRun(run.id, (current) => succeededRunState(current));
+    await expect(assignments.getAssignment(assignment.id)).resolves.toMatchObject({
+      state: { status: "open" },
+    });
+    await expect(
+      assignments.completeAssignment({
+        assignmentId: assignment.id,
+        expectedRevision: edited.revision,
+      }),
+    ).resolves.toMatchObject({ state: { status: "completed" } });
+  });
+
   test("returns one run for concurrent starts with the same idempotency key", async () => {
     const input = createRunInput(definition);
 
@@ -446,6 +717,22 @@ describe("TeamRepository runs", () => {
 
     expect(second).toEqual(first);
     await expect(repository.listRuns()).resolves.toMatchObject({ runs: [first], issues: [] });
+  });
+
+  test("rejects conflicting reuse of objective-only idempotency inputs", async () => {
+    const input = createRunInput(definition);
+    await repository.createRun(input);
+
+    const conflicts = [
+      { ...input, objective: "A different Objective" },
+      { ...input, expectedRevision: input.expectedRevision + 1 },
+      { ...input, workspace: { ...input.workspace, workspaceId: "wks_other_idempotency" } },
+    ];
+    for (const conflict of conflicts) {
+      await expect(repository.createRun(conflict)).rejects.toBeInstanceOf(
+        TeamRunIdempotencyConflictError,
+      );
+    }
   });
 
   test("creates distinct runs for different idempotency keys and Workspaces", async () => {

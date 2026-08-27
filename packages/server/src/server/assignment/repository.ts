@@ -6,6 +6,10 @@ import { z } from "zod";
 
 import { writeJsonFileAtomic } from "../atomic-file.js";
 import {
+  hostPersistenceBoundaryKey,
+  serializeHostPersistenceMutation,
+} from "../persistence-mutation.js";
+import {
   generateAssignmentId,
   PersistedAssignmentArtifactIdSchema,
   PersistedAssignmentArtifactRecordSchema,
@@ -76,6 +80,12 @@ export interface AssignmentRepositoryOptions {
   paseoHome: string;
   now?: () => Date;
   writeJson?: (filePath: string, value: unknown) => Promise<void>;
+  activeRunStore?: AssignmentActiveRunStore;
+}
+
+export interface AssignmentActiveRunStore {
+  readonly persistenceBoundaryKey: string;
+  getActiveRunForAssignment(assignmentId: string): Promise<{ id: string } | null>;
 }
 
 interface CollectionRead<TRecord> {
@@ -92,8 +102,6 @@ const AssignmentArtifactCursorSchema = z
   .strict();
 
 type AssignmentArtifactCursor = z.infer<typeof AssignmentArtifactCursorSchema>;
-
-const mutationTails = new Map<string, Promise<unknown>>();
 
 export class AssignmentNotFoundError extends Error {
   readonly code = "assignment_not_found";
@@ -126,8 +134,29 @@ export class AssignmentStateConflictError extends Error {
     readonly assignmentId: string,
     readonly status: PersistedAssignmentRecord["state"]["status"],
   ) {
-    super(`Assignment ${assignmentId} is ${status} and cannot be changed`);
+    super(`Assignment ${assignmentId} is ${status}; this operation requires an open Assignment`);
     this.name = "AssignmentStateConflictError";
+  }
+}
+
+export class AssignmentHasActiveRunError extends Error {
+  readonly code = "assignment_has_active_run";
+
+  constructor(
+    readonly assignmentId: string,
+    readonly runId: string,
+  ) {
+    super(`Assignment ${assignmentId} has an active Team Run: ${runId}`);
+    this.name = "AssignmentHasActiveRunError";
+  }
+}
+
+export class AssignmentPersistenceBoundaryError extends Error {
+  readonly code = "assignment_persistence_boundary_mismatch";
+
+  constructor() {
+    super("Assignment and Team Run stores must share one host persistence boundary");
+    this.name = "AssignmentPersistenceBoundaryError";
   }
 }
 
@@ -194,18 +223,26 @@ export class AssignmentStorageCorruptError extends Error {
 export class AssignmentRepository {
   private readonly recordsDir: string;
   private readonly artifactsDir: string;
-  private readonly mutationKey: string;
+  readonly persistenceBoundaryKey: string;
   private readonly now: () => Date;
   private readonly writeJson: (filePath: string, value: unknown) => Promise<void>;
+  private readonly activeRunStore: AssignmentActiveRunStore | null;
   private readonly listeners = new Set<AssignmentRepositoryListener>();
 
   constructor(options: AssignmentRepositoryOptions) {
     const assignmentsDir = resolve(options.paseoHome, "assignments");
     this.recordsDir = join(assignmentsDir, "records");
     this.artifactsDir = join(assignmentsDir, "artifacts");
-    this.mutationKey = assignmentsDir;
+    this.persistenceBoundaryKey = hostPersistenceBoundaryKey(options.paseoHome);
     this.now = options.now ?? (() => new Date());
     this.writeJson = options.writeJson ?? writeJsonFileAtomic;
+    this.activeRunStore = options.activeRunStore ?? null;
+    if (
+      this.activeRunStore &&
+      this.activeRunStore.persistenceBoundaryKey !== this.persistenceBoundaryKey
+    ) {
+      throw new AssignmentPersistenceBoundaryError();
+    }
   }
 
   subscribe(listener: AssignmentRepositoryListener): () => void {
@@ -254,7 +291,7 @@ export class AssignmentRepository {
 
   async patchAssignment(input: PatchAssignmentInput): Promise<PersistedAssignmentRecord> {
     if (Object.keys(input.patch).length === 0) throw new AssignmentPatchEmptyError();
-    return this.updateOpenAssignment(input, (current, timestamp) => ({
+    return this.updateOpenAssignment(input, false, (current, timestamp) => ({
       ...current,
       ...input.patch,
       id: current.id,
@@ -266,7 +303,7 @@ export class AssignmentRepository {
   }
 
   async completeAssignment(input: TransitionAssignmentInput): Promise<PersistedAssignmentRecord> {
-    return this.updateOpenAssignment(input, (current, timestamp) => ({
+    return this.updateOpenAssignment(input, true, (current, timestamp) => ({
       ...current,
       revision: current.revision + 1,
       state: { status: "completed", completedAt: timestamp },
@@ -275,7 +312,7 @@ export class AssignmentRepository {
   }
 
   async cancelAssignment(input: TransitionAssignmentInput): Promise<PersistedAssignmentRecord> {
-    return this.updateOpenAssignment(input, (current, timestamp) => ({
+    return this.updateOpenAssignment(input, true, (current, timestamp) => ({
       ...current,
       revision: current.revision + 1,
       state: { status: "canceled", canceledAt: timestamp },
@@ -350,6 +387,7 @@ export class AssignmentRepository {
 
   private async updateOpenAssignment(
     input: TransitionAssignmentInput,
+    rejectActiveRun: boolean,
     updater: (current: PersistedAssignmentRecord, timestamp: string) => PersistedAssignmentRecord,
   ): Promise<PersistedAssignmentRecord> {
     return this.serializeMutation(async () => {
@@ -357,6 +395,10 @@ export class AssignmentRepository {
       this.requireRevision(current, input.expectedRevision);
       if (current.state.status !== "open") {
         throw new AssignmentStateConflictError(current.id, current.state.status);
+      }
+      if (rejectActiveRun && this.activeRunStore) {
+        const activeRun = await this.activeRunStore.getActiveRunForAssignment(current.id);
+        if (activeRun) throw new AssignmentHasActiveRunError(current.id, activeRun.id);
       }
       const assignment = PersistedAssignmentRecordSchema.parse(
         updater(current, this.now().toISOString()),
@@ -484,16 +526,7 @@ export class AssignmentRepository {
   }
 
   private async serializeMutation<T>(mutation: () => Promise<T>): Promise<T> {
-    const previous = mutationTails.get(this.mutationKey) ?? Promise.resolve();
-    const next = previous.catch(() => undefined).then(mutation);
-    mutationTails.set(this.mutationKey, next);
-    try {
-      return await next;
-    } finally {
-      if (mutationTails.get(this.mutationKey) === next) {
-        mutationTails.delete(this.mutationKey);
-      }
-    }
+    return serializeHostPersistenceMutation(this.persistenceBoundaryKey, mutation);
   }
 
   private publish(change: AssignmentRepositoryChange): void {

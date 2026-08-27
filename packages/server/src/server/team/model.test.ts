@@ -126,6 +126,35 @@ function createRun(team = createTeam()): PersistedTeamRunRecord {
   };
 }
 
+function createAssignmentRun() {
+  const run = createRun();
+  const assignmentSnapshot = {
+    id: "asgn_0123456789abcdef",
+    revision: 3,
+    title: "Ship Assignment-backed Team Runs",
+    objective: "Add the requested feature.",
+    workItem: null,
+    state: { status: "open" as const },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  for (const [index, step] of run.steps.entries()) {
+    step.snapshot.inputArtifactIds = index === 0 ? [] : ["aart_0123456789abcdef"];
+    step.snapshot.outputArtifact = {
+      id: index === 0 ? "aart_0123456789abcdef" : "aart_fedcba9876543210",
+      kind: "team_step_output",
+      title: `${step.snapshot.roleName} output`,
+      mediaType: "text/markdown",
+    };
+  }
+  return {
+    ...run,
+    assignmentId: assignmentSnapshot.id,
+    assignmentRevision: assignmentSnapshot.revision,
+    assignmentSnapshot,
+  };
+}
+
 describe("Team definition contract", () => {
   test("accepts stable roles and an explicit sequential workflow", () => {
     expect(PersistedTeamDefinitionSchema.parse(createTeam())).toEqual(createTeam());
@@ -183,6 +212,61 @@ describe("Team definition contract", () => {
 describe("Team Run contract", () => {
   test("accepts a frozen Team, Workspace, resolved steps, and active state", () => {
     expect(PersistedTeamRunRecordSchema.parse(createRun())).toEqual(createRun());
+  });
+
+  test("accepts a frozen Assignment and exact sequential Artifact plan", () => {
+    const run = createAssignmentRun();
+
+    expect(PersistedTeamRunRecordSchema.parse(run)).toEqual(run);
+  });
+
+  test("requires Assignment identity, revision, and snapshot together", () => {
+    const run = createAssignmentRun();
+    const { assignmentSnapshot: _, ...withoutSnapshot } = run;
+
+    const result = PersistedTeamRunRecordSchema.safeParse(withoutSnapshot);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Assignment identity, revision, and snapshot must be present together",
+    );
+  });
+
+  test("rejects drift from the frozen open Assignment", () => {
+    const source = createAssignmentRun();
+    const run = {
+      ...source,
+      objective: "Different objective",
+      assignmentSnapshot: {
+        ...source.assignmentSnapshot,
+        state: { status: "completed" as const, completedAt: timestamp },
+      },
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toEqual(
+      expect.arrayContaining([
+        "objective must match the frozen Assignment snapshot",
+        "Assignment-backed runs must freeze an open Assignment",
+      ]),
+    );
+  });
+
+  test("rejects missing or latest-style Artifact handoffs", () => {
+    const run = createAssignmentRun();
+    run.steps[1]!.snapshot.inputArtifactIds = [];
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Each downstream step must consume exactly the preceding output Artifact ID",
+    );
   });
 
   test("rejects a run whose Team revision or workflow snapshot drifted", () => {

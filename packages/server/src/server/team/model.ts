@@ -11,6 +11,12 @@ import {
   TEAM_OBJECTIVE_MAX_CHARS,
   TEAM_ROLE_NAME_MAX_CHARS,
 } from "@getpaseo/protocol/team/types";
+import {
+  ASSIGNMENT_ARTIFACT_TITLE_MAX_CHARS,
+  PersistedAssignmentArtifactIdSchema,
+  PersistedAssignmentIdSchema,
+  PersistedAssignmentRecordSchema,
+} from "../assignment/model.js";
 
 export {
   TEAM_AGENT_PROFILE_ID_MAX_CHARS,
@@ -138,6 +144,15 @@ export const PersistedTeamRunWorkspaceSnapshotSchema = z
   })
   .strict();
 
+export const PersistedTeamRunArtifactOutputSchema = z
+  .object({
+    id: PersistedAssignmentArtifactIdSchema,
+    kind: z.literal("team_step_output"),
+    title: nonBlankStringSchema(ASSIGNMENT_ARTIFACT_TITLE_MAX_CHARS),
+    mediaType: z.literal("text/markdown"),
+  })
+  .strict();
+
 export const PersistedTeamRunStepSnapshotSchema = z
   .object({
     stepId: PersistedTeamEntityIdSchema,
@@ -146,6 +161,11 @@ export const PersistedTeamRunStepSnapshotSchema = z
     roleInstructions: nonBlankStringSchema(TEAM_INSTRUCTIONS_MAX_CHARS),
     stepInstructions: nonBlankStringSchema(TEAM_INSTRUCTIONS_MAX_CHARS).nullable(),
     resolvedLaunch: PersistedTeamResolvedLaunchSchema,
+    inputArtifactIds: z
+      .array(PersistedAssignmentArtifactIdSchema)
+      .max(TEAM_MAX_WORKFLOW_STEPS)
+      .optional(),
+    outputArtifact: PersistedTeamRunArtifactOutputSchema.optional(),
   })
   .strict();
 
@@ -361,6 +381,9 @@ const PersistedTeamRunRecordBaseSchema = z
     idempotencyKey: nonBlankStringSchema(TEAM_IDEMPOTENCY_KEY_MAX_CHARS),
     teamSnapshot: PersistedTeamDefinitionSchema,
     objective: nonBlankStringSchema(TEAM_OBJECTIVE_MAX_CHARS),
+    assignmentId: PersistedAssignmentIdSchema.optional(),
+    assignmentRevision: z.number().int().positive().optional(),
+    assignmentSnapshot: PersistedAssignmentRecordSchema.optional(),
     workspace: PersistedTeamRunWorkspaceSnapshotSchema,
     steps: z.array(PersistedTeamRunStepSchema).min(1).max(TEAM_MAX_WORKFLOW_STEPS),
     state: PersistedTeamRunStateSchema,
@@ -389,6 +412,94 @@ function validateRunIdentity(run: TeamRunRecordShape): ContractIssue[] {
   }
   if (run.steps.length !== run.teamSnapshot.workflow.length) {
     issues.push({ path: ["steps"], message: "Run steps must match the frozen workflow length" });
+  }
+  issues.push(...validateAssignmentIdentity(run));
+  return issues;
+}
+
+function validateAssignmentIdentity(run: TeamRunRecordShape): ContractIssue[] {
+  const issues: ContractIssue[] = [];
+  const assignmentFields = [run.assignmentId, run.assignmentRevision, run.assignmentSnapshot];
+  const presentFieldCount = assignmentFields.filter((field) => field !== undefined).length;
+  if (presentFieldCount === 0) return issues;
+  if (presentFieldCount !== assignmentFields.length) {
+    issues.push({
+      path: ["assignmentId"],
+      message: "Assignment identity, revision, and snapshot must be present together",
+    });
+    return issues;
+  }
+
+  const assignmentId = run.assignmentId!;
+  const assignmentRevision = run.assignmentRevision!;
+  const assignmentSnapshot = run.assignmentSnapshot!;
+  if (assignmentId !== assignmentSnapshot.id) {
+    issues.push({
+      path: ["assignmentId"],
+      message: "assignmentId must match the frozen Assignment snapshot",
+    });
+  }
+  if (assignmentRevision !== assignmentSnapshot.revision) {
+    issues.push({
+      path: ["assignmentRevision"],
+      message: "assignmentRevision must match the frozen Assignment snapshot",
+    });
+  }
+  if (run.objective !== assignmentSnapshot.objective) {
+    issues.push({
+      path: ["objective"],
+      message: "objective must match the frozen Assignment snapshot",
+    });
+  }
+  if (assignmentSnapshot.state.status !== "open") {
+    issues.push({
+      path: ["assignmentSnapshot", "state", "status"],
+      message: "Assignment-backed runs must freeze an open Assignment",
+    });
+  }
+  issues.push(...validateAssignmentArtifactPlan(run));
+  return issues;
+}
+
+function validateAssignmentArtifactPlan(run: TeamRunRecordShape): ContractIssue[] {
+  const issues: ContractIssue[] = [];
+  const outputIds = new Set<string>();
+  let precedingOutputId: string | null = null;
+  for (const [index, step] of run.steps.entries()) {
+    const { inputArtifactIds, outputArtifact } = step.snapshot;
+    if (!inputArtifactIds || !outputArtifact) {
+      issues.push({
+        path: ["steps", index, "snapshot"],
+        message: "Assignment-backed steps must freeze Artifact inputs and output",
+      });
+      precedingOutputId = outputArtifact?.id ?? null;
+      continue;
+    }
+
+    const expectedInputs = precedingOutputId === null ? [] : [precedingOutputId];
+    if (
+      inputArtifactIds.length !== expectedInputs.length ||
+      inputArtifactIds.some((artifactId, inputIndex) => artifactId !== expectedInputs[inputIndex])
+    ) {
+      issues.push({
+        path: ["steps", index, "snapshot", "inputArtifactIds"],
+        message: "Each downstream step must consume exactly the preceding output Artifact ID",
+      });
+    }
+    if (outputIds.has(outputArtifact.id)) {
+      issues.push({
+        path: ["steps", index, "snapshot", "outputArtifact", "id"],
+        message: "Each Team Run step must own a distinct output Artifact ID",
+      });
+    }
+    outputIds.add(outputArtifact.id);
+    if (outputArtifact.title !== `${step.snapshot.roleName} output`) {
+      issues.push({
+        path: ["steps", index, "snapshot", "outputArtifact", "title"],
+        message: "Team step output titles must use the canonical role display",
+      });
+    }
+    precedingOutputId = outputArtifact.id;
   }
   return issues;
 }
