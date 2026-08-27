@@ -80,7 +80,7 @@ export interface AssignmentRepositoryOptions {
   paseoHome: string;
   now?: () => Date;
   writeJson?: (filePath: string, value: unknown) => Promise<void>;
-  activeRunStore?: AssignmentActiveRunStore;
+  activeRunStore: AssignmentActiveRunStore;
 }
 
 export interface AssignmentActiveRunStore {
@@ -226,7 +226,7 @@ export class AssignmentRepository {
   readonly persistenceBoundaryKey: string;
   private readonly now: () => Date;
   private readonly writeJson: (filePath: string, value: unknown) => Promise<void>;
-  private readonly activeRunStore: AssignmentActiveRunStore | null;
+  private readonly activeRunStore: AssignmentActiveRunStore;
   private readonly listeners = new Set<AssignmentRepositoryListener>();
 
   constructor(options: AssignmentRepositoryOptions) {
@@ -236,11 +236,8 @@ export class AssignmentRepository {
     this.persistenceBoundaryKey = hostPersistenceBoundaryKey(options.paseoHome);
     this.now = options.now ?? (() => new Date());
     this.writeJson = options.writeJson ?? writeJsonFileAtomic;
-    this.activeRunStore = options.activeRunStore ?? null;
-    if (
-      this.activeRunStore &&
-      this.activeRunStore.persistenceBoundaryKey !== this.persistenceBoundaryKey
-    ) {
+    this.activeRunStore = options.activeRunStore;
+    if (this.activeRunStore.persistenceBoundaryKey !== this.persistenceBoundaryKey) {
       throw new AssignmentPersistenceBoundaryError();
     }
   }
@@ -396,7 +393,7 @@ export class AssignmentRepository {
       if (current.state.status !== "open") {
         throw new AssignmentStateConflictError(current.id, current.state.status);
       }
-      if (rejectActiveRun && this.activeRunStore) {
+      if (rejectActiveRun) {
         const activeRun = await this.activeRunStore.getActiveRunForAssignment(current.id);
         if (activeRun) throw new AssignmentHasActiveRunError(current.id, activeRun.id);
       }

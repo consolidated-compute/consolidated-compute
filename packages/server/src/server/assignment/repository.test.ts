@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { writeJsonFileAtomic } from "../atomic-file.js";
+import { hostPersistenceBoundaryKey } from "../persistence-mutation.js";
 import {
   generateAssignmentArtifactId,
   type PersistedAssignmentArtifactRecord,
@@ -16,6 +17,7 @@ import {
   AssignmentRepository,
   AssignmentRevisionConflictError,
   AssignmentStateConflictError,
+  type AssignmentRepositoryOptions,
   type AssignmentRepositoryChange,
   type CreateAssignmentArtifactInput,
   type CreateAssignmentInput,
@@ -24,6 +26,20 @@ import {
 const firstTimestamp = "2026-08-27T12:00:00.000Z";
 const secondTimestamp = "2026-08-27T12:01:00.000Z";
 const thirdTimestamp = "2026-08-27T12:02:00.000Z";
+
+function createRepository(
+  options: Omit<AssignmentRepositoryOptions, "activeRunStore">,
+): AssignmentRepository {
+  return new AssignmentRepository({
+    ...options,
+    activeRunStore: {
+      persistenceBoundaryKey: hostPersistenceBoundaryKey(options.paseoHome),
+      async getActiveRunForAssignment() {
+        return null;
+      },
+    },
+  });
+}
 
 function createAssignmentInput(): CreateAssignmentInput {
   return {
@@ -77,7 +93,7 @@ describe("AssignmentRepository", () => {
   beforeEach(async () => {
     paseoHome = await mkdtemp(join(tmpdir(), "assignment-repository-test-"));
     currentTimestamp = firstTimestamp;
-    repository = new AssignmentRepository({
+    repository = createRepository({
       paseoHome,
       now: () => new Date(currentTimestamp),
     });
@@ -102,7 +118,7 @@ describe("AssignmentRepository", () => {
     );
     expect(stored).toEqual(created);
 
-    const reloaded = new AssignmentRepository({ paseoHome });
+    const reloaded = createRepository({ paseoHome });
     await expect(reloaded.getAssignment(created.id)).resolves.toEqual(created);
     await expect(reloaded.listAssignments()).resolves.toEqual({
       assignments: [created],
@@ -113,7 +129,7 @@ describe("AssignmentRepository", () => {
   test("serializes concurrent patches and rejects the stale revision", async () => {
     const created = await repository.createAssignment(createAssignmentInput());
     currentTimestamp = secondTimestamp;
-    const peer = new AssignmentRepository({
+    const peer = createRepository({
       paseoHome,
       now: () => new Date(currentTimestamp),
     });
@@ -170,9 +186,9 @@ describe("AssignmentRepository", () => {
     await expect(
       repository.cancelAssignment({ assignmentId: created.id, expectedRevision: 2 }),
     ).rejects.toMatchObject({ code: "assignment_state_conflict", status: "completed" });
-    await expect(
-      new AssignmentRepository({ paseoHome }).getAssignment(created.id),
-    ).resolves.toEqual(completed);
+    await expect(createRepository({ paseoHome }).getAssignment(created.id)).resolves.toEqual(
+      completed,
+    );
 
     const canceledSource = await repository.createAssignment({
       ...createAssignmentInput(),
@@ -209,7 +225,7 @@ describe("AssignmentRepository", () => {
   test("retains the previous record and event boundary when an atomic update is interrupted", async () => {
     const changes: AssignmentRepositoryChange[] = [];
     let interruptNextWrite = false;
-    repository = new AssignmentRepository({
+    repository = createRepository({
       paseoHome,
       now: () => new Date(firstTimestamp),
       writeJson: async (filePath, value) => {
@@ -231,9 +247,9 @@ describe("AssignmentRepository", () => {
         patch: { title: "Incomplete update" },
       }),
     ).rejects.toThrow("simulated interruption before rename");
-    await expect(
-      new AssignmentRepository({ paseoHome }).getAssignment(created.id),
-    ).resolves.toEqual(created);
+    await expect(createRepository({ paseoHome }).getAssignment(created.id)).resolves.toEqual(
+      created,
+    );
     expect(changes).toEqual([{ type: "assignment_created", assignment: created }]);
   });
 
@@ -245,7 +261,7 @@ describe("AssignmentRepository", () => {
 
     expect(artifact).toEqual({ ...input, createdAt: secondTimestamp });
     await expect(repository.getAssignment(assignment.id)).resolves.toEqual(assignment);
-    await expect(new AssignmentRepository({ paseoHome }).getArtifact(artifact.id)).resolves.toEqual(
+    await expect(createRepository({ paseoHome }).getArtifact(artifact.id)).resolves.toEqual(
       artifact,
     );
 
@@ -259,7 +275,7 @@ describe("AssignmentRepository", () => {
     currentTimestamp = secondTimestamp;
     const input = createArtifactInput(assignment);
     const changes: AssignmentRepositoryChange[] = [];
-    const peer = new AssignmentRepository({
+    const peer = createRepository({
       paseoHome,
       now: () => new Date(currentTimestamp),
     });
