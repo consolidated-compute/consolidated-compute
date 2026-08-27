@@ -14,6 +14,7 @@ import type {
 } from "../agent/agent-sdk-types.js";
 import type { CreateAgentFromMcpInput } from "../agent/create-agent/create.js";
 import { createTestLogger } from "../../test-utils/test-logger.js";
+import { writeJsonFileAtomic } from "../atomic-file.js";
 import { AssignmentRepository } from "../assignment/repository.js";
 import {
   createPersistedWorkspaceRecord,
@@ -22,6 +23,7 @@ import {
   type WorkspaceTerminationBoundary,
 } from "../workspace-registry.js";
 import { TeamExecutionPreflightError, type TeamProviderCatalog } from "./execution.js";
+import { materializeTeamStepArtifact } from "./artifacts.js";
 import type { PersistedTeamDefinition, PersistedTeamRunRecord } from "./model.js";
 import {
   TeamRepository,
@@ -408,6 +410,7 @@ describe("TeamRunService", () => {
   async function createHarness(options?: {
     workspace?: PersistedWorkspaceRecord;
     repository?: TeamRepository;
+    assignmentRepository?: AssignmentRepository;
     initialize?: boolean;
   }): Promise<Harness> {
     const repository =
@@ -415,11 +418,13 @@ describe("TeamRunService", () => {
     const definitions = await repository.listDefinitions();
     const definition =
       definitions.definitions[0] ?? (await repository.createDefinition(createDefinitionInput()));
-    const assignments = new AssignmentRepository({
-      paseoHome,
-      now: () => new Date(timestamp),
-      activeRunStore: repository,
-    });
+    const assignments =
+      options?.assignmentRepository ??
+      new AssignmentRepository({
+        paseoHome,
+        now: () => new Date(timestamp),
+        activeRunStore: repository,
+      });
     const workspaceRegistry = new MemoryWorkspaceRegistry(options?.workspace ?? createWorkspace());
     const providerCatalog = new MemoryProviderCatalog();
     const daemonConfigStore = new MemoryDaemonConfigStore();
@@ -513,6 +518,166 @@ describe("TeamRunService", () => {
       assignmentRevision: assignment.revision,
       assignmentSnapshot: assignment,
     });
+
+    harness.runtime.finalResponses.set(firstAgentId, "Builder produced the durable result.");
+    await harness.runtime.waitForStream(firstAgentId);
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-builder",
+    });
+    await harness.runtime.waitForStream(secondAgentId);
+
+    const builderArtifact = await harness.assignments.getArtifact(
+      run.steps[0]!.snapshot.outputArtifact!.id,
+    );
+    expect(builderArtifact).toMatchObject({
+      content: "Builder produced the durable result.",
+      producer: {
+        teamRunId: run.id,
+        stepId: "step_build",
+        roleId: "role_builder",
+        agentId: firstAgentId,
+        turnId: "turn-builder",
+      },
+    });
+    expect(harness.runtime.streams[1]?.prompt).toContain("## Input Artifacts");
+    expect(harness.runtime.streams[1]?.prompt).toContain(builderArtifact!.id);
+    expect(harness.runtime.streams[1]?.prompt).toContain(builderArtifact!.content);
+    expect(harness.runtime.streams[1]?.prompt).toContain(assignment.objective);
+    expect(harness.runtime.streams[1]?.prompt).not.toContain("Changed after admission.");
+    expect(harness.runtime.streams[1]?.prompt).not.toContain("Previous step final response");
+
+    harness.runtime.finalResponses.set(secondAgentId, "Review passed.");
+    await harness.runtime.pushEvent(secondAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-reviewer",
+    });
+    const completed = await harness.service.waitForRun(run.id);
+    expect(completed.state.status).toBe("succeeded");
+    await expect(
+      harness.assignments.listArtifacts({ assignmentId: assignment.id }),
+    ).resolves.toMatchObject({
+      artifacts: expect.arrayContaining([
+        expect.objectContaining({ id: run.steps[0]!.snapshot.outputArtifact!.id }),
+        expect.objectContaining({ id: run.steps[1]!.snapshot.outputArtifact!.id }),
+      ]),
+      issues: [],
+    });
+    await expect(harness.assignments.getAssignment(assignment.id)).resolves.toMatchObject({
+      revision: 2,
+      state: { status: "open" },
+    });
+  });
+
+  test("fails an Assignment-backed step before advancement when required output is blank", async () => {
+    const harness = await createHarness();
+    const assignment = await harness.assignments.createAssignment({
+      title: "Blank output",
+      objective: "Do not create a misleading empty Artifact.",
+      workItem: null,
+    });
+    const run = await startAssignmentRun(harness, assignment);
+    harness.runtime.finalResponses.set(firstAgentId, "  \n\t");
+
+    await harness.runtime.waitForStream(firstAgentId);
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-blank",
+    });
+    const failed = await harness.service.waitForRun(run.id);
+
+    expect(failed.state.status).toBe("failed");
+    expect(failed.steps[0]!.state.status).toBe("failed");
+    expect(harness.runtime.creations).toHaveLength(1);
+    await expect(
+      harness.assignments.listArtifacts({ assignmentId: assignment.id }),
+    ).resolves.toMatchObject({ artifacts: [], issues: [] });
+  });
+
+  test("retains an ambiguously persisted Artifact without advancing or creating a consumer", async () => {
+    const repository = new TeamRepository({ paseoHome, now: () => new Date(timestamp) });
+    let failAfterArtifactPersistence = false;
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(timestamp),
+      activeRunStore: repository,
+      writeJson: async (filePath, value) => {
+        await writeJsonFileAtomic(filePath, value);
+        if (
+          failAfterArtifactPersistence &&
+          filePath.includes(`${join("assignments", "artifacts")}`)
+        ) {
+          throw new Error("simulated ambiguous Artifact persistence");
+        }
+      },
+    });
+    const harness = await createHarness({ repository, assignmentRepository: assignments });
+    const assignment = await assignments.createAssignment({
+      title: "Ambiguous persistence",
+      objective: "Retain durable output without replaying uncertain advancement.",
+      workItem: null,
+    });
+    const run = await startAssignmentRun(harness, assignment);
+    harness.runtime.finalResponses.set(firstAgentId, "Persisted before the error.");
+    failAfterArtifactPersistence = true;
+
+    await harness.runtime.waitForStream(firstAgentId);
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-ambiguous",
+    });
+    const failed = await harness.service.waitForRun(run.id);
+
+    expect(failed.state.status).toBe("failed");
+    expect(failed.steps[1]!.state.status).toBe("pending");
+    expect(harness.runtime.creations).toHaveLength(1);
+    await expect(
+      assignments.getArtifact(run.steps[0]!.snapshot.outputArtifact!.id),
+    ).resolves.toMatchObject({ content: "Persisted before the error." });
+  });
+
+  test("does not advance or create a consumer when Artifact persistence fails", async () => {
+    const repository = new TeamRepository({ paseoHome, now: () => new Date(timestamp) });
+    let failArtifactWrites = false;
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(timestamp),
+      activeRunStore: repository,
+      writeJson: async (filePath, value) => {
+        if (failArtifactWrites && filePath.includes(join("assignments", "artifacts"))) {
+          throw new Error("simulated Artifact persistence failure");
+        }
+        await writeJsonFileAtomic(filePath, value);
+      },
+    });
+    const harness = await createHarness({ repository, assignmentRepository: assignments });
+    const assignment = await assignments.createAssignment({
+      title: "Failed persistence",
+      objective: "Do not advance without durable output.",
+      workItem: null,
+    });
+    const run = await startAssignmentRun(harness, assignment);
+    harness.runtime.finalResponses.set(firstAgentId, "This write will fail.");
+    failArtifactWrites = true;
+
+    await harness.runtime.waitForStream(firstAgentId);
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-write-failed",
+    });
+    const failed = await harness.service.waitForRun(run.id);
+
+    expect(failed.state.status).toBe("failed");
+    expect(failed.steps[1]!.state.status).toBe("pending");
+    expect(harness.runtime.creations).toHaveLength(1);
+    await expect(
+      assignments.getArtifact(run.steps[0]!.snapshot.outputArtifact!.id),
+    ).resolves.toBeNull();
   });
 
   test("runs reached steps in order and hands only the previous final response forward", async () => {
@@ -995,6 +1160,71 @@ describe("TeamRunService", () => {
       status: "interrupted",
       agentId: null,
     });
+    expect(harness.runtime.creations).toEqual([]);
+  });
+
+  test("retains a pre-crash Artifact while interrupting uncertain Assignment work", async () => {
+    const repository = new TeamRepository({ paseoHome, now: () => new Date(timestamp) });
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(timestamp),
+      activeRunStore: repository,
+    });
+    const definition = await repository.createDefinition(createDefinitionInput());
+    const assignment = await assignments.createAssignment({
+      title: "Crash boundary",
+      objective: "Keep durable output without replaying the next step.",
+      workItem: null,
+    });
+    const workspace = createWorkspace();
+    const admitted = await repository.createAssignmentRun(
+      {
+        teamId: definition.id,
+        expectedRevision: definition.revision,
+        idempotencyKey: "assignment-crash",
+        assignmentId: assignment.id,
+        expectedAssignmentRevision: assignment.revision,
+        workspace: {
+          workspaceId: workspace.workspaceId,
+          projectId: workspace.projectId,
+          cwd: workspace.cwd,
+          displayName: "Team workspace",
+        },
+        steps: acceptedSteps(definition),
+      },
+      assignments,
+    );
+    const active = await repository.updateRun(admitted.id, (run) => {
+      const steps = run.steps.slice();
+      const firstStep = steps[0]!;
+      steps[0] = {
+        ...firstStep,
+        state: {
+          status: "running",
+          plannedAgentId: firstAgentId,
+          agentId: firstAgentId,
+          startedAt: timestamp,
+        },
+      };
+      return { steps, state: { status: "running", startedAt: timestamp } };
+    });
+    const artifact = await materializeTeamStepArtifact(assignments, {
+      run: active,
+      stepIndex: 0,
+      finalResponse: "Durable before the daemon stopped.",
+      turnId: "turn-before-crash",
+    });
+
+    const harness = await createHarness({
+      repository,
+      assignmentRepository: assignments,
+      workspace,
+    });
+
+    await expect(harness.repository.getRun(active.id)).resolves.toMatchObject({
+      state: { status: "interrupted" },
+    });
+    await expect(assignments.getArtifact(artifact.id)).resolves.toEqual(artifact);
     expect(harness.runtime.creations).toEqual([]);
   });
 });

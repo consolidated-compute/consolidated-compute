@@ -2,7 +2,7 @@
 
 A Team is a reusable, host-local definition. A Team Run is one execution of that definition against an Objective in an existing Workspace.
 
-[Assignments and Artifacts](assignments.md) define the durable intent and explicit handoff contract layered onto this lifecycle. Assignment-backed admission freezes that intent and its Artifact plan. Execution still uses the objective-only handoff until Artifact materialization replaces it; objective-only records remain the compatibility path.
+[Assignments and Artifacts](assignments.md) define the durable intent and explicit handoff contract layered onto this lifecycle. Assignment-backed admission freezes that intent and its Artifact plan. Assignment-backed execution persists and resolves those exact Artifacts; objective-only records retain their inline compatibility handoff.
 
 ## Ownership
 
@@ -46,9 +46,11 @@ Compose each initial prompt from these bounded sections:
 2. Role name and instructions.
 3. Step instructions, when present.
 4. Objective.
-5. The immediately previous step final response, when present.
+5. Exact frozen input Artifacts for Assignment-backed runs, or the immediately previous final response for objective-only runs.
 
-Delimit the previous response as untrusted handoff context. Cap it at 4 KiB of UTF-8 and state when it was truncated. An empty final response gets an explicit empty marker. Do not pass the full transcript.
+For an Assignment-backed step, persist its bounded final response under the preallocated output ID before committing step success or creating the next agent. Reject blank output. Resolve downstream inputs by their frozen IDs and verify the Assignment revision, Team Run, producing step, role, agent, success state, and descriptor before agent creation. Artifact content is capped at 32 KiB each and 32 KiB total per prompt. Delimit it as untrusted context with identity, provenance, and truncation facts.
+
+For an objective-only step, delimit the previous response as untrusted handoff context. Cap it at 4 KiB of UTF-8 and state when it was truncated. An empty final response gets an explicit empty marker. Do not pass the full transcript.
 
 The handoff is not a security or context-isolation boundary. Roles share the Workspace filesystem and may use daemon tools. Run records keep step status, timestamps, agent IDs, frozen configuration, and bounded errors; agent timelines remain authoritative for output.
 
@@ -64,6 +66,6 @@ Shutdown fences new starts before agents close. Mark in-flight runs interrupted 
 
 ## Roadmap boundary
 
-V0.2 remains objective-only: its Objective is not a durable Assignment and its bounded inline handoff is not an Artifact. [Assignments and Artifacts](assignments.md) own the v0.3 contract; the legacy path remains for stored runs and older clients.
+Stored v0.2 runs remain objective-only: their Objective is not a durable Assignment and their bounded inline handoff is not an Artifact. [Assignments and Artifacts](assignments.md) own the v0.3 path; stored runs and older clients keep the legacy behavior.
 
 Teams still add no policy enforcement, sandbox, supervisor, conditional revision loop, retry, fan-out, new scheduler, or Team-owned Workspace creation. Issues #6–#8 own those later contracts.

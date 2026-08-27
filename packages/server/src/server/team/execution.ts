@@ -14,6 +14,7 @@ import type {
 } from "../agent/agent-sdk-types.js";
 import { formatProviderModel, type CreateAgentFromMcpInput } from "../agent/create-agent/create.js";
 import type { ProviderSnapshotManager } from "../agent/provider-snapshot-manager.js";
+import type { PersistedAssignmentArtifactRecord } from "../assignment/model.js";
 import {
   resolveWorkspaceDisplayName,
   type PersistedWorkspaceRecord,
@@ -24,6 +25,7 @@ import {
   type PersistedTeamDefinition,
   type PersistedTeamRunRecord,
 } from "./model.js";
+import { formatTeamArtifactPromptSections } from "./artifacts.js";
 
 export const TEAM_ID_LABEL = "paseo.team-id";
 export const TEAM_RUN_ID_LABEL = "paseo.team-run-id";
@@ -507,6 +509,7 @@ export interface TeamStepPromptInput {
   step: TeamRunStepSnapshot;
   objective: string;
   previousFinalResponse?: string;
+  inputArtifacts?: PersistedAssignmentArtifactRecord[];
 }
 
 export function composeTeamStepPrompt(input: TeamStepPromptInput): string {
@@ -518,6 +521,10 @@ export function composeTeamStepPrompt(input: TeamStepPromptInput): string {
     sections.push(`## Step\n${input.step.stepInstructions}`);
   }
   sections.push(`## Objective\n${input.objective}`);
+  if (input.inputArtifacts !== undefined) {
+    const artifactSections = formatTeamArtifactPromptSections(input.inputArtifacts);
+    if (artifactSections) sections.push(artifactSections);
+  }
   if (input.previousFinalResponse !== undefined) {
     const handoff = createTeamHandoff(input.previousFinalResponse);
     const content = handoff.text.length > 0 ? handoff.text : "[empty final response]";
@@ -569,6 +576,7 @@ export interface TeamStepExecutionInput {
   stepId: string;
   plannedAgentId: string;
   previousFinalResponse?: string;
+  inputArtifacts?: PersistedAssignmentArtifactRecord[];
 }
 
 export async function* executeTeamStep(
@@ -584,6 +592,7 @@ export async function* executeTeamStep(
     step: step.snapshot,
     objective: input.run.objective,
     previousFinalResponse: input.previousFinalResponse,
+    inputArtifacts: input.inputArtifacts,
   });
   const launch = step.snapshot.resolvedLaunch;
   await dependencies.createAgent({
