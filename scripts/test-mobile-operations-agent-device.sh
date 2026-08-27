@@ -265,20 +265,16 @@ fi
 # Expo's development-client shell has platform- and runtime-dependent prompts.
 # Reuse the repository's conditional Maestro choreography before the strict
 # Agent Device replay starts asserting product state.
-DEV_CLIENT_RESULT="$(
-  AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" replay \
-    "${DEV_CLIENT_FLOW}" \
-    --maestro \
-    "${TARGET_ARGS[@]}" \
-    --metro-host "${DEVICE_HOST}" \
-    --metro-port "${METRO_PORT}" \
-    --timeout 180000 \
-    --json
-)"
-printf '%s\n' "${DEV_CLIENT_RESULT}"
+AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" replay \
+  "${DEV_CLIENT_FLOW}" \
+  --maestro \
+  "${TARGET_ARGS[@]}" \
+  --metro-host "${DEVICE_HOST}" \
+  --metro-port "${METRO_PORT}" \
+  --timeout 180000
 
 DEV_CLIENT_SESSION="$(
-  printf '%s' "${DEV_CLIENT_RESULT}" | node -e '
+  AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" session list --json | node -e '
     let input = "";
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", (chunk) => {
@@ -286,11 +282,20 @@ DEV_CLIENT_SESSION="$(
     });
     process.stdin.on("end", () => {
       const result = JSON.parse(input);
-      const session = result.data?.session;
-      if (typeof session !== "string" || session.length === 0) {
-        throw new Error("Agent Device replay did not return a session ID.");
+      const sessions = result.data?.sessions;
+      const replaySessions = Array.isArray(sessions)
+        ? sessions.filter(
+            (session) =>
+              typeof session.name === "string" &&
+              (session.name === "default" || session.name.endsWith(":default")),
+          )
+        : [];
+      if (replaySessions.length !== 1) {
+        throw new Error(
+          `Expected one Agent Device replay session, found ${replaySessions.length}.`,
+        );
       }
-      process.stdout.write(session);
+      process.stdout.write(replaySessions[0].name);
     });
   '
 )"
