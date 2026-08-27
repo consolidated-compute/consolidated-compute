@@ -273,6 +273,10 @@ AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" replay \
   --metro-port "${METRO_PORT}" \
   --timeout 180000
 
+# Maestro replay keeps its default session active so callers can continue it.
+# The matrix runner owns a fresh test session instead, so release the device.
+AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" close --session default
+
 REPORTER_ARGS=(--reporter default)
 if [[ -n "${PASEO_MOBILE_E2E_JUNIT_PATH:-}" ]]; then
   mkdir -p "$(dirname "${PASEO_MOBILE_E2E_JUNIT_PATH}")"
