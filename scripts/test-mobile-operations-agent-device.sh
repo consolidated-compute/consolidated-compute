@@ -235,6 +235,11 @@ AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" boot "${BOOT_ARGS[@]
 if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
   RESET_DEVICE_SETTINGS=1
   if [[ "${PLATFORM}" == "ios" ]]; then
+    # Current simctl runtimes omit the notifications service. Resetting all
+    # permissions by bundle ID preserves the fresh-prompt contract without
+    # relying on Agent Device's unavailable notifications-only command.
+    PRIVACY_DEVICE="${DEVICE:-booted}"
+    xcrun simctl privacy "${PRIVACY_DEVICE}" reset all "${APP_ID}"
     xcrun simctl ui booted content_size accessibility-extra-extra-extra-large
   else
     if ! command -v adb >/dev/null 2>&1; then

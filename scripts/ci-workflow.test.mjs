@@ -13,6 +13,7 @@ const operationsMobileRunnerPath = new URL(
   "scripts/test-mobile-operations-agent-device.sh",
   repoRoot,
 );
+const operationsMatrixRunnerPath = new URL("scripts/run-mobile-operations-matrix.sh", repoRoot);
 const iosOperationsReplayPath = new URL(
   "packages/app/e2e/mobile/operations-agent-device/operations-matrix.ios.ad",
   repoRoot,
@@ -165,6 +166,7 @@ test("mobile Operations, Visual, and Teams keep native device jobs off pull requ
 
   assert.match(validation, /bash -n scripts\/test-mobile-agent-device\.sh/);
   assert.match(validation, /bash -n scripts\/test-mobile-operations-agent-device\.sh/);
+  assert.match(validation, /bash -n scripts\/run-mobile-operations-matrix\.sh/);
   assert.match(validation, /node --test scripts\/ci-workflow\.test\.mjs/);
   assert.doesNotMatch(validation, /setup-node|npm ci|expo|gradle|xcodebuild|agent-device test/);
 
@@ -199,6 +201,7 @@ test("mobile Operations, Visual, and Teams stay isolated from the upstream runne
   assert.match(operationsRunner, /\.dev\/teams-agent-device-e2e/);
   assert.match(operationsRunner, /\.dev\/teams-agent-device-artifacts/);
   assert.match(operationsRunner, /DEFAULT_METRO_PORT=8084/);
+  assert.match(operationsRunner, /simctl privacy "\$\{PRIVACY_DEVICE\}" reset all "\$\{APP_ID\}"/);
   assert.match(operationsRunner, /EXPO_PUBLIC_PASEO_E2E_VISUAL_MOTION_PROBE=1/);
   assert.match(
     operationsRunner,
@@ -211,10 +214,13 @@ test("mobile Operations replays keep one cross-platform contract", () => {
   const iosReplay = readFileSync(iosOperationsReplayPath, "utf8");
   const androidReplay = readFileSync(androidOperationsReplayPath, "utf8");
   const normalizePlatform = (source) =>
-    source.replace(/^context platform=(ios|android)/, "context platform=native");
+    source
+      .replace(/^context platform=(ios|android)/, "context platform=native")
+      .replace(/^settings permission reset notifications\n/m, "");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
-  assert.match(iosReplay, /settings permission reset notifications/);
+  assert.doesNotMatch(iosReplay, /settings permission reset notifications/);
+  assert.match(androidReplay, /settings permission reset notifications/);
   assert.match(iosReplay, /alert wait 45000\nalert dismiss/);
   assert.match(iosReplay, /wait "id=\\"menu-button\\"" 45000/);
 });
@@ -225,9 +231,12 @@ test("mobile Visual replays keep one cross-platform accessibility contract", () 
   const normalizePlatform = (source) =>
     source
       .replace(/^context platform=(ios|android)/, "context platform=native")
+      .replace(/^settings permission reset notifications\n/m, "")
       .replace(/^settings animations off\n/m, "");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
+  assert.doesNotMatch(iosReplay, /settings permission reset notifications/);
+  assert.match(androidReplay, /settings permission reset notifications/);
   assert.match(iosReplay, /open "\$\{APP_ID\}" "paseo:\/\/visual" --relaunch/);
   assert.doesNotMatch(iosReplay, /settings animations off/);
   assert.match(androidReplay, /settings animations off/);
@@ -249,9 +258,13 @@ test("mobile Teams replays keep one cross-platform run contract", () => {
   const iosReplay = readFileSync(iosTeamsReplayPath, "utf8");
   const androidReplay = readFileSync(androidTeamsReplayPath, "utf8");
   const normalizePlatform = (source) =>
-    source.replace(/^context platform=(ios|android)/, "context platform=native");
+    source
+      .replace(/^context platform=(ios|android)/, "context platform=native")
+      .replace(/^settings permission reset notifications\n/m, "");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
+  assert.doesNotMatch(iosReplay, /settings permission reset notifications/);
+  assert.match(androidReplay, /settings permission reset notifications/);
   assert.match(iosReplay, /team-detail-\$\{PRIMARY_SERVER_ID\}-\$\{PRIMARY_TEAM_ID\}/);
   assert.match(iosReplay, /orientation landscape-left/);
   assert.match(iosReplay, /home\nopen "\$\{APP_ID\}"/);
@@ -263,6 +276,7 @@ test("mobile Teams replays keep one cross-platform run contract", () => {
 
 test("mobile Operations, Visual, and Teams reuse native development apps", () => {
   const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
+  const matrixRunner = readFileSync(operationsMatrixRunnerPath, "utf8");
 
   assert.match(source, /actions\/cache\/restore@[a-f0-9]{40}/);
   assert.match(source, /actions\/cache\/save@[a-f0-9]{40}/);
@@ -273,21 +287,27 @@ test("mobile Operations, Visual, and Teams reuse native development apps", () =>
   assert.match(source, /-PreactNativeArchitectures=x86_64/);
   assert.match(source, /packages\/expo-two-way-audio\/ios\/\*\*/);
   assert.match(source, /packages\/expo-two-way-audio\/android\/\*\*/);
-  assert.match(source, /npm run test:e2e:mobile:operations/);
-  assert.match(source, /npm run test:e2e:mobile:visual/);
-  assert.match(source, /npm run test:e2e:mobile:teams/);
-  assert.match(source, /EVIDENCE_ROOT\/operations/);
-  assert.match(source, /EVIDENCE_ROOT\/visual/);
-  assert.match(source, /EVIDENCE_ROOT\/teams/);
+  assert.match(source, /bash scripts\/run-mobile-operations-matrix\.sh/);
+  assert.match(matrixRunner, /npm run "test:e2e:mobile:\$\{surface\}"/);
+  assert.match(matrixRunner, /run_surface operations/);
+  assert.match(matrixRunner, /run_surface visual/);
+  assert.match(matrixRunner, /run_surface teams/);
+  assert.match(matrixRunner, /EVIDENCE_ROOT\}\/\$\{surface\}/);
   assert.doesNotMatch(source, /hashFiles\('\.github\/workflows\/mobile-operations\.yml'/);
 });
 
 test("mobile Operations, Visual, and Teams bound Android replay resources", () => {
   const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
+  const matrixRunner = readFileSync(operationsMatrixRunnerPath, "utf8");
 
   assert.match(source, /ram-size: 2048M/);
   assert.match(source, /heap-size: 512M/);
-  assert.equal(source.match(/NODE_OPTIONS=--max-old-space-size=2048/g)?.length, 3);
+  assert.match(
+    source,
+    /script: \|\n\s+adb install -r[^\n]+\n\s+bash scripts\/run-mobile-operations-matrix\.sh/,
+  );
+  assert.doesNotMatch(source, /NODE_OPTIONS=--max-old-space-size=2048 \\/);
+  assert.equal(matrixRunner.match(/NODE_OPTIONS=--max-old-space-size=2048/g)?.length, 1);
 });
 
 test("fork delivery and write-back jobs stay quarantined", () => {

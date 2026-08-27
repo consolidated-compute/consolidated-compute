@@ -13,6 +13,7 @@ on:
       - "scripts/mobile-operations-fixture.ts"
       - "scripts/test-mobile-agent-device.sh"
       - "scripts/test-mobile-operations-agent-device.sh"
+      - "scripts/run-mobile-operations-matrix.sh"
       - "packages/app/app.config.js"
       - "packages/app/native-release-version.js"
       - "packages/app/plugins/**"
@@ -54,6 +55,7 @@ jobs:
         run: |
           bash -n scripts/test-mobile-agent-device.sh
           bash -n scripts/test-mobile-operations-agent-device.sh
+          bash -n scripts/run-mobile-operations-matrix.sh
           node --test scripts/ci-workflow.test.mjs
 
   ios:
@@ -137,25 +139,7 @@ jobs:
           PASEO_MOBILE_E2E_PLATFORM: ios
           PASEO_MOBILE_E2E_DEVICE: ${{ env.IOS_UDID }}
           EVIDENCE_ROOT: ${{ runner.temp }}/mobile-operations-visual-teams-ios
-        run: |
-          set +e
-          PASEO_MOBILE_E2E_ARTIFACTS_DIR="$EVIDENCE_ROOT/operations" \
-            PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/operations/junit.xml" \
-            npm run test:e2e:mobile:operations
-          operations_status=$?
-          PASEO_MOBILE_E2E_ARTIFACTS_DIR="$EVIDENCE_ROOT/visual" \
-            PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/visual/junit.xml" \
-            npm run test:e2e:mobile:visual
-          visual_status=$?
-          PASEO_MOBILE_E2E_ARTIFACTS_DIR="$EVIDENCE_ROOT/teams" \
-            PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/teams/junit.xml" \
-            npm run test:e2e:mobile:teams
-          teams_status=$?
-          set -e
-          if [[ "$operations_status" -ne 0 || "$visual_status" -ne 0 || "$teams_status" -ne 0 ]]; then
-            echo "Native matrix failed: operations=$operations_status visual=$visual_status teams=$teams_status" >&2
-            exit 1
-          fi
+        run: bash scripts/run-mobile-operations-matrix.sh
 
       - name: Upload iOS evidence
         if: ${{ always() }}
@@ -234,27 +218,7 @@ jobs:
           disable-animations: true
           script: |
             adb install -r .dev/mobile-build-cache/android/app-debug.apk
-            set +e
-            NODE_OPTIONS=--max-old-space-size=2048 \
-              PASEO_MOBILE_E2E_ARTIFACTS_DIR="$EVIDENCE_ROOT/operations" \
-              PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/operations/junit.xml" \
-              npm run test:e2e:mobile:operations
-            operations_status=$?
-            NODE_OPTIONS=--max-old-space-size=2048 \
-              PASEO_MOBILE_E2E_ARTIFACTS_DIR="$EVIDENCE_ROOT/visual" \
-              PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/visual/junit.xml" \
-              npm run test:e2e:mobile:visual
-            visual_status=$?
-            NODE_OPTIONS=--max-old-space-size=2048 \
-              PASEO_MOBILE_E2E_ARTIFACTS_DIR="$EVIDENCE_ROOT/teams" \
-              PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/teams/junit.xml" \
-              npm run test:e2e:mobile:teams
-            teams_status=$?
-            set -e
-            if [[ "$operations_status" -ne 0 || "$visual_status" -ne 0 || "$teams_status" -ne 0 ]]; then
-              echo "Native matrix failed: operations=$operations_status visual=$visual_status teams=$teams_status" >&2
-              exit 1
-            fi
+            bash scripts/run-mobile-operations-matrix.sh
 
       - name: Upload Android evidence
         if: ${{ always() }}
