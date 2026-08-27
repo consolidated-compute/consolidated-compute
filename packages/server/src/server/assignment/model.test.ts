@@ -16,7 +16,11 @@ import {
 const timestamp = "2026-08-27T12:00:00.000Z";
 const laterTimestamp = "2026-08-27T13:00:00.000Z";
 
-function createAssignment(): PersistedAssignmentRecord {
+type AssignmentFixture = PersistedAssignmentRecord & {
+  workItem: NonNullable<PersistedAssignmentRecord["workItem"]>;
+};
+
+function createAssignment(): AssignmentFixture {
   return {
     id: "asgn_0123456789abcdef",
     revision: 3,
@@ -86,7 +90,6 @@ describe("Assignment contract", () => {
     const mirrored = PersistedAssignmentRecordSchema.safeParse(withTrackerState);
 
     expect(mirrored.success).toBe(false);
-    if (!assignment.workItem) return;
     const nonHttp = PersistedAssignmentRecordSchema.safeParse({
       ...assignment,
       workItem: { ...assignment.workItem, url: "file:///tmp/issue.json" },
