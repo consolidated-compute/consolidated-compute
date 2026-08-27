@@ -40,7 +40,7 @@ An Artifact is immutable and append-only. It records:
 - the producing Team Run, step, role, agent, and optional provider turn;
 - creation time and UTF-8 inclusion/truncation facts.
 
-Artifact content is nonempty and capped at 32 KiB of UTF-8. Truncation never splits a code point and records the original and included byte counts. Corrections create another Artifact. Artifact creation does not increment the Assignment revision.
+Artifact content is nonempty and capped at 32 KiB of UTF-8. Truncation never splits a code point and records the original and included byte counts. A step prompt accepts at most 32 KiB total Artifact content. Corrections create another Artifact. Artifact creation does not increment the Assignment revision.
 
 Kinds such as `plan`, `research`, `implementation_summary`, `review`, `test_result`, `decision`, and `approval` are conventions, not a closed enum. Consumers must display unknown kinds.
 

@@ -5,6 +5,7 @@ import type { Logger } from "pino";
 import type { AgentRunCancellationResult } from "../agent/agent-manager.js";
 import type { CreateAgentFromMcpInput } from "../agent/create-agent/create.js";
 import type { AssignmentRepository } from "../assignment/repository.js";
+import type { PersistedAssignmentArtifactRecord } from "../assignment/model.js";
 import type { WorkspaceMutation, WorkspaceTerminationBoundary } from "../workspace-registry.js";
 import {
   executeTeamStep,
@@ -33,6 +34,7 @@ import {
   TeamRunNotFoundError,
   type TeamRunUpdate,
 } from "./repository.js";
+import { materializeTeamStepArtifact, resolveTeamStepInputArtifacts } from "./artifacts.js";
 
 type TeamRunStep = PersistedTeamRunRecord["steps"][number];
 type TeamRunTerminationReason = "cancel" | "workspace" | "shutdown";
@@ -345,6 +347,11 @@ export class TeamRunService {
     if (!this.acceptingStarts) throw new TeamRunServiceShuttingDownError();
   }
 
+  private requireAssignmentRepository(): AssignmentRepository {
+    if (!this.assignmentRepository) throw new TeamAssignmentRepositoryUnavailableError();
+    return this.assignmentRepository;
+  }
+
   private serializeAdmission<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.admissionTail.then(operation, operation);
     this.admissionTail = result.then(
@@ -462,9 +469,22 @@ export class TeamRunService {
       if (!active) {
         throw new Error(`Active Team Run ${run.id} has no active workflow step`);
       }
-      const outcome = await this.executeStep(run, active, previousFinalResponse);
+      const inputArtifacts =
+        run.assignmentId === undefined
+          ? undefined
+          : await resolveTeamStepInputArtifacts(
+              this.requireAssignmentRepository(),
+              run,
+              active.index,
+            );
+      const outcome = await this.executeStep(
+        run,
+        active,
+        run.assignmentId === undefined ? previousFinalResponse : undefined,
+        inputArtifacts,
+      );
       if (outcome.status === "terminal") return;
-      previousFinalResponse = outcome.finalResponse;
+      if (run.assignmentId === undefined) previousFinalResponse = outcome.finalResponse;
       run = await this.requireRun(runId);
     }
   }
@@ -490,6 +510,7 @@ export class TeamRunService {
     run: PersistedTeamRunRecord,
     active: ActiveStep,
     previousFinalResponse: string | undefined,
+    inputArtifacts: PersistedAssignmentArtifactRecord[] | undefined,
   ): Promise<StepExecutionOutcome> {
     if (active.step.state.status === "stopping" && active.step.state.agentId === null) {
       await this.finishTermination(run.id, this.terminationRequests.get(run.id) ?? "cancel");
@@ -512,6 +533,7 @@ export class TeamRunService {
         stepId: active.step.snapshot.stepId,
         plannedAgentId: active.step.state.plannedAgentId,
         previousFinalResponse,
+        inputArtifacts,
       },
     )[Symbol.asyncIterator]();
     let agentCreated = false;
@@ -577,7 +599,12 @@ export class TeamRunService {
       return { agentCreated: false, outcome: null };
     }
     if (event.type === "turn_completed") {
-      const outcome = await this.completeStep(runId, stepIndex, event.finalResponse);
+      const outcome = await this.completeStep(
+        runId,
+        stepIndex,
+        event.finalResponse,
+        event.turnId ?? null,
+      );
       return { agentCreated: false, outcome };
     }
     if (event.type === "turn_failed") {
@@ -733,10 +760,38 @@ export class TeamRunService {
     runId: string,
     stepIndex: number,
     finalResponse: string,
+    turnId: string | null,
   ): Promise<StepExecutionOutcome> {
-    const nextPlannedAgentId = this.createAgentId();
     const current = await this.requireRun(runId);
     return this.withWorkspaceOperation(current.workspace.workspaceId, async () => {
+      const beforeCompletion = await this.requireRun(runId);
+      if (isTerminalTeamRunStatus(beforeCompletion.state.status)) {
+        return { status: "terminal" };
+      }
+      const currentStep = beforeCompletion.steps[stepIndex];
+      if (!currentStep || currentStep.state.status === "succeeded") {
+        return { status: "terminal" };
+      }
+      if (!("agentId" in currentStep.state) || currentStep.state.agentId === null) {
+        return { status: "terminal" };
+      }
+      const requestedReason = this.requestedTerminationReason(beforeCompletion);
+      if (requestedReason) {
+        const timestamp = this.timestamp();
+        await this.repository.updateRun(runId, (run) =>
+          terminationRunUpdate(run, requestedReason, timestamp),
+        );
+        return { status: "terminal" };
+      }
+      if (beforeCompletion.assignmentId !== undefined) {
+        await materializeTeamStepArtifact(this.requireAssignmentRepository(), {
+          run: beforeCompletion,
+          stepIndex,
+          finalResponse,
+          turnId,
+        });
+      }
+
       let advanced = false;
       const timestamp = this.timestamp();
       await this.repository.updateRun(runId, (run) => {
@@ -773,6 +828,7 @@ export class TeamRunService {
         }
 
         advanced = true;
+        const nextPlannedAgentId = this.createAgentId();
         const steps = replaceStep(run.steps, stepIndex, succeededStep);
         steps[stepIndex + 1] = {
           ...nextStep,
@@ -787,7 +843,10 @@ export class TeamRunService {
           state: { status: "running", startedAt: requireRunStartedAt(run) },
         };
       });
-      return advanced ? { status: "next", finalResponse } : { status: "terminal" };
+      if (!advanced) return { status: "terminal" };
+      return beforeCompletion.assignmentId === undefined
+        ? { status: "next", finalResponse }
+        : { status: "next" };
     });
   }
 
