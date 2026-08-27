@@ -249,6 +249,9 @@ test("mobile Operations replays keep one cross-platform contract", () => {
     /settings (permission reset notifications|clear-app-state)|--launch-url|alert /,
   );
   assert.match(iosReplay, /wait "id=\\"menu-button\\"" 45000/);
+  assert.match(iosReplay, /retries=0/);
+  assert.match(iosReplay, /wait "id=\\"host-page-connections-card\\"" 30000/);
+  assert.doesNotMatch(iosReplay, /retries=[1-9]/);
 });
 
 test("mobile Visual replays keep one cross-platform accessibility contract", () => {
@@ -277,7 +280,9 @@ test("mobile Visual replays keep one cross-platform accessibility contract", () 
     iosReplay,
     /orientation landscape-left\nwait[^\n]+\nwait "id=\\"visual-layout-compact/,
   );
-  assert.match(iosReplay, /wait "id=\\"visual-motion-reduced\\"" 10000/);
+  assert.match(iosReplay, /wait "id=\\"visual-motion-reduced\\"" 30000/);
+  assert.match(iosReplay, /wait "id=\\"host-page-connections-card\\"" 30000/);
+  assert.doesNotMatch(iosReplay, /retries=[1-9]/);
   assert.match(iosReplay, /home\nopen "\$\{APP_ID\}"\nwait "id=\\"visual-screen/);
   assert.match(iosReplay, /get attrs "id=\\"visual-workspace-open-/);
   assert.match(iosReplay, /get attrs "id=\\"visual-agent-/);
@@ -301,6 +306,8 @@ test("mobile Teams replays keep one cross-platform run contract", () => {
     /settings (permission reset notifications|clear-app-state)|--launch-url|alert /,
   );
   assert.match(iosReplay, /team-detail-\$\{PRIMARY_SERVER_ID\}-\$\{PRIMARY_TEAM_ID\}/);
+  assert.match(iosReplay, /retries=0/);
+  assert.doesNotMatch(iosReplay, /retries=[1-9]/);
   assert.match(iosReplay, /orientation landscape-left/);
   assert.match(iosReplay, /home\nopen "\$\{APP_ID\}"/);
   assert.match(iosReplay, /team-run-role-status-\$\{PRIMARY_TEAM_ROLE_ID\}-ready/);

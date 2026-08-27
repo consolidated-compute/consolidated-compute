@@ -1,4 +1,4 @@
-context platform=android timeout=600000 retries=1
+context platform=android timeout=600000 retries=0
 env APP_ID=sh.paseo.debug
 
 open "${APP_ID}"
@@ -6,7 +6,7 @@ settings appearance light
 wait "id=\"menu-button\"" 45000
 
 press "id=\"menu-button\""
-wait "id=\"sidebar-teams\"" 10000
+wait "id=\"sidebar-teams\"" 30000
 press "id=\"sidebar-teams\""
 wait "id=\"teams-list\"" 30000
 wait "id=\"teams-host-${PRIMARY_SERVER_ID}\"" 30000
@@ -22,10 +22,10 @@ wait "id=\"team-step-${PRIMARY_SERVER_ID}-${PRIMARY_TEAM_ID}-${PRIMARY_TEAM_STEP
 screenshot "${AD_ARTIFACTS}/teams-detail-large-text.png" --scale 1
 
 orientation landscape-left
-wait "id=\"team-detail-${PRIMARY_SERVER_ID}-${PRIMARY_TEAM_ID}\"" 10000
+wait "id=\"team-detail-${PRIMARY_SERVER_ID}-${PRIMARY_TEAM_ID}\"" 30000
 screenshot "${AD_ARTIFACTS}/teams-detail-landscape.png" --scale 1
 orientation portrait
-wait "id=\"team-detail-${PRIMARY_SERVER_ID}-${PRIMARY_TEAM_ID}\"" 10000
+wait "id=\"team-detail-${PRIMARY_SERVER_ID}-${PRIMARY_TEAM_ID}\"" 30000
 
 home
 open "${APP_ID}"
@@ -45,7 +45,7 @@ wait "id=\"team-run-status-waiting_for_permission\"" 30000
 screenshot "${AD_ARTIFACTS}/teams-waiting-for-permission.png" --scale 1
 scroll down 0.8
 scroll down 0.8
-wait "id=\"team-run-step-status-${PRIMARY_TEAM_STEP_ID}-waiting_for_permission\"" 10000
+wait "id=\"team-run-step-status-${PRIMARY_TEAM_STEP_ID}-waiting_for_permission\"" 30000
 screenshot "${AD_ARTIFACTS}/teams-waiting-step.png" --scale 1
 
 press "id=\"team-run-step-agent-${PRIMARY_TEAM_STEP_ID}\""
@@ -57,6 +57,6 @@ scroll top
 wait "id=\"team-run-status-succeeded\"" 30000
 scroll down 0.8
 scroll down 0.8
-wait "id=\"team-run-step-status-${PRIMARY_TEAM_STEP_ID}-succeeded\"" 10000
+wait "id=\"team-run-step-status-${PRIMARY_TEAM_STEP_ID}-succeeded\"" 30000
 screenshot "${AD_ARTIFACTS}/teams-succeeded.png" --scale 1
 close

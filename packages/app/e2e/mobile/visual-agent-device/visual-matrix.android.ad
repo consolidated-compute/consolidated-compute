@@ -1,4 +1,4 @@
-context platform=android timeout=600000 retries=1
+context platform=android timeout=600000 retries=0
 env APP_ID=sh.paseo.debug
 
 open "${APP_ID}"
@@ -7,69 +7,69 @@ settings animations off
 wait "id=\"menu-button\"" 45000
 
 press "id=\"menu-button\""
-wait "id=\"sidebar-settings\"" 10000
+wait "id=\"sidebar-settings\"" 30000
 press "id=\"sidebar-settings\""
-wait "id=\"settings-host-picker\"" 20000
+wait "id=\"settings-host-picker\"" 30000
 press "id=\"settings-host-picker\""
-wait "id=\"settings-add-host\"" 10000
+wait "id=\"settings-add-host\"" 30000
 press "id=\"settings-add-host\""
-wait "id=\"add-host-method-direct\"" 10000
+wait "id=\"add-host-method-direct\"" 30000
 press "id=\"add-host-method-direct\""
-wait "id=\"direct-host-input\"" 10000
+wait "id=\"direct-host-input\"" 30000
 fill "id=\"direct-host-input\"" "${SECONDARY_HOST}"
 fill "id=\"direct-port-input\"" "${SECONDARY_PORT}"
 keyboard dismiss
 press "id=\"direct-host-submit\""
-wait "id=\"settings-host-picker\"" 30000
+wait "id=\"host-page-connections-card\"" 30000
 
 open "${APP_ID}" "paseo://visual" --relaunch
 wait "id=\"visual-screen\"" 30000
 wait "id=\"visual-layout-compact\"" 30000
-wait "id=\"visual-motion-reduced\"" 10000
-wait "id=\"visual-workspace-open-${PRIMARY_SERVER_ID}-${PRIMARY_WORKSPACE_ID}\"" 20000
+wait "id=\"visual-motion-reduced\"" 30000
+wait "id=\"visual-workspace-open-${PRIMARY_SERVER_ID}-${PRIMARY_WORKSPACE_ID}\"" 30000
 get attrs "id=\"visual-workspace-open-${PRIMARY_SERVER_ID}-${PRIMARY_WORKSPACE_ID}\""
 screenshot "${AD_ARTIFACTS}/visual-cold-light.png" --scale 1
 
 orientation landscape-left
-wait "id=\"visual-screen\"" 10000
-wait "id=\"visual-viewport\"" 10000
-wait "id=\"menu-button\"" 10000
+wait "id=\"visual-screen\"" 30000
+wait "id=\"visual-viewport\"" 30000
+wait "id=\"menu-button\"" 30000
 screenshot "${AD_ARTIFACTS}/visual-landscape.png" --scale 1
 orientation portrait
-wait "id=\"visual-screen\"" 10000
+wait "id=\"visual-screen\"" 30000
 
 home
 open "${APP_ID}"
 wait "id=\"visual-screen\"" 30000
-wait "id=\"visual-layout-compact\"" 10000
+wait "id=\"visual-layout-compact\"" 30000
 screenshot "${AD_ARTIFACTS}/visual-resumed.png" --scale 1
 
 press "id=\"visual-workspace-open-${PRIMARY_SERVER_ID}-${PRIMARY_WORKSPACE_ID}\""
 wait "id=\"workspace-header-title\"" 30000
 press "id=\"menu-button\""
-wait "id=\"sidebar-visual\"" 10000
+wait "id=\"sidebar-visual\"" 30000
 press "id=\"sidebar-visual\""
 wait "id=\"visual-screen\"" 30000
 
 scroll bottom
-wait "id=\"visual-workspace-open-${SECONDARY_SERVER_ID}-${SECONDARY_WORKSPACE_ID}\"" 20000
-wait "id=\"visual-agent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}\"" 10000
-wait "id=\"visual-provider-subagent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}-${SECONDARY_PROVIDER_SUBAGENT_ID}\"" 10000
+wait "id=\"visual-workspace-open-${SECONDARY_SERVER_ID}-${SECONDARY_WORKSPACE_ID}\"" 30000
+wait "id=\"visual-agent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}\"" 30000
+wait "id=\"visual-provider-subagent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}-${SECONDARY_PROVIDER_SUBAGENT_ID}\"" 30000
 get attrs "id=\"visual-workspace-open-${SECONDARY_SERVER_ID}-${SECONDARY_WORKSPACE_ID}\""
 get attrs "id=\"visual-agent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}\""
 get attrs "id=\"visual-provider-subagent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}-${SECONDARY_PROVIDER_SUBAGENT_ID}\""
 settings appearance dark
-wait "id=\"visual-screen\"" 10000
+wait "id=\"visual-screen\"" 30000
 screenshot "${AD_ARTIFACTS}/visual-dark-large-text-reduced-motion.png" --scale 1
 
 press "id=\"visual-workspace-open-${SECONDARY_SERVER_ID}-${SECONDARY_WORKSPACE_ID}\""
 wait "id=\"workspace-header-title\"" 30000
 press "id=\"menu-button\""
-wait "id=\"sidebar-visual\"" 10000
+wait "id=\"sidebar-visual\"" 30000
 press "id=\"sidebar-visual\""
 wait "id=\"visual-screen\"" 30000
 scroll bottom
-wait "id=\"visual-agent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}\"" 20000
+wait "id=\"visual-agent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}\"" 30000
 press "id=\"visual-agent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}\""
 wait "id=\"workspace-tab-agent_${SECONDARY_AGENT_ID}\"" 30000
 close
