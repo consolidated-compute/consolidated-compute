@@ -1,12 +1,5 @@
 appId: ${APP_ID}
 ---
-- launchApp:
-    appId: ${APP_ID}
-    clearState: true
-    stopApp: true
-
-- openLink: ${DEV_CLIENT_URL}
-
 - runFlow:
     when:
       visible: "Open in.*Consolidated Compute.*\\?"

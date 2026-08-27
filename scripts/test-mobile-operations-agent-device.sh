@@ -267,8 +267,26 @@ if [[ "${PLATFORM}" == "ios" ]]; then
 fi
 
 # Expo's development-client shell has platform- and runtime-dependent prompts.
-# Reuse the repository's conditional Maestro choreography before the strict
-# Agent Device replay starts asserting product state.
+# Clear and deep-link the app explicitly so Android never routes launch through
+# Quickstep. Maestro owns only the conditional development-client prompts before
+# the strict Agent Device replay starts asserting product state.
+DEV_CLIENT_LAUNCH_SESSION="${MATRIX_SURFACE}-dev-client-launch-${PLATFORM}"
+if [[ "${PLATFORM}" == "android" ]]; then
+  adb shell am force-stop com.android.launcher3 >/dev/null 2>&1 || true
+fi
+AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" settings clear-app-state \
+  "${APP_ID}" \
+  "${TARGET_ARGS[@]}"
+AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" open \
+  "${APP_ID}" \
+  "${AD_VAR_DEV_CLIENT_URL}" \
+  --session "${DEV_CLIENT_LAUNCH_SESSION}" \
+  "${TARGET_ARGS[@]}" \
+  --metro-host "${DEVICE_HOST}" \
+  --metro-port "${METRO_PORT}"
+AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" close \
+  --session "${DEV_CLIENT_LAUNCH_SESSION}"
+
 DEV_CLIENT_REPLAY_LOG="${ARTIFACTS_DIR}/dev-client-replay.log"
 CAPTURE_AGENT_DEVICE_SESSIONS=1
 AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" replay \

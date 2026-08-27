@@ -707,10 +707,14 @@ export async function renameExplorerEntry({
       }
       throw error;
     });
-    if (
-      targetStats &&
-      (targetStats.dev !== sourceStats.dev || targetStats.ino !== sourceStats.ino)
-    ) {
+    let targetIsSource = false;
+    if (targetStats) {
+      targetIsSource =
+        process.platform === "win32"
+          ? (await fs.realpath(source.requestedPath)) === (await fs.realpath(targetPath))
+          : targetStats.dev === sourceStats.dev && targetStats.ino === sourceStats.ino;
+    }
+    if (targetStats && !targetIsSource) {
       return { status: "error", error: `"${trimmedName}" already exists` };
     }
 

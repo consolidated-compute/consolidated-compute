@@ -14,6 +14,7 @@ on:
       - "scripts/test-mobile-agent-device.sh"
       - "scripts/test-mobile-operations-agent-device.sh"
       - "scripts/run-mobile-operations-matrix.sh"
+      - "packages/app/e2e/mobile/native-matrix-dev-client.yaml"
       - "packages/app/app.config.js"
       - "packages/app/native-release-version.js"
       - "packages/app/plugins/**"

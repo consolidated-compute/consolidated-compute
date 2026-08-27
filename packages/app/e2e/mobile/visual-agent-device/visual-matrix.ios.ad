@@ -19,7 +19,7 @@ scroll down 0.2
 fill "id=\"direct-host-input\"" "${SECONDARY_HOST}"
 fill "id=\"direct-port-input\"" "${SECONDARY_PORT}"
 keyboard dismiss
-scroll bottom
+scroll down 0.3
 wait "id=\"direct-host-submit\"" 30000
 press "id=\"direct-host-submit\""
 wait "id=\"host-page-connections-card\"" 30000

@@ -173,6 +173,7 @@ test("mobile Operations, Visual, and Teams keep native device jobs off pull requ
   assert.match(validation, /bash -n scripts\/run-mobile-operations-matrix\.sh/);
   assert.match(validation, /node --test scripts\/ci-workflow\.test\.mjs/);
   assert.doesNotMatch(validation, /setup-node|npm ci|expo|gradle|xcodebuild|agent-device test/);
+  assert.match(source, /packages\/app\/e2e\/mobile\/native-matrix-dev-client\.yaml/);
 
   for (const jobId of ["ios", "android"]) {
     const job = jobs.get(jobId)?.join("\n") ?? "";
@@ -214,6 +215,11 @@ test("mobile Operations, Visual, and Teams stay isolated from the upstream runne
   );
   assert.match(operationsRunner, /metro prepare[\s\S]*--no-reuse-existing/);
   assert.match(operationsRunner, /TARGET_ARGS\+=\(--serial "\$\{SERIAL\}"\)/);
+  assert.match(
+    operationsRunner,
+    /settings clear-app-state[\s\S]*"\$\{APP_ID\}"[\s\S]*open[\s\S]*"\$\{APP_ID\}"[\s\S]*"\$\{AD_VAR_DEV_CLIENT_URL\}"/,
+  );
+  assert.match(operationsRunner, /am force-stop com\.android\.launcher3/);
   assert.match(operationsRunner, /replay[\s\S]*DEV_CLIENT_FLOW[\s\S]*--maestro/);
   assert.match(operationsRunner, /DEV_CLIENT_REPLAY_LOG/);
   assert.match(operationsRunner, /CAPTURE_AGENT_DEVICE_SESSIONS=1/);
@@ -223,8 +229,7 @@ test("mobile Operations, Visual, and Teams stay isolated from the upstream runne
     operationsRunner,
     /replay[\s\S]*DEV_CLIENT_FLOW[\s\S]*close --session "\$\{DEV_CLIENT_SESSION\}"[\s\S]*test/,
   );
-  assert.match(devClientFlow, /clearState: true/);
-  assert.match(devClientFlow, /openLink: \$\{DEV_CLIENT_URL\}/);
+  assert.doesNotMatch(devClientFlow, /launchApp|openLink/);
   assert.match(devClientFlow, /visible: "Open in\.\*Consolidated Compute/);
   assert.match(devClientFlow, /visible: "Continue"/);
   assert.match(devClientFlow, /visible: "Go home"/);
@@ -241,7 +246,7 @@ test("mobile Operations replays keep one cross-platform contract", () => {
       .replace(/^context platform=(ios|android)/, "context platform=native")
       .replace(/^scroll down 0\.2\n(?=fill "id=\\"direct-host-input)/m, "")
       .replace(
-        /^scroll bottom\nwait "id=\\"direct-host-submit\\"" 30000\n(?=press "id=\\"direct-host-submit)/m,
+        /^scroll down 0\.3\nwait "id=\\"direct-host-submit\\"" 30000\n(?=press "id=\\"direct-host-submit)/m,
         "",
       );
 
@@ -259,8 +264,9 @@ test("mobile Operations replays keep one cross-platform contract", () => {
   assert.match(iosReplay, /wait "id=\\"host-page-connections-card\\"" 30000/);
   assert.match(iosReplay, /direct-host-input\\"" 30000\nscroll down 0\.2\nfill/);
   assert.doesNotMatch(androidReplay, /direct-host-input\\"" 30000\nscroll down/);
-  assert.match(iosReplay, /keyboard dismiss\nscroll bottom\nwait "id=\\"direct-host-submit/);
-  assert.doesNotMatch(androidReplay, /keyboard dismiss\nscroll bottom/);
+  assert.match(iosReplay, /keyboard dismiss\nscroll down 0\.3\nwait "id=\\"direct-host-submit/);
+  assert.doesNotMatch(iosReplay, /keyboard dismiss\nscroll bottom/);
+  assert.doesNotMatch(androidReplay, /keyboard dismiss\nscroll (?:bottom|down)/);
   assert.doesNotMatch(iosReplay, /workspace-tab-agent_/);
   assert.match(iosReplay, /wait "id=\\"message-input-root\\"" 30000/);
   assert.match(iosReplay, /get attrs "id=\\"operations-provider-subagent-/);
@@ -276,7 +282,7 @@ test("mobile Visual replays keep one cross-platform accessibility contract", () 
       .replace(/^settings animations off\n/m, "")
       .replace(/^scroll down 0\.2\n(?=fill "id=\\"direct-host-input)/m, "")
       .replace(
-        /^scroll bottom\nwait "id=\\"direct-host-submit\\"" 30000\n(?=press "id=\\"direct-host-submit)/m,
+        /^scroll down 0\.3\nwait "id=\\"direct-host-submit\\"" 30000\n(?=press "id=\\"direct-host-submit)/m,
         "",
       );
 
@@ -293,8 +299,9 @@ test("mobile Visual replays keep one cross-platform accessibility contract", () 
   assert.doesNotMatch(iosReplay, /paseo:\/\/visual" --relaunch/);
   assert.match(iosReplay, /direct-host-input\\"" 30000\nscroll down 0\.2\nfill/);
   assert.doesNotMatch(androidReplay, /direct-host-input\\"" 30000\nscroll down/);
-  assert.match(iosReplay, /keyboard dismiss\nscroll bottom\nwait "id=\\"direct-host-submit/);
-  assert.doesNotMatch(androidReplay, /keyboard dismiss\nscroll bottom/);
+  assert.match(iosReplay, /keyboard dismiss\nscroll down 0\.3\nwait "id=\\"direct-host-submit/);
+  assert.doesNotMatch(iosReplay, /keyboard dismiss\nscroll bottom/);
+  assert.doesNotMatch(androidReplay, /keyboard dismiss\nscroll (?:bottom|down)/);
   assert.doesNotMatch(iosReplay, /settings animations off/);
   assert.match(androidReplay, /settings animations off/);
   assert.match(iosReplay, /orientation landscape-left/);
@@ -319,7 +326,12 @@ test("mobile Teams replays keep one cross-platform run contract", () => {
   const iosReplay = readFileSync(iosTeamsReplayPath, "utf8");
   const androidReplay = readFileSync(androidTeamsReplayPath, "utf8");
   const normalizePlatform = (source) =>
-    source.replace(/^context platform=(ios|android)/, "context platform=native");
+    source
+      .replace(/^context platform=(ios|android)/, "context platform=native")
+      .replace(
+        /scroll down 0\.6\nwait "id=\\"team-(?:role|step)-[^\n]+\nscroll (?:down|up) 0\.6\nwait "id=\\"team-(?:role|step)-[^\n]+/,
+        "assert team detail structure",
+      );
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
   assert.doesNotMatch(
@@ -337,8 +349,14 @@ test("mobile Teams replays keep one cross-platform run contract", () => {
   assert.match(iosReplay, /home\nopen "\$\{APP_ID\}"/);
   assert.match(iosReplay, /team-run-role-status-\$\{PRIMARY_TEAM_ROLE_ID\}-ready/);
   assert.match(iosReplay, /team-run-status-waiting_for_permission/);
-  assert.match(iosReplay, /get attrs "id=\\"team-role-/);
-  assert.match(iosReplay, /get attrs "id=\\"team-step-/);
+  assert.match(
+    iosReplay,
+    /scroll down 0\.6\nwait "id=\\"team-step-[^\n]+\nscroll up 0\.6\nwait "id=\\"team-role-/,
+  );
+  assert.match(
+    androidReplay,
+    /scroll down 0\.6\nwait "id=\\"team-role-[^\n]+\nscroll down 0\.6\nwait "id=\\"team-step-/,
+  );
   assert.match(iosReplay, /team-run-cancel\\"" 30000\nscroll down 0\.8/);
   assert.match(iosReplay, /permission-request-accept/);
   assert.match(iosReplay, /team-run-status-succeeded/);

@@ -15,9 +15,10 @@ screenshot "${AD_ARTIFACTS}/teams-list-light.png" --scale 1
 
 press "id=\"team-row-${PRIMARY_SERVER_ID}-${PRIMARY_TEAM_ID}\""
 wait "id=\"team-detail-${PRIMARY_SERVER_ID}-${PRIMARY_TEAM_ID}\"" 30000
-get attrs "id=\"team-role-${PRIMARY_SERVER_ID}%3A${PRIMARY_TEAM_ID}-${PRIMARY_TEAM_ROLE_ID}\""
 scroll down 0.6
-get attrs "id=\"team-step-${PRIMARY_SERVER_ID}-${PRIMARY_TEAM_ID}-${PRIMARY_TEAM_STEP_ID}\""
+wait "id=\"team-role-${PRIMARY_SERVER_ID}%3A${PRIMARY_TEAM_ID}-${PRIMARY_TEAM_ROLE_ID}\"" 30000
+scroll down 0.6
+wait "id=\"team-step-${PRIMARY_SERVER_ID}-${PRIMARY_TEAM_ID}-${PRIMARY_TEAM_STEP_ID}\"" 30000
 screenshot "${AD_ARTIFACTS}/teams-detail-large-text.png" --scale 1
 
 orientation landscape-left
