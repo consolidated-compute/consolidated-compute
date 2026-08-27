@@ -1,4 +1,4 @@
-name: Mobile Operations and Visual
+name: Mobile Operations, Visual, and Teams
 
 on:
   workflow_dispatch:
@@ -17,14 +17,20 @@ on:
       - "packages/app/native-release-version.js"
       - "packages/app/plugins/**"
       - "packages/app/e2e/mobile/operations-agent-device/operations-matrix.*.ad"
+      - "packages/app/e2e/mobile/teams-agent-device/teams-matrix.*.ad"
       - "packages/app/e2e/mobile/visual-agent-device/visual-matrix.*.ad"
+      - "packages/app/e2e/support/helpers/agent-profiles.ts"
       - "packages/app/e2e/support/helpers/operations-*.ts"
+      - "packages/app/e2e/support/helpers/teams.ts"
       - "packages/app/src/components/headers/menu-header.tsx"
       - "packages/app/src/components/left-sidebar.tsx"
       - "packages/app/src/operations/**"
       - "packages/app/src/runtime/host-runtime.ts"
+      - "packages/app/src/teams/**"
       - "packages/expo-two-way-audio/**"
+      - "packages/protocol/src/team/**"
       - "packages/server/src/server/agent/providers/mock-load-test-agent.ts"
+      - "packages/server/src/server/team/**"
       - "patches/**"
 
 concurrency:
@@ -39,7 +45,7 @@ env:
 
 jobs:
   validate:
-    name: validate mobile Operations and Visual
+    name: validate mobile Operations, Visual, and Teams
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -51,11 +57,11 @@ jobs:
           node --test scripts/ci-workflow.test.mjs
 
   ios:
-    name: operations + visual (iOS)
+    name: operations + visual + teams (iOS)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: validate
     runs-on: macos-15
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -126,11 +132,11 @@ jobs:
           path: .dev/mobile-build-cache/ios/ConsolidatedComputeDebug.app
           key: ${{ steps.ios-app-cache.outputs.cache-primary-key }}
 
-      - name: Run the iOS Operations and Visual matrices
+      - name: Run the iOS Operations, Visual, and Teams matrices
         env:
           PASEO_MOBILE_E2E_PLATFORM: ios
           PASEO_MOBILE_E2E_DEVICE: ${{ env.IOS_UDID }}
-          EVIDENCE_ROOT: ${{ runner.temp }}/mobile-operations-visual-ios
+          EVIDENCE_ROOT: ${{ runner.temp }}/mobile-operations-visual-teams-ios
         run: |
           set +e
           PASEO_MOBILE_E2E_ARTIFACTS_DIR="$EVIDENCE_ROOT/operations" \
@@ -141,9 +147,13 @@ jobs:
             PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/visual/junit.xml" \
             npm run test:e2e:mobile:visual
           visual_status=$?
+          PASEO_MOBILE_E2E_ARTIFACTS_DIR="$EVIDENCE_ROOT/teams" \
+            PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/teams/junit.xml" \
+            npm run test:e2e:mobile:teams
+          teams_status=$?
           set -e
-          if [[ "$operations_status" -ne 0 || "$visual_status" -ne 0 ]]; then
-            echo "Native matrix failed: operations=$operations_status visual=$visual_status" >&2
+          if [[ "$operations_status" -ne 0 || "$visual_status" -ne 0 || "$teams_status" -ne 0 ]]; then
+            echo "Native matrix failed: operations=$operations_status visual=$visual_status teams=$teams_status" >&2
             exit 1
           fi
 
@@ -151,17 +161,17 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: mobile-operations-visual-ios
-          path: ${{ runner.temp }}/mobile-operations-visual-ios
+          name: mobile-operations-visual-teams-ios
+          path: ${{ runner.temp }}/mobile-operations-visual-teams-ios
           if-no-files-found: warn
           retention-days: 14
 
   android:
-    name: operations + visual (Android)
+    name: operations + visual + teams (Android)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: validate
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -210,11 +220,11 @@ jobs:
           path: .dev/mobile-build-cache/android/app-debug.apk
           key: ${{ steps.android-app-cache.outputs.cache-primary-key }}
 
-      - name: Run the Android Operations and Visual matrices
+      - name: Run the Android Operations, Visual, and Teams matrices
         uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2.34.0
         env:
           PASEO_MOBILE_E2E_PLATFORM: android
-          EVIDENCE_ROOT: ${{ runner.temp }}/mobile-operations-visual-android
+          EVIDENCE_ROOT: ${{ runner.temp }}/mobile-operations-visual-teams-android
         with:
           api-level: 35
           arch: x86_64
@@ -235,9 +245,14 @@ jobs:
               PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/visual/junit.xml" \
               npm run test:e2e:mobile:visual
             visual_status=$?
+            NODE_OPTIONS=--max-old-space-size=2048 \
+              PASEO_MOBILE_E2E_ARTIFACTS_DIR="$EVIDENCE_ROOT/teams" \
+              PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/teams/junit.xml" \
+              npm run test:e2e:mobile:teams
+            teams_status=$?
             set -e
-            if [[ "$operations_status" -ne 0 || "$visual_status" -ne 0 ]]; then
-              echo "Native matrix failed: operations=$operations_status visual=$visual_status" >&2
+            if [[ "$operations_status" -ne 0 || "$visual_status" -ne 0 || "$teams_status" -ne 0 ]]; then
+              echo "Native matrix failed: operations=$operations_status visual=$visual_status teams=$teams_status" >&2
               exit 1
             fi
 
@@ -245,7 +260,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: mobile-operations-visual-android
-          path: ${{ runner.temp }}/mobile-operations-visual-android
+          name: mobile-operations-visual-teams-android
+          path: ${{ runner.temp }}/mobile-operations-visual-teams-android
           if-no-files-found: warn
           retention-days: 14

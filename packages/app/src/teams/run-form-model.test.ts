@@ -474,6 +474,28 @@ describe("Team Run form model", () => {
     expect(model.getState().validationIssue).toBe("profiles_loading");
   });
 
+  it("preserves the provider catalog when the selected Workspace is selected again", () => {
+    const model = openTeamRunForm({
+      serverId: "host-a",
+      team: team(),
+      workspaces: [workspace],
+      profiles: [profile({ featureValues: {} })],
+    });
+    model.setObjective("Plan");
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    const catalogGeneration = model.getState().catalogGeneration;
+    expect(model.getState().canSubmit).toBe(true);
+
+    model.setWorkspace("workspace-1", workspace.display);
+
+    expect(model.getState()).toMatchObject({
+      catalogGeneration,
+      validationIssue: null,
+      canSubmit: true,
+    });
+    expect(model.getState().roleResolutions[0]?.status).toBe("ready");
+  });
+
   it("rejects a provider result for an earlier path under the same Workspace ID", () => {
     const model = openTeamRunForm({
       serverId: "host-a",

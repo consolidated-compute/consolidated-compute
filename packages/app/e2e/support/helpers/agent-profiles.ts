@@ -25,8 +25,16 @@ export interface HostSeed {
   restore(): Promise<void>;
 }
 
-async function connectAgentProfilesClient(): Promise<AgentProfilesDaemonClient> {
-  return connectDaemonClient<AgentProfilesDaemonClient>({ clientIdPrefix: "agent-profiles-e2e" });
+export interface AgentProfilesSeed extends HostSeed {
+  /** Replaces the live host catalog without changing the restore target. */
+  replace(profiles: AgentProfile[]): Promise<void>;
+}
+
+async function connectAgentProfilesClient(port?: number): Promise<AgentProfilesDaemonClient> {
+  return connectDaemonClient<AgentProfilesDaemonClient>({
+    clientIdPrefix: "agent-profiles-e2e",
+    port,
+  });
 }
 
 /**
@@ -34,11 +42,17 @@ async function connectAgentProfilesClient(): Promise<AgentProfilesDaemonClient> 
  * settings UI create theirs through it; every other journey starts from a host
  * that already has them.
  */
-export async function seedAgentProfiles(profiles: AgentProfile[]): Promise<HostSeed> {
-  const client = await connectAgentProfilesClient();
+export async function seedAgentProfiles(
+  profiles: AgentProfile[],
+  options?: { port?: number },
+): Promise<AgentProfilesSeed> {
+  const client = await connectAgentProfilesClient(options?.port);
   const previous = (await client.getDaemonConfig()).config.agentProfiles ?? [];
   await client.patchDaemonConfig({ agentProfiles: profiles });
   return {
+    async replace(nextProfiles) {
+      await client.patchDaemonConfig({ agentProfiles: nextProfiles });
+    },
     async restore() {
       await client.patchDaemonConfig({ agentProfiles: previous }).catch(() => undefined);
       await client.close().catch(() => undefined);

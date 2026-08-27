@@ -503,15 +503,21 @@ export function openTeamRunForm(
     },
     setWorkspace: (workspaceId, display) => {
       const workspace = state.workspaces.find((entry) => entry.workspaceId === workspaceId);
-      providerWorkspaceId = null;
-      providerWorkspaceCwd = null;
-      providerEntries = null;
+      const selectionContextChanged =
+        workspaceId !== state.selectedWorkspaceId || workspace?.cwd !== state.selectedWorkspaceCwd;
+      if (selectionContextChanged) {
+        providerWorkspaceId = null;
+        providerWorkspaceCwd = null;
+        providerEntries = null;
+      }
       publish({
         ...state,
         selectedWorkspaceId: workspaceId,
         selectedWorkspaceDisplay: display,
         selectedWorkspaceCwd: workspace?.cwd ?? null,
-        catalogGeneration: state.catalogGeneration + 1,
+        catalogGeneration: selectionContextChanged
+          ? state.catalogGeneration + 1
+          : state.catalogGeneration,
         submitError: null,
       });
     },
