@@ -4,6 +4,7 @@ import type { Logger } from "pino";
 
 import type { AgentRunCancellationResult } from "../agent/agent-manager.js";
 import type { CreateAgentFromMcpInput } from "../agent/create-agent/create.js";
+import type { AssignmentRepository } from "../assignment/repository.js";
 import type { WorkspaceMutation, WorkspaceTerminationBoundary } from "../workspace-registry.js";
 import {
   executeTeamStep,
@@ -59,8 +60,18 @@ export interface StartTeamRunInput {
   workspaceId: string;
 }
 
+export interface StartAssignmentTeamRunInput {
+  teamId: string;
+  expectedRevision: number;
+  idempotencyKey: string;
+  assignmentId: string;
+  expectedAssignmentRevision: number;
+  workspaceId: string;
+}
+
 export interface TeamRunServiceOptions {
   repository: TeamRepository;
+  assignmentRepository?: AssignmentRepository;
   workspaceRegistry: TeamRunWorkspaceRegistry;
   providerCatalog: TeamProviderCatalog;
   daemonConfigStore: TeamAgentProfileConfigStore;
@@ -78,6 +89,15 @@ export class TeamRunServiceShuttingDownError extends Error {
   constructor() {
     super("Team Runs cannot start while the daemon is shutting down");
     this.name = "TeamRunServiceShuttingDownError";
+  }
+}
+
+export class TeamAssignmentRepositoryUnavailableError extends Error {
+  readonly code = "team_assignment_repository_unavailable";
+
+  constructor() {
+    super("Assignment-backed Team Runs require an Assignment repository");
+    this.name = "TeamAssignmentRepositoryUnavailableError";
   }
 }
 
@@ -110,6 +130,7 @@ interface WorkspaceTerminationFence {
 
 export class TeamRunService {
   private readonly repository: TeamRepository;
+  private readonly assignmentRepository: AssignmentRepository | null;
   private readonly workspaceRegistry: TeamRunWorkspaceRegistry;
   private readonly providerCatalog: TeamProviderCatalog;
   private readonly daemonConfigStore: TeamAgentProfileConfigStore;
@@ -134,6 +155,7 @@ export class TeamRunService {
 
   constructor(options: TeamRunServiceOptions) {
     this.repository = options.repository;
+    this.assignmentRepository = options.assignmentRepository ?? null;
     this.workspaceRegistry = options.workspaceRegistry;
     this.providerCatalog = options.providerCatalog;
     this.daemonConfigStore = options.daemonConfigStore;
@@ -167,7 +189,15 @@ export class TeamRunService {
   }
 
   async startRun(input: StartTeamRunInput): Promise<PersistedTeamRunRecord> {
-    const existing = await this.repository.getRunByIdempotency(input.teamId, input.idempotencyKey);
+    const identity = {
+      kind: "objective" as const,
+      teamId: input.teamId,
+      expectedRevision: input.expectedRevision,
+      idempotencyKey: input.idempotencyKey,
+      objective: input.objective,
+      workspaceId: input.workspaceId,
+    };
+    const existing = await this.repository.getRunByAdmissionIdentity(identity);
     if (existing) return existing;
     this.requireAcceptingStarts();
 
@@ -191,10 +221,7 @@ export class TeamRunService {
     );
     return this.withWorkspaceOperation(input.workspaceId, () =>
       this.serializeAdmission(async () => {
-        const acceptedExisting = await this.repository.getRunByIdempotency(
-          input.teamId,
-          input.idempotencyKey,
-        );
+        const acceptedExisting = await this.repository.getRunByAdmissionIdentity(identity);
         if (acceptedExisting) return acceptedExisting;
         this.requireAcceptingStarts();
         await revalidateTeamRunWorkspace(this.workspaceRegistry, accepted.workspace);
@@ -206,6 +233,64 @@ export class TeamRunService {
           workspace: accepted.workspace,
           steps: accepted.steps,
         });
+        this.launchExecution(run.id);
+        return run;
+      }),
+    );
+  }
+
+  async startAssignmentRun(input: StartAssignmentTeamRunInput): Promise<PersistedTeamRunRecord> {
+    const assignments = this.assignmentRepository;
+    if (!assignments) throw new TeamAssignmentRepositoryUnavailableError();
+    const identity = {
+      kind: "assignment" as const,
+      teamId: input.teamId,
+      expectedRevision: input.expectedRevision,
+      idempotencyKey: input.idempotencyKey,
+      assignmentId: input.assignmentId,
+      expectedAssignmentRevision: input.expectedAssignmentRevision,
+      workspaceId: input.workspaceId,
+    };
+    const existing = await this.repository.getRunByAdmissionIdentity(identity);
+    if (existing) return existing;
+    this.requireAcceptingStarts();
+
+    const definition = await this.repository.getDefinition(input.teamId);
+    if (!definition) throw new TeamNotFoundError(input.teamId);
+    if (definition.revision !== input.expectedRevision) {
+      throw new TeamRevisionConflictError(
+        input.teamId,
+        input.expectedRevision,
+        definition.revision,
+      );
+    }
+    const accepted = await preflightTeamRun(
+      {
+        workspaceRegistry: this.workspaceRegistry,
+        providerCatalog: this.providerCatalog,
+        featureCatalog: this.agentManager,
+        daemonConfigStore: this.daemonConfigStore,
+      },
+      { definition, workspaceId: input.workspaceId },
+    );
+    return this.withWorkspaceOperation(input.workspaceId, () =>
+      this.serializeAdmission(async () => {
+        const acceptedExisting = await this.repository.getRunByAdmissionIdentity(identity);
+        if (acceptedExisting) return acceptedExisting;
+        this.requireAcceptingStarts();
+        await revalidateTeamRunWorkspace(this.workspaceRegistry, accepted.workspace);
+        const run = await this.repository.createAssignmentRun(
+          {
+            teamId: input.teamId,
+            expectedRevision: input.expectedRevision,
+            idempotencyKey: input.idempotencyKey,
+            assignmentId: input.assignmentId,
+            expectedAssignmentRevision: input.expectedAssignmentRevision,
+            workspace: accepted.workspace,
+            steps: accepted.steps,
+          },
+          assignments,
+        );
         this.launchExecution(run.id);
         return run;
       }),

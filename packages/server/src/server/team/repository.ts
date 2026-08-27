@@ -4,6 +4,18 @@ import { join, resolve } from "node:path";
 import { z } from "zod";
 
 import { writeJsonFileAtomic } from "../atomic-file.js";
+import { generateAssignmentArtifactId } from "../assignment/model.js";
+import type { AssignmentRepository } from "../assignment/repository.js";
+import {
+  AssignmentNotFoundError,
+  AssignmentRevisionConflictError,
+  AssignmentStateConflictError,
+  AssignmentPersistenceBoundaryError,
+} from "../assignment/repository.js";
+import {
+  hostPersistenceBoundaryKey,
+  serializeHostPersistenceMutation,
+} from "../persistence-mutation.js";
 import {
   generateTeamId,
   generateTeamRunId,
@@ -42,6 +54,34 @@ export interface CreateTeamRunInput extends Pick<
 > {
   expectedRevision: number;
 }
+
+export interface CreateAssignmentTeamRunInput extends Pick<
+  PersistedTeamRunRecord,
+  "teamId" | "idempotencyKey" | "workspace" | "steps"
+> {
+  expectedRevision: number;
+  assignmentId: string;
+  expectedAssignmentRevision: number;
+}
+
+export type TeamRunAdmissionIdentity =
+  | {
+      kind: "objective";
+      teamId: string;
+      expectedRevision: number;
+      idempotencyKey: string;
+      objective: string;
+      workspaceId: string;
+    }
+  | {
+      kind: "assignment";
+      teamId: string;
+      expectedRevision: number;
+      idempotencyKey: string;
+      assignmentId: string;
+      expectedAssignmentRevision: number;
+      workspaceId: string;
+    };
 
 export type TeamRunUpdate = Pick<PersistedTeamRunRecord, "steps" | "state">;
 export type TeamRunUpdater = (
@@ -88,6 +128,7 @@ export interface TeamRepositoryOptions {
   paseoHome: string;
   now?: () => Date;
   writeJson?: (filePath: string, value: unknown) => Promise<void>;
+  generateArtifactId?: () => string;
 }
 
 interface CollectionRead<TRecord> {
@@ -104,8 +145,6 @@ const TeamRunCursorSchema = z
   .strict();
 
 type TeamRunCursor = z.infer<typeof TeamRunCursorSchema>;
-
-const mutationTails = new Map<string, Promise<unknown>>();
 
 export class TeamNotFoundError extends Error {
   readonly code = "team_not_found";
@@ -155,6 +194,33 @@ export class TeamWorkspaceHasActiveRunError extends Error {
   }
 }
 
+export class TeamAssignmentHasActiveRunError extends Error {
+  readonly code = "team_assignment_has_active_run";
+
+  constructor(
+    readonly assignmentId: string,
+    readonly runId: string,
+  ) {
+    super(`Assignment ${assignmentId} already has an active Team Run: ${runId}`);
+    this.name = "TeamAssignmentHasActiveRunError";
+  }
+}
+
+export class TeamRunIdempotencyConflictError extends Error {
+  readonly code = "team_run_idempotency_conflict";
+
+  constructor(
+    readonly teamId: string,
+    readonly idempotencyKey: string,
+    readonly runId: string,
+  ) {
+    super(
+      `Team Run idempotency key ${idempotencyKey} for ${teamId} is already bound to different admission inputs`,
+    );
+    this.name = "TeamRunIdempotencyConflictError";
+  }
+}
+
 export class TeamRunNotFoundError extends Error {
   readonly code = "team_run_not_found";
 
@@ -196,16 +262,18 @@ export class TeamRepository {
   private readonly runsDir: string;
   private readonly now: () => Date;
   private readonly writeJson: (filePath: string, value: unknown) => Promise<void>;
+  private readonly generateArtifactId: () => string;
   private readonly listeners = new Set<TeamRepositoryListener>();
-  private readonly mutationKey: string;
+  readonly persistenceBoundaryKey: string;
 
   constructor(options: TeamRepositoryOptions) {
     const teamsDir = resolve(options.paseoHome, "teams");
     this.definitionsDir = join(teamsDir, "definitions");
     this.runsDir = join(teamsDir, "runs");
-    this.mutationKey = teamsDir;
+    this.persistenceBoundaryKey = hostPersistenceBoundaryKey(options.paseoHome);
     this.now = options.now ?? (() => new Date());
     this.writeJson = options.writeJson ?? writeJsonFileAtomic;
+    this.generateArtifactId = options.generateArtifactId ?? generateAssignmentArtifactId;
   }
 
   subscribe(listener: TeamRepositoryListener): () => void {
@@ -270,6 +338,15 @@ export class TeamRepository {
     );
   }
 
+  async getRunByAdmissionIdentity(
+    identity: TeamRunAdmissionIdentity,
+  ): Promise<PersistedTeamRunRecord | null> {
+    const existing = await this.getRunByIdempotency(identity.teamId, identity.idempotencyKey);
+    if (!existing) return null;
+    this.requireMatchingAdmissionIdentity(existing, identity);
+    return existing;
+  }
+
   async listActiveRuns(): Promise<PersistedTeamRunRecord[]> {
     const collection = await this.readRuns();
     this.requireHealthyCollection(collection.issues);
@@ -283,6 +360,16 @@ export class TeamRepository {
       collection.records.find(
         (run) =>
           run.workspace.workspaceId === workspaceId && isActiveTeamRunStatus(run.state.status),
+      ) ?? null
+    );
+  }
+
+  async getActiveRunForAssignment(assignmentId: string): Promise<PersistedTeamRunRecord | null> {
+    const collection = await this.readRuns();
+    this.requireHealthyCollection(collection.issues);
+    return (
+      collection.records.find(
+        (run) => run.assignmentId === assignmentId && isActiveTeamRunStatus(run.state.status),
       ) ?? null
     );
   }
@@ -331,7 +418,17 @@ export class TeamRepository {
       const existing = collection.records.find(
         (run) => run.teamId === input.teamId && run.idempotencyKey === input.idempotencyKey,
       );
-      if (existing) return existing;
+      if (existing) {
+        this.requireMatchingAdmissionIdentity(existing, {
+          kind: "objective",
+          teamId: input.teamId,
+          expectedRevision: input.expectedRevision,
+          idempotencyKey: input.idempotencyKey,
+          objective: input.objective,
+          workspaceId: input.workspace.workspaceId,
+        });
+        return existing;
+      }
       this.requireHealthyCollection(collection.issues);
 
       const workspaceRun = collection.records.find(
@@ -360,6 +457,92 @@ export class TeamRepository {
         id: runId,
         teamRevision: definition.revision,
         teamSnapshot: definition,
+        state: { status: "queued" },
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+      await this.writeJson(this.runPath(run.id), run);
+      this.publish({ type: "run_created", run });
+      return run;
+    });
+  }
+
+  async createAssignmentRun(
+    input: CreateAssignmentTeamRunInput,
+    assignments: AssignmentRepository,
+  ): Promise<PersistedTeamRunRecord> {
+    if (assignments.persistenceBoundaryKey !== this.persistenceBoundaryKey) {
+      throw new AssignmentPersistenceBoundaryError();
+    }
+    return this.serializeMutation(async () => {
+      const identity: TeamRunAdmissionIdentity = {
+        kind: "assignment",
+        teamId: input.teamId,
+        expectedRevision: input.expectedRevision,
+        idempotencyKey: input.idempotencyKey,
+        assignmentId: input.assignmentId,
+        expectedAssignmentRevision: input.expectedAssignmentRevision,
+        workspaceId: input.workspace.workspaceId,
+      };
+      const collection = await this.readRuns();
+      const existing = collection.records.find(
+        (run) => run.teamId === input.teamId && run.idempotencyKey === input.idempotencyKey,
+      );
+      if (existing) {
+        this.requireMatchingAdmissionIdentity(existing, identity);
+        return existing;
+      }
+      this.requireHealthyCollection(collection.issues);
+
+      const workspaceRun = collection.records.find(
+        (run) =>
+          run.workspace.workspaceId === input.workspace.workspaceId &&
+          isActiveTeamRunStatus(run.state.status),
+      );
+      if (workspaceRun) {
+        throw new TeamWorkspaceHasActiveRunError(input.workspace.workspaceId, workspaceRun.id);
+      }
+      const assignmentRun = collection.records.find(
+        (run) => run.assignmentId === input.assignmentId && isActiveTeamRunStatus(run.state.status),
+      );
+      if (assignmentRun) {
+        throw new TeamAssignmentHasActiveRunError(input.assignmentId, assignmentRun.id);
+      }
+
+      const definition = await this.requireDefinition(input.teamId);
+      this.requireRevision(definition, input.expectedRevision);
+      const assignment = await assignments.getAssignment(input.assignmentId);
+      if (!assignment) throw new AssignmentNotFoundError(input.assignmentId);
+      if (assignment.revision !== input.expectedAssignmentRevision) {
+        throw new AssignmentRevisionConflictError(
+          assignment.id,
+          input.expectedAssignmentRevision,
+          assignment.revision,
+        );
+      }
+      if (assignment.state.status !== "open") {
+        throw new AssignmentStateConflictError(assignment.id, assignment.state.status);
+      }
+
+      const existingRunIds = new Set(collection.records.map((run) => run.id));
+      let runId = generateTeamRunId();
+      while (existingRunIds.has(runId)) {
+        runId = generateTeamRunId();
+      }
+      const steps = this.createAssignmentArtifactPlan(input.steps, collection.records);
+      const timestamp = this.now().toISOString();
+      const run = PersistedTeamRunRecordSchema.parse({
+        id: runId,
+        teamId: input.teamId,
+        teamRevision: definition.revision,
+        idempotencyKey: input.idempotencyKey,
+        teamSnapshot: definition,
+        objective: assignment.objective,
+        assignmentId: assignment.id,
+        assignmentRevision: assignment.revision,
+        assignmentSnapshot: assignment,
+        workspace: input.workspace,
+        steps,
         state: { status: "queued" },
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -415,6 +598,58 @@ export class TeamRepository {
         revision: current.revision,
       });
     });
+  }
+
+  private createAssignmentArtifactPlan(
+    steps: PersistedTeamRunRecord["steps"],
+    existingRuns: PersistedTeamRunRecord[],
+  ): PersistedTeamRunRecord["steps"] {
+    const reservedArtifactIds = new Set(
+      existingRuns.flatMap((run) =>
+        run.steps.flatMap((step) =>
+          step.snapshot.outputArtifact ? [step.snapshot.outputArtifact.id] : [],
+        ),
+      ),
+    );
+    let precedingOutputId: string | null = null;
+    return steps.map((step) => {
+      let outputArtifactId = this.generateArtifactId();
+      while (reservedArtifactIds.has(outputArtifactId)) {
+        outputArtifactId = this.generateArtifactId();
+      }
+      reservedArtifactIds.add(outputArtifactId);
+      const inputArtifactIds = precedingOutputId === null ? [] : [precedingOutputId];
+      precedingOutputId = outputArtifactId;
+      return {
+        ...step,
+        snapshot: {
+          ...step.snapshot,
+          inputArtifactIds,
+          outputArtifact: {
+            id: outputArtifactId,
+            kind: "team_step_output",
+            title: `${step.snapshot.roleName} output`,
+            mediaType: "text/markdown",
+          },
+        },
+      };
+    });
+  }
+
+  private requireMatchingAdmissionIdentity(
+    run: PersistedTeamRunRecord,
+    identity: TeamRunAdmissionIdentity,
+  ): void {
+    const commonMatches =
+      run.teamRevision === identity.expectedRevision &&
+      run.workspace.workspaceId === identity.workspaceId;
+    const kindMatches =
+      identity.kind === "objective"
+        ? run.assignmentId === undefined && run.objective === identity.objective
+        : run.assignmentId === identity.assignmentId &&
+          run.assignmentRevision === identity.expectedAssignmentRevision;
+    if (commonMatches && kindMatches) return;
+    throw new TeamRunIdempotencyConflictError(identity.teamId, identity.idempotencyKey, run.id);
   }
 
   private definitionPath(teamId: string): string {
@@ -532,16 +767,7 @@ export class TeamRepository {
   }
 
   private async serializeMutation<T>(mutation: () => Promise<T>): Promise<T> {
-    const previous = mutationTails.get(this.mutationKey) ?? Promise.resolve();
-    const next = previous.catch(() => undefined).then(mutation);
-    mutationTails.set(this.mutationKey, next);
-    try {
-      return await next;
-    } finally {
-      if (mutationTails.get(this.mutationKey) === next) {
-        mutationTails.delete(this.mutationKey);
-      }
-    }
+    return serializeHostPersistenceMutation(this.persistenceBoundaryKey, mutation);
   }
 
   private publish(change: TeamRepositoryChange): void {

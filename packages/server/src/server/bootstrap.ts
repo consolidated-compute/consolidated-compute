@@ -226,6 +226,7 @@ import {
 } from "./hub/relationship-remote.js";
 import { DaemonExecutions } from "./hub/daemon-executions.js";
 import { PluginService } from "./plugins/index.js";
+import { AssignmentRepository } from "./assignment/repository.js";
 import { TeamRepository } from "./team/repository.js";
 import { TeamRunService } from "./team/service.js";
 
@@ -1155,8 +1156,13 @@ export async function createPaseoDaemon(
   const createAgent = (input: Parameters<typeof createAgentCommand>[1]) =>
     createAgentCommand(createAgentCommandDependencies, input);
   const teamRepository = new TeamRepository({ paseoHome: config.paseoHome });
+  const assignmentRepository = new AssignmentRepository({
+    paseoHome: config.paseoHome,
+    activeRunStore: teamRepository,
+  });
   const teamRunService = new TeamRunService({
     repository: teamRepository,
+    assignmentRepository,
     workspaceRegistry,
     providerCatalog: providerSnapshotManager,
     daemonConfigStore,

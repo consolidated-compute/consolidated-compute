@@ -2,7 +2,7 @@
 
 A Team is a reusable, host-local definition. A Team Run is one execution of that definition against an Objective in an existing Workspace.
 
-[Assignments and Artifacts](assignments.md) define the durable intent and explicit handoff contract layered onto this lifecycle. The execution rules below describe the current objective-only compatibility path until that admission path is implemented.
+[Assignments and Artifacts](assignments.md) define the durable intent and explicit handoff contract layered onto this lifecycle. Assignment-backed admission freezes that intent and its Artifact plan. Execution still uses the objective-only handoff until Artifact materialization replaces it; objective-only records remain the compatibility path.
 
 ## Ownership
 
