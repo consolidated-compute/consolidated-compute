@@ -220,6 +220,8 @@ test("mobile Operations, Visual, and Teams stay isolated from the upstream runne
   assert.match(devClientFlow, /visible: "Open in\.\*Consolidated Compute/);
   assert.match(devClientFlow, /visible: "Continue"/);
   assert.match(devClientFlow, /visible: "Go home"/);
+  assert.match(devClientFlow, /visible: "Runtime version:\.\*"/);
+  assert.match(devClientFlow, /tapOn: "Close"/);
   assert.match(devClientFlow, /id: "menu-button"/);
 });
 

@@ -49,6 +49,12 @@ appId: ${APP_ID}
       - tapOn:
           point: "50%,20%"
 
+- runFlow:
+    when:
+      visible: "Runtime version:.*"
+    commands:
+      - tapOn: "Close"
+
 - extendedWaitUntil:
     visible:
       id: "menu-button"
