@@ -1,0 +1,55 @@
+appId: ${APP_ID}
+---
+- launchApp:
+    appId: ${APP_ID}
+    clearState: true
+    stopApp: true
+
+- openLink: ${DEV_CLIENT_URL}
+
+- runFlow:
+    when:
+      visible: "Open in.*Consolidated Compute.*\\?"
+    commands:
+      - tapOn: "Open"
+
+- tapOn:
+    text: "Open"
+    optional: true
+
+- tapOn:
+    text: ".*(localhost|127\\.0\\.0\\.1|10\\.0\\.2\\.2|192\\.168\\.).*"
+    optional: true
+
+- runFlow:
+    when:
+      visible: "DEVELOPMENT SERVERS"
+    commands:
+      - tapOn:
+          point: "50%,8%"
+
+- waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+
+- tapOn:
+    text: "Continue"
+    optional: true
+
+- waitForAnimationToEnd
+
+- runFlow:
+    when:
+      visible: "Go home"
+    commands:
+      - tapOn:
+          point: "50%,20%"
+
+- extendedWaitUntil:
+    visible:
+      id: "menu-button"
+    timeout: 90000

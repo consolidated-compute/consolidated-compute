@@ -14,6 +14,10 @@ const operationsMobileRunnerPath = new URL(
   repoRoot,
 );
 const operationsMatrixRunnerPath = new URL("scripts/run-mobile-operations-matrix.sh", repoRoot);
+const nativeMatrixDevClientPath = new URL(
+  "packages/app/e2e/mobile/native-matrix-dev-client.yaml",
+  repoRoot,
+);
 const iosOperationsReplayPath = new URL(
   "packages/app/e2e/mobile/operations-agent-device/operations-matrix.ios.ad",
   repoRoot,
@@ -183,6 +187,7 @@ test("mobile Operations, Visual, and Teams keep native device jobs off pull requ
 test("mobile Operations, Visual, and Teams stay isolated from the upstream runner", () => {
   const genericRunner = readFileSync(genericMobileRunnerPath, "utf8");
   const operationsRunner = readFileSync(operationsMobileRunnerPath, "utf8");
+  const devClientFlow = readFileSync(nativeMatrixDevClientPath, "utf8");
 
   assert.doesNotMatch(
     genericRunner,
@@ -208,23 +213,30 @@ test("mobile Operations, Visual, and Teams stay isolated from the upstream runne
     /\[\[ "\$\{PLATFORM\}" == "ios" \]\][\s\S]*EXPO_PUBLIC_PASEO_E2E_FORCE_VISUAL_REDUCED_MOTION=1/,
   );
   assert.match(operationsRunner, /metro prepare[\s\S]*--no-reuse-existing/);
-  assert.match(operationsRunner, /BOOT_ARGS\+=\(--serial "\$\{SERIAL\}"\)/);
+  assert.match(operationsRunner, /TARGET_ARGS\+=\(--serial "\$\{SERIAL\}"\)/);
+  assert.match(operationsRunner, /replay[\s\S]*DEV_CLIENT_FLOW[\s\S]*--maestro/);
+  assert.match(devClientFlow, /clearState: true/);
+  assert.match(devClientFlow, /openLink: \$\{DEV_CLIENT_URL\}/);
+  assert.match(devClientFlow, /visible: "Open in\.\*Consolidated Compute/);
+  assert.match(devClientFlow, /visible: "Continue"/);
+  assert.match(devClientFlow, /visible: "Go home"/);
+  assert.match(devClientFlow, /id: "menu-button"/);
 });
 
 test("mobile Operations replays keep one cross-platform contract", () => {
   const iosReplay = readFileSync(iosOperationsReplayPath, "utf8");
   const androidReplay = readFileSync(androidOperationsReplayPath, "utf8");
   const normalizePlatform = (source) =>
-    source
-      .replace(/^context platform=(ios|android)/, "context platform=native")
-      .replace(/^alert wait 45000\nalert accept\n/m, "");
+    source.replace(/^context platform=(ios|android)/, "context platform=native");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
-  assert.match(iosReplay, /alert wait 45000\nalert accept/);
-  assert.doesNotMatch(iosReplay, /settings permission reset notifications|alert dismiss/);
+  assert.doesNotMatch(
+    iosReplay,
+    /settings (permission reset notifications|clear-app-state)|--launch-url|alert /,
+  );
   assert.doesNotMatch(
     androidReplay,
-    /settings permission reset notifications|alert (wait|accept|dismiss)/,
+    /settings (permission reset notifications|clear-app-state)|--launch-url|alert /,
   );
   assert.match(iosReplay, /wait "id=\\"menu-button\\"" 45000/);
 });
@@ -235,15 +247,16 @@ test("mobile Visual replays keep one cross-platform accessibility contract", () 
   const normalizePlatform = (source) =>
     source
       .replace(/^context platform=(ios|android)/, "context platform=native")
-      .replace(/^alert wait 45000\nalert accept\n/m, "")
       .replace(/^settings animations off\n/m, "");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
-  assert.match(iosReplay, /alert wait 45000\nalert accept/);
-  assert.doesNotMatch(iosReplay, /settings permission reset notifications|alert dismiss/);
+  assert.doesNotMatch(
+    iosReplay,
+    /settings (permission reset notifications|clear-app-state)|--launch-url|alert /,
+  );
   assert.doesNotMatch(
     androidReplay,
-    /settings permission reset notifications|alert (wait|accept|dismiss)/,
+    /settings (permission reset notifications|clear-app-state)|--launch-url|alert /,
   );
   assert.match(iosReplay, /open "\$\{APP_ID\}" "paseo:\/\/visual" --relaunch/);
   assert.doesNotMatch(iosReplay, /settings animations off/);
@@ -266,16 +279,16 @@ test("mobile Teams replays keep one cross-platform run contract", () => {
   const iosReplay = readFileSync(iosTeamsReplayPath, "utf8");
   const androidReplay = readFileSync(androidTeamsReplayPath, "utf8");
   const normalizePlatform = (source) =>
-    source
-      .replace(/^context platform=(ios|android)/, "context platform=native")
-      .replace(/^alert wait 45000\nalert accept\n/m, "");
+    source.replace(/^context platform=(ios|android)/, "context platform=native");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
-  assert.match(iosReplay, /alert wait 45000\nalert accept/);
-  assert.doesNotMatch(iosReplay, /settings permission reset notifications|alert dismiss/);
+  assert.doesNotMatch(
+    iosReplay,
+    /settings (permission reset notifications|clear-app-state)|--launch-url|alert /,
+  );
   assert.doesNotMatch(
     androidReplay,
-    /settings permission reset notifications|alert (wait|accept|dismiss)/,
+    /settings (permission reset notifications|clear-app-state)|--launch-url|alert /,
   );
   assert.match(iosReplay, /team-detail-\$\{PRIMARY_SERVER_ID\}-\$\{PRIMARY_TEAM_ID\}/);
   assert.match(iosReplay, /orientation landscape-left/);

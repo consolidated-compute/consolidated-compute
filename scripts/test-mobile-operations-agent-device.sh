@@ -9,6 +9,7 @@ SERIAL="${PASEO_MOBILE_E2E_SERIAL:-}"
 APP_ID="${PASEO_MOBILE_E2E_APP_ID:-sh.paseo.debug}"
 OPERATIONS_FIXTURE="${PASEO_MOBILE_E2E_OPERATIONS_FIXTURE:-1}"
 SUITE_PATH="${PASEO_MOBILE_E2E_SUITE:-${REPO_ROOT}/packages/app/e2e/mobile/agent-device}"
+DEV_CLIENT_FLOW="${REPO_ROOT}/packages/app/e2e/mobile/native-matrix-dev-client.yaml"
 AGENT_DEVICE_BIN="${REPO_ROOT}/node_modules/.bin/agent-device"
 METRO_PID=0
 METRO_LOG_PATH=""
@@ -229,18 +230,18 @@ curl --fail --show-error --silent --retry 2 --retry-all-errors --max-time 300 \
   --output /dev/null \
   "${METRO_PREWARM_URL}"
 
-BOOT_ARGS=(--platform "${PLATFORM}")
+TARGET_ARGS=(--platform "${PLATFORM}")
 if [[ -n "${DEVICE}" ]]; then
   if [[ "${PLATFORM}" == "ios" ]]; then
-    BOOT_ARGS+=(--udid "${DEVICE}")
+    TARGET_ARGS+=(--udid "${DEVICE}")
   else
-    BOOT_ARGS+=(--device "${DEVICE}")
+    TARGET_ARGS+=(--device "${DEVICE}")
   fi
 fi
 if [[ "${PLATFORM}" == "android" && -n "${SERIAL}" ]]; then
-  BOOT_ARGS+=(--serial "${SERIAL}")
+  TARGET_ARGS+=(--serial "${SERIAL}")
 fi
-AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" boot "${BOOT_ARGS[@]}"
+AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" boot "${TARGET_ARGS[@]}"
 
 if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
   RESET_DEVICE_SETTINGS=1
@@ -257,9 +258,20 @@ fi
 
 if [[ "${PLATFORM}" == "ios" ]]; then
   AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" prepare ios-runner \
-    --platform ios \
+    "${TARGET_ARGS[@]}" \
     --timeout 240000
 fi
+
+# Expo's development-client shell has platform- and runtime-dependent prompts.
+# Reuse the repository's conditional Maestro choreography before the strict
+# Agent Device replay starts asserting product state.
+AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" replay \
+  "${DEV_CLIENT_FLOW}" \
+  --maestro \
+  "${TARGET_ARGS[@]}" \
+  --metro-host "${DEVICE_HOST}" \
+  --metro-port "${METRO_PORT}" \
+  --timeout 180000
 
 REPORTER_ARGS=(--reporter default)
 if [[ -n "${PASEO_MOBILE_E2E_JUNIT_PATH:-}" ]]; then
@@ -269,7 +281,7 @@ fi
 
 AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" test \
   "${SUITE_PATH}" \
-  --platform "${PLATFORM}" \
+  "${TARGET_ARGS[@]}" \
   --metro-port "${METRO_PORT}" \
   --timeout 600000 \
   --fail-fast \
