@@ -46,7 +46,7 @@ The Operations matrix owns its state. This command starts two private daemons, s
 PASEO_MOBILE_E2E_PLATFORM=ios npm run test:e2e:mobile:operations
 ```
 
-The fixture bundle skips push registration. Native notification prompts are outside these surface contracts and are not deterministic across simulator runtimes.
+The fixture bundle skips push registration. Native notification prompts are outside these surface contracts and are not deterministic across simulator runtimes. The iOS replays accept the development-client deep-link confirmation before asserting app state.
 
 Use `android` for the Android run. The Operations runner uses its own Agent Device state and artifact directories under `.dev/operations-agent-device-*` and defaults Metro to port `8082`, so it does not stop or overwrite a normal mobile run. Choose another unused `PASEO_MOBILE_E2E_METRO_PORT` when needed; the fixture daemon endpoint is compiled into the bundle, so this runner always starts a fresh Metro process. `.github/workflows/mobile-operations.yml` runs the device matrix on its weekday schedule or by manual dispatch, then retains passing screenshots, timings, JUnit output, logs, and failure diagnostics. Pull requests only validate the workflow and replay contracts; the normal app and browser checks own change-time coverage. The scheduled matrix caches the built development-client `.app` and APK by native inputs; JavaScript-only changes reuse the binaries and still compile the current Metro bundle before replay.
 

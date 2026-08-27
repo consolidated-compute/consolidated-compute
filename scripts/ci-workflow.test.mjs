@@ -208,19 +208,23 @@ test("mobile Operations, Visual, and Teams stay isolated from the upstream runne
     /\[\[ "\$\{PLATFORM\}" == "ios" \]\][\s\S]*EXPO_PUBLIC_PASEO_E2E_FORCE_VISUAL_REDUCED_MOTION=1/,
   );
   assert.match(operationsRunner, /metro prepare[\s\S]*--no-reuse-existing/);
+  assert.match(operationsRunner, /BOOT_ARGS\+=\(--serial "\$\{SERIAL\}"\)/);
 });
 
 test("mobile Operations replays keep one cross-platform contract", () => {
   const iosReplay = readFileSync(iosOperationsReplayPath, "utf8");
   const androidReplay = readFileSync(androidOperationsReplayPath, "utf8");
   const normalizePlatform = (source) =>
-    source.replace(/^context platform=(ios|android)/, "context platform=native");
+    source
+      .replace(/^context platform=(ios|android)/, "context platform=native")
+      .replace(/^alert wait 45000\nalert accept\n/m, "");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
-  assert.doesNotMatch(iosReplay, /settings permission reset notifications|alert (wait|dismiss)/);
+  assert.match(iosReplay, /alert wait 45000\nalert accept/);
+  assert.doesNotMatch(iosReplay, /settings permission reset notifications|alert dismiss/);
   assert.doesNotMatch(
     androidReplay,
-    /settings permission reset notifications|alert (wait|dismiss)/,
+    /settings permission reset notifications|alert (wait|accept|dismiss)/,
   );
   assert.match(iosReplay, /wait "id=\\"menu-button\\"" 45000/);
 });
@@ -231,13 +235,15 @@ test("mobile Visual replays keep one cross-platform accessibility contract", () 
   const normalizePlatform = (source) =>
     source
       .replace(/^context platform=(ios|android)/, "context platform=native")
+      .replace(/^alert wait 45000\nalert accept\n/m, "")
       .replace(/^settings animations off\n/m, "");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
-  assert.doesNotMatch(iosReplay, /settings permission reset notifications|alert (wait|dismiss)/);
+  assert.match(iosReplay, /alert wait 45000\nalert accept/);
+  assert.doesNotMatch(iosReplay, /settings permission reset notifications|alert dismiss/);
   assert.doesNotMatch(
     androidReplay,
-    /settings permission reset notifications|alert (wait|dismiss)/,
+    /settings permission reset notifications|alert (wait|accept|dismiss)/,
   );
   assert.match(iosReplay, /open "\$\{APP_ID\}" "paseo:\/\/visual" --relaunch/);
   assert.doesNotMatch(iosReplay, /settings animations off/);
@@ -260,13 +266,16 @@ test("mobile Teams replays keep one cross-platform run contract", () => {
   const iosReplay = readFileSync(iosTeamsReplayPath, "utf8");
   const androidReplay = readFileSync(androidTeamsReplayPath, "utf8");
   const normalizePlatform = (source) =>
-    source.replace(/^context platform=(ios|android)/, "context platform=native");
+    source
+      .replace(/^context platform=(ios|android)/, "context platform=native")
+      .replace(/^alert wait 45000\nalert accept\n/m, "");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
-  assert.doesNotMatch(iosReplay, /settings permission reset notifications|alert (wait|dismiss)/);
+  assert.match(iosReplay, /alert wait 45000\nalert accept/);
+  assert.doesNotMatch(iosReplay, /settings permission reset notifications|alert dismiss/);
   assert.doesNotMatch(
     androidReplay,
-    /settings permission reset notifications|alert (wait|dismiss)/,
+    /settings permission reset notifications|alert (wait|accept|dismiss)/,
   );
   assert.match(iosReplay, /team-detail-\$\{PRIMARY_SERVER_ID\}-\$\{PRIMARY_TEAM_ID\}/);
   assert.match(iosReplay, /orientation landscape-left/);
@@ -305,7 +314,7 @@ test("mobile Operations, Visual, and Teams bound Android replay resources", () =
 
   assert.match(source, /ram-size: 2048M/);
   assert.match(source, /heap-size: 512M/);
-  assert.match(source, /PASEO_MOBILE_E2E_DEVICE: emulator-5554/);
+  assert.match(source, /PASEO_MOBILE_E2E_SERIAL: emulator-5554/);
   assert.match(
     source,
     /script: \|\n\s+adb install -r[^\n]+\n\s+bash scripts\/run-mobile-operations-matrix\.sh/,

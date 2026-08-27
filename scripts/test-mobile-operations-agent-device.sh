@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MATRIX_SURFACE="${PASEO_MOBILE_E2E_MATRIX_SURFACE:-operations}"
 PLATFORM="${PASEO_MOBILE_E2E_PLATFORM:-ios}"
 DEVICE="${PASEO_MOBILE_E2E_DEVICE:-}"
+SERIAL="${PASEO_MOBILE_E2E_SERIAL:-}"
 APP_ID="${PASEO_MOBILE_E2E_APP_ID:-sh.paseo.debug}"
 OPERATIONS_FIXTURE="${PASEO_MOBILE_E2E_OPERATIONS_FIXTURE:-1}"
 SUITE_PATH="${PASEO_MOBILE_E2E_SUITE:-${REPO_ROOT}/packages/app/e2e/mobile/agent-device}"
@@ -235,6 +236,9 @@ if [[ -n "${DEVICE}" ]]; then
   else
     BOOT_ARGS+=(--device "${DEVICE}")
   fi
+fi
+if [[ "${PLATFORM}" == "android" && -n "${SERIAL}" ]]; then
+  BOOT_ARGS+=(--serial "${SERIAL}")
 fi
 AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" boot "${BOOT_ARGS[@]}"
 
