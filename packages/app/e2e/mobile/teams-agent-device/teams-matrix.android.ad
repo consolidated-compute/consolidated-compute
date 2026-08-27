@@ -41,6 +41,8 @@ keyboard dismiss
 scroll down 0.6
 wait "id=\"team-run-role-status-${PRIMARY_TEAM_ROLE_ID}-ready\"" 30000
 press "id=\"team-run-start\""
+wait "id=\"team-run-cancel\"" 30000
+scroll down 0.3
 wait "id=\"team-run-status-waiting_for_permission\"" 30000
 screenshot "${AD_ARTIFACTS}/teams-waiting-for-permission.png" --scale 1
 scroll down 0.8

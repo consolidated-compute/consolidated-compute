@@ -22,7 +22,7 @@ keyboard dismiss
 press "id=\"direct-host-submit\""
 wait "id=\"host-page-connections-card\"" 30000
 
-open "${APP_ID}" "paseo://visual" --relaunch
+open "${APP_ID}" "paseo://visual"
 wait "id=\"visual-screen\"" 30000
 wait "id=\"visual-layout-compact\"" 30000
 wait "id=\"visual-motion-reduced\"" 30000
@@ -71,5 +71,5 @@ wait "id=\"visual-screen\"" 30000
 scroll bottom
 wait "id=\"visual-agent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}\"" 30000
 press "id=\"visual-agent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}\""
-wait "id=\"workspace-tab-agent_${SECONDARY_AGENT_ID}\"" 30000
+wait "id=\"message-input-root\"" 30000
 close

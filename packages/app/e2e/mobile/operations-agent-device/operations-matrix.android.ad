@@ -56,7 +56,7 @@ press "id=\"sidebar-operations\""
 wait "id=\"operations-screen\"" 30000
 
 press "id=\"operations-agent-${PRIMARY_SERVER_ID}-${PRIMARY_AGENT_ID}\""
-wait "id=\"workspace-tab-agent_${PRIMARY_AGENT_ID}\"" 30000
+wait "id=\"message-input-root\"" 30000
 press "id=\"menu-button\""
 wait "id=\"sidebar-operations\"" 30000
 press "id=\"sidebar-operations\""
@@ -78,5 +78,5 @@ wait "id=\"operations-screen\"" 30000
 screenshot "${AD_ARTIFACTS}/operations-dark-hierarchy.png" --scale 1
 
 press "id=\"operations-agent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}\""
-wait "id=\"workspace-tab-agent_${SECONDARY_AGENT_ID}\"" 30000
+wait "id=\"message-input-root\"" 30000
 close

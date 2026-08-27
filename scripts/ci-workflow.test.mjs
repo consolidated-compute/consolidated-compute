@@ -237,7 +237,9 @@ test("mobile Operations replays keep one cross-platform contract", () => {
   const iosReplay = readFileSync(iosOperationsReplayPath, "utf8");
   const androidReplay = readFileSync(androidOperationsReplayPath, "utf8");
   const normalizePlatform = (source) =>
-    source.replace(/^context platform=(ios|android)/, "context platform=native");
+    source
+      .replace(/^context platform=(ios|android)/, "context platform=native")
+      .replace(/^scroll down 0\.2\n(?=fill "id=\\"direct-host-input)/m, "");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
   assert.doesNotMatch(
@@ -251,6 +253,10 @@ test("mobile Operations replays keep one cross-platform contract", () => {
   assert.match(iosReplay, /wait "id=\\"menu-button\\"" 45000/);
   assert.match(iosReplay, /retries=0/);
   assert.match(iosReplay, /wait "id=\\"host-page-connections-card\\"" 30000/);
+  assert.match(iosReplay, /direct-host-input\\"" 30000\nscroll down 0\.2\nfill/);
+  assert.doesNotMatch(androidReplay, /direct-host-input\\"" 30000\nscroll down/);
+  assert.doesNotMatch(iosReplay, /workspace-tab-agent_/);
+  assert.match(iosReplay, /wait "id=\\"message-input-root\\"" 30000/);
   assert.doesNotMatch(iosReplay, /retries=[1-9]/);
 });
 
@@ -260,7 +266,8 @@ test("mobile Visual replays keep one cross-platform accessibility contract", () 
   const normalizePlatform = (source) =>
     source
       .replace(/^context platform=(ios|android)/, "context platform=native")
-      .replace(/^settings animations off\n/m, "");
+      .replace(/^settings animations off\n/m, "")
+      .replace(/^scroll down 0\.2\n(?=fill "id=\\"direct-host-input)/m, "");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
   assert.doesNotMatch(
@@ -271,7 +278,10 @@ test("mobile Visual replays keep one cross-platform accessibility contract", () 
     androidReplay,
     /settings (permission reset notifications|clear-app-state)|--launch-url|alert /,
   );
-  assert.match(iosReplay, /open "\$\{APP_ID\}" "paseo:\/\/visual" --relaunch/);
+  assert.match(iosReplay, /open "\$\{APP_ID\}" "paseo:\/\/visual"\n/);
+  assert.doesNotMatch(iosReplay, /paseo:\/\/visual" --relaunch/);
+  assert.match(iosReplay, /direct-host-input\\"" 30000\nscroll down 0\.2\nfill/);
+  assert.doesNotMatch(androidReplay, /direct-host-input\\"" 30000\nscroll down/);
   assert.doesNotMatch(iosReplay, /settings animations off/);
   assert.match(androidReplay, /settings animations off/);
   assert.match(iosReplay, /orientation landscape-left/);
@@ -288,13 +298,17 @@ test("mobile Visual replays keep one cross-platform accessibility contract", () 
   assert.match(iosReplay, /get attrs "id=\\"visual-agent-/);
   assert.match(iosReplay, /get attrs "id=\\"visual-provider-subagent-/);
   assert.match(iosReplay, /visual-dark-large-text-reduced-motion\.png/);
+  assert.doesNotMatch(iosReplay, /workspace-tab-agent_/);
+  assert.match(iosReplay, /wait "id=\\"message-input-root\\"" 30000/);
 });
 
 test("mobile Teams replays keep one cross-platform run contract", () => {
   const iosReplay = readFileSync(iosTeamsReplayPath, "utf8");
   const androidReplay = readFileSync(androidTeamsReplayPath, "utf8");
   const normalizePlatform = (source) =>
-    source.replace(/^context platform=(ios|android)/, "context platform=native");
+    source
+      .replace(/^context platform=(ios|android)/, "context platform=native")
+      .replace(/^scroll down 0\.3\n(?=wait "id=\\"team-role-)/m, "scroll down 0.6\n");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
   assert.doesNotMatch(
@@ -312,6 +326,7 @@ test("mobile Teams replays keep one cross-platform run contract", () => {
   assert.match(iosReplay, /home\nopen "\$\{APP_ID\}"/);
   assert.match(iosReplay, /team-run-role-status-\$\{PRIMARY_TEAM_ROLE_ID\}-ready/);
   assert.match(iosReplay, /team-run-status-waiting_for_permission/);
+  assert.match(iosReplay, /team-run-cancel\\"" 30000\nscroll down 0\.3\nwait/);
   assert.match(iosReplay, /permission-request-accept/);
   assert.match(iosReplay, /team-run-status-succeeded/);
 });
