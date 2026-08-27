@@ -10,6 +10,8 @@ The daemon owns the Assignment title, objective, link, and lifecycle. It does no
 
 Disk schemas belong to the server. Future protocol DTOs project those records without exporting persistence schemas.
 
+The daemon stores one atomic JSON record per Assignment under `$PASEO_HOME/assignments/records/` and per Artifact under `$PASEO_HOME/assignments/artifacts/`. Collection reads return healthy records together with unknown or corrupt-file diagnostics; they do not hide the healthy records because one sibling is bad.
+
 ## Work Item references
 
 A Work Item reference keeps source and resource identity, a URL, and bounded display fallbacks. The title, identifier, source label, and URL are snapshots revised with the Assignment. The external source remains authoritative.
