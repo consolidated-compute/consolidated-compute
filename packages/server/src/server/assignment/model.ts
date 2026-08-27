@@ -36,8 +36,8 @@ function openTokenSchema(max: number) {
 }
 
 const TimestampSchema = z.string().datetime({ offset: true });
-const AssignmentIdSchema = z.string().regex(/^asgn_[0-9a-f]{16}$/);
-const AssignmentArtifactIdSchema = z.string().regex(/^aart_[0-9a-f]{16}$/);
+export const PersistedAssignmentIdSchema = z.string().regex(/^asgn_[0-9a-f]{16}$/);
+export const PersistedAssignmentArtifactIdSchema = z.string().regex(/^aart_[0-9a-f]{16}$/);
 const TeamRunIdSchema = z.string().regex(/^trun_[0-9a-f]{16}$/);
 const SafeEntityIdSchema = z
   .string()
@@ -87,7 +87,7 @@ export const PersistedAssignmentStateSchema = z.discriminatedUnion("status", [
 
 export const PersistedAssignmentRecordSchema = z
   .object({
-    id: AssignmentIdSchema,
+    id: PersistedAssignmentIdSchema,
     revision: z.number().int().positive(),
     title: nonBlankStringSchema(ASSIGNMENT_TITLE_MAX_CHARS),
     objective: nonBlankStringSchema(ASSIGNMENT_OBJECTIVE_MAX_CHARS),
@@ -154,8 +154,8 @@ export const PersistedAssignmentArtifactProducerSchema = z
 
 export const PersistedAssignmentArtifactRecordSchema = z
   .object({
-    id: AssignmentArtifactIdSchema,
-    assignmentId: AssignmentIdSchema,
+    id: PersistedAssignmentArtifactIdSchema,
+    assignmentId: PersistedAssignmentIdSchema,
     assignmentRevision: z.number().int().positive(),
     kind: openTokenSchema(ASSIGNMENT_ARTIFACT_KIND_MAX_CHARS),
     title: nonBlankStringSchema(ASSIGNMENT_ARTIFACT_TITLE_MAX_CHARS),
