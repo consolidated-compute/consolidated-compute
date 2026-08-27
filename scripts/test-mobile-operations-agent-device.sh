@@ -265,17 +265,39 @@ fi
 # Expo's development-client shell has platform- and runtime-dependent prompts.
 # Reuse the repository's conditional Maestro choreography before the strict
 # Agent Device replay starts asserting product state.
-AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" replay \
-  "${DEV_CLIENT_FLOW}" \
-  --maestro \
-  "${TARGET_ARGS[@]}" \
-  --metro-host "${DEVICE_HOST}" \
-  --metro-port "${METRO_PORT}" \
-  --timeout 180000
+DEV_CLIENT_RESULT="$(
+  AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" replay \
+    "${DEV_CLIENT_FLOW}" \
+    --maestro \
+    "${TARGET_ARGS[@]}" \
+    --metro-host "${DEVICE_HOST}" \
+    --metro-port "${METRO_PORT}" \
+    --timeout 180000 \
+    --json
+)"
+printf '%s\n' "${DEV_CLIENT_RESULT}"
 
-# Maestro replay keeps its default session active so callers can continue it.
+DEV_CLIENT_SESSION="$(
+  printf '%s' "${DEV_CLIENT_RESULT}" | node -e '
+    let input = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => {
+      input += chunk;
+    });
+    process.stdin.on("end", () => {
+      const result = JSON.parse(input);
+      const session = result.data?.session;
+      if (typeof session !== "string" || session.length === 0) {
+        throw new Error("Agent Device replay did not return a session ID.");
+      }
+      process.stdout.write(session);
+    });
+  '
+)"
+
+# Maestro replay keeps its returned session active so callers can continue it.
 # The matrix runner owns a fresh test session instead, so release the device.
-AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" close --session default
+AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" close --session "${DEV_CLIENT_SESSION}"
 
 REPORTER_ARGS=(--reporter default)
 if [[ -n "${PASEO_MOBILE_E2E_JUNIT_PATH:-}" ]]; then

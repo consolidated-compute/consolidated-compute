@@ -215,9 +215,11 @@ test("mobile Operations, Visual, and Teams stay isolated from the upstream runne
   assert.match(operationsRunner, /metro prepare[\s\S]*--no-reuse-existing/);
   assert.match(operationsRunner, /TARGET_ARGS\+=\(--serial "\$\{SERIAL\}"\)/);
   assert.match(operationsRunner, /replay[\s\S]*DEV_CLIENT_FLOW[\s\S]*--maestro/);
+  assert.match(operationsRunner, /DEV_CLIENT_RESULT[\s\S]*--json/);
+  assert.match(operationsRunner, /result\.data\?\.session/);
   assert.match(
     operationsRunner,
-    /replay[\s\S]*DEV_CLIENT_FLOW[\s\S]*close --session default[\s\S]*test/,
+    /replay[\s\S]*DEV_CLIENT_FLOW[\s\S]*close --session "\$\{DEV_CLIENT_SESSION\}"[\s\S]*test/,
   );
   assert.match(devClientFlow, /clearState: true/);
   assert.match(devClientFlow, /openLink: \$\{DEV_CLIENT_URL\}/);
