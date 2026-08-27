@@ -2,6 +2,8 @@
 
 A Team is a reusable, host-local definition. A Team Run is one execution of that definition against an Objective in an existing Workspace.
 
+[Assignments and Artifacts](assignments.md) define the durable intent and explicit handoff contract layered onto this lifecycle. The execution rules below describe the current objective-only compatibility path until that admission path is implemented.
+
 ## Ownership
 
 The daemon that stores a Team owns it. Team and Team Run IDs are daemon-local. The app qualifies them with `serverId`; stored and wire records do not.
@@ -62,4 +64,6 @@ Shutdown fences new starts before agents close. Mark in-flight runs interrupted 
 
 ## Roadmap boundary
 
-The Objective is not a durable Assignment. The bounded inline handoff is not an Artifact. V0.2 adds no policy enforcement, sandbox, supervisor, conditional revision loop, retry, fan-out, Work Item, new scheduler, or Team-owned Workspace creation. Issues #5–#8 own those later contracts.
+V0.2 remains objective-only: its Objective is not a durable Assignment and its bounded inline handoff is not an Artifact. [Assignments and Artifacts](assignments.md) own the v0.3 contract; the legacy path remains for stored runs and older clients.
+
+Teams still add no policy enforcement, sandbox, supervisor, conditional revision loop, retry, fan-out, new scheduler, or Team-owned Workspace creation. Issues #6–#8 own those later contracts.
