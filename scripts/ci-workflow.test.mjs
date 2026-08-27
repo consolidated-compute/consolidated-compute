@@ -216,6 +216,8 @@ test("mobile Operations, Visual, and Teams stay isolated from the upstream runne
   assert.match(operationsRunner, /TARGET_ARGS\+=\(--serial "\$\{SERIAL\}"\)/);
   assert.match(operationsRunner, /replay[\s\S]*DEV_CLIENT_FLOW[\s\S]*--maestro/);
   assert.match(operationsRunner, /DEV_CLIENT_REPLAY_LOG/);
+  assert.match(operationsRunner, /CAPTURE_AGENT_DEVICE_SESSIONS=1/);
+  assert.match(operationsRunner, /agent-device-sessions/);
   assert.match(operationsRunner, /matchAll\(\/pass --session \(\\S\+\)/);
   assert.match(
     operationsRunner,
@@ -333,7 +335,7 @@ test("mobile Operations, Visual, and Teams bound Android replay resources", () =
   const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
   const matrixRunner = readFileSync(operationsMatrixRunnerPath, "utf8");
 
-  assert.match(source, /ram-size: 2048M/);
+  assert.match(source, /ram-size: 4096M/);
   assert.match(source, /heap-size: 512M/);
   assert.match(source, /PASEO_MOBILE_E2E_SERIAL: emulator-5554/);
   assert.match(

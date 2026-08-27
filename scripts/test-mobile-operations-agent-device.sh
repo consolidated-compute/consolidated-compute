@@ -15,6 +15,7 @@ METRO_PID=0
 METRO_LOG_PATH=""
 FIXTURE_PID=0
 RESET_DEVICE_SETTINGS=0
+CAPTURE_AGENT_DEVICE_SESSIONS=0
 
 case "${MATRIX_SURFACE}" in
   operations)
@@ -90,6 +91,11 @@ cleanup() {
   fi
   if [[ -n "${METRO_LOG_PATH}" && -f "${METRO_LOG_PATH}" ]]; then
     cp "${METRO_LOG_PATH}" "${ARTIFACTS_DIR}/metro.log" >/dev/null 2>&1 || true
+  fi
+  if [[ "${CAPTURE_AGENT_DEVICE_SESSIONS}" -eq 1 && -d "${STATE_DIR}/sessions" ]]; then
+    mkdir -p "${ARTIFACTS_DIR}/agent-device-sessions"
+    cp -R "${STATE_DIR}/sessions/." "${ARTIFACTS_DIR}/agent-device-sessions/" \
+      >/dev/null 2>&1 || true
   fi
   AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" daemon stop --clean >/dev/null 2>&1 || true
   if [[ "${METRO_PID}" -gt 0 ]]; then
@@ -266,6 +272,7 @@ fi
 # Reuse the repository's conditional Maestro choreography before the strict
 # Agent Device replay starts asserting product state.
 DEV_CLIENT_REPLAY_LOG="${ARTIFACTS_DIR}/dev-client-replay.log"
+CAPTURE_AGENT_DEVICE_SESSIONS=1
 AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" replay \
   "${DEV_CLIENT_FLOW}" \
   --maestro \

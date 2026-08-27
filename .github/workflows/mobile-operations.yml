@@ -215,7 +215,7 @@ jobs:
           api-level: 35
           arch: x86_64
           profile: pixel_6
-          ram-size: 2048M
+          ram-size: 4096M
           heap-size: 512M
           disable-animations: true
           script: |
