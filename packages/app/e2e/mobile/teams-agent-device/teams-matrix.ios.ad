@@ -15,10 +15,9 @@ screenshot "${AD_ARTIFACTS}/teams-list-light.png" --scale 1
 
 press "id=\"team-row-${PRIMARY_SERVER_ID}-${PRIMARY_TEAM_ID}\""
 wait "id=\"team-detail-${PRIMARY_SERVER_ID}-${PRIMARY_TEAM_ID}\"" 30000
-scroll down 0.3
-wait "id=\"team-role-${PRIMARY_SERVER_ID}%3A${PRIMARY_TEAM_ID}-${PRIMARY_TEAM_ROLE_ID}\"" 30000
+get attrs "id=\"team-role-${PRIMARY_SERVER_ID}%3A${PRIMARY_TEAM_ID}-${PRIMARY_TEAM_ROLE_ID}\""
 scroll down 0.6
-wait "id=\"team-step-${PRIMARY_SERVER_ID}-${PRIMARY_TEAM_ID}-${PRIMARY_TEAM_STEP_ID}\"" 30000
+get attrs "id=\"team-step-${PRIMARY_SERVER_ID}-${PRIMARY_TEAM_ID}-${PRIMARY_TEAM_STEP_ID}\""
 screenshot "${AD_ARTIFACTS}/teams-detail-large-text.png" --scale 1
 
 orientation landscape-left
@@ -42,12 +41,11 @@ scroll down 0.6
 wait "id=\"team-run-role-status-${PRIMARY_TEAM_ROLE_ID}-ready\"" 30000
 press "id=\"team-run-start\""
 wait "id=\"team-run-cancel\"" 30000
-scroll down 0.3
-wait "id=\"team-run-status-waiting_for_permission\"" 30000
-screenshot "${AD_ARTIFACTS}/teams-waiting-for-permission.png" --scale 1
 scroll down 0.8
 scroll down 0.8
 wait "id=\"team-run-step-status-${PRIMARY_TEAM_STEP_ID}-waiting_for_permission\"" 30000
+get attrs "id=\"team-run-status-waiting_for_permission\""
+screenshot "${AD_ARTIFACTS}/teams-waiting-for-permission.png" --scale 1
 screenshot "${AD_ARTIFACTS}/teams-waiting-step.png" --scale 1
 
 press "id=\"team-run-step-agent-${PRIMARY_TEAM_STEP_ID}\""
@@ -55,10 +53,7 @@ wait "id=\"permission-request-question\"" 30000
 screenshot "${AD_ARTIFACTS}/teams-permission.png" --scale 1
 press "id=\"permission-request-accept\""
 back
-scroll top
-wait "id=\"team-run-status-succeeded\"" 30000
-scroll down 0.8
-scroll down 0.8
 wait "id=\"team-run-step-status-${PRIMARY_TEAM_STEP_ID}-succeeded\"" 30000
+get attrs "id=\"team-run-status-succeeded\""
 screenshot "${AD_ARTIFACTS}/teams-succeeded.png" --scale 1
 close

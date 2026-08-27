@@ -19,6 +19,8 @@ scroll down 0.2
 fill "id=\"direct-host-input\"" "${SECONDARY_HOST}"
 fill "id=\"direct-port-input\"" "${SECONDARY_PORT}"
 keyboard dismiss
+scroll bottom
+wait "id=\"direct-host-submit\"" 30000
 press "id=\"direct-host-submit\""
 wait "id=\"host-page-connections-card\"" 30000
 
@@ -63,14 +65,10 @@ wait "id=\"sidebar-operations\"" 30000
 press "id=\"sidebar-operations\""
 wait "id=\"operations-screen\"" 30000
 
-scroll down 0.7
-scroll down 0.7
-wait "id=\"operations-provider-subagent-${PRIMARY_SERVER_ID}-${PRIMARY_AGENT_ID}-${PRIMARY_PROVIDER_SUBAGENT_ID}\"" 30000
+get attrs "id=\"operations-provider-subagent-${PRIMARY_SERVER_ID}-${PRIMARY_AGENT_ID}-${PRIMARY_PROVIDER_SUBAGENT_ID}\""
 screenshot "${AD_ARTIFACTS}/operations-primary-hierarchy.png" --scale 1
 
-scroll down 0.8
-scroll down 0.8
-scroll down 0.8
+scroll bottom
 wait "id=\"operations-workspace-${SECONDARY_SERVER_ID}-${SECONDARY_WORKSPACE_ID}\"" 30000
 wait "id=\"operations-agent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}\"" 30000
 wait "id=\"operations-provider-subagent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}-${SECONDARY_PROVIDER_SUBAGENT_ID}\"" 30000

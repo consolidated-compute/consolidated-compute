@@ -41,11 +41,9 @@ esac
 
 if [[ "${MATRIX_SURFACE}" == "visual" ]]; then
   export EXPO_PUBLIC_PASEO_E2E_VISUAL_MOTION_PROBE=1
-  if [[ "${PLATFORM}" == "ios" ]]; then
-    # Agent Device has no iOS command for the system Reduce Motion setting.
-    # Exercise the same presentation path without changing production bundles.
-    export EXPO_PUBLIC_PASEO_E2E_FORCE_VISUAL_REDUCED_MOTION=1
-  fi
+  # The hosted devices expose different system animation controls. Exercise the
+  # same presentation path on both without changing production bundles.
+  export EXPO_PUBLIC_PASEO_E2E_FORCE_VISUAL_REDUCED_MOTION=1
 fi
 
 if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then

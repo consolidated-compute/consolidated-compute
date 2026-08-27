@@ -210,7 +210,7 @@ test("mobile Operations, Visual, and Teams stay isolated from the upstream runne
   assert.match(operationsRunner, /EXPO_PUBLIC_PASEO_E2E_VISUAL_MOTION_PROBE=1/);
   assert.match(
     operationsRunner,
-    /\[\[ "\$\{PLATFORM\}" == "ios" \]\][\s\S]*EXPO_PUBLIC_PASEO_E2E_FORCE_VISUAL_REDUCED_MOTION=1/,
+    /EXPO_PUBLIC_PASEO_E2E_VISUAL_MOTION_PROBE=1\n\s+#[^\n]+\n\s+#[^\n]+\n\s+export EXPO_PUBLIC_PASEO_E2E_FORCE_VISUAL_REDUCED_MOTION=1/,
   );
   assert.match(operationsRunner, /metro prepare[\s\S]*--no-reuse-existing/);
   assert.match(operationsRunner, /TARGET_ARGS\+=\(--serial "\$\{SERIAL\}"\)/);
@@ -239,7 +239,11 @@ test("mobile Operations replays keep one cross-platform contract", () => {
   const normalizePlatform = (source) =>
     source
       .replace(/^context platform=(ios|android)/, "context platform=native")
-      .replace(/^scroll down 0\.2\n(?=fill "id=\\"direct-host-input)/m, "");
+      .replace(/^scroll down 0\.2\n(?=fill "id=\\"direct-host-input)/m, "")
+      .replace(
+        /^scroll bottom\nwait "id=\\"direct-host-submit\\"" 30000\n(?=press "id=\\"direct-host-submit)/m,
+        "",
+      );
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
   assert.doesNotMatch(
@@ -255,8 +259,11 @@ test("mobile Operations replays keep one cross-platform contract", () => {
   assert.match(iosReplay, /wait "id=\\"host-page-connections-card\\"" 30000/);
   assert.match(iosReplay, /direct-host-input\\"" 30000\nscroll down 0\.2\nfill/);
   assert.doesNotMatch(androidReplay, /direct-host-input\\"" 30000\nscroll down/);
+  assert.match(iosReplay, /keyboard dismiss\nscroll bottom\nwait "id=\\"direct-host-submit/);
+  assert.doesNotMatch(androidReplay, /keyboard dismiss\nscroll bottom/);
   assert.doesNotMatch(iosReplay, /workspace-tab-agent_/);
   assert.match(iosReplay, /wait "id=\\"message-input-root\\"" 30000/);
+  assert.match(iosReplay, /get attrs "id=\\"operations-provider-subagent-/);
   assert.doesNotMatch(iosReplay, /retries=[1-9]/);
 });
 
@@ -267,7 +274,11 @@ test("mobile Visual replays keep one cross-platform accessibility contract", () 
     source
       .replace(/^context platform=(ios|android)/, "context platform=native")
       .replace(/^settings animations off\n/m, "")
-      .replace(/^scroll down 0\.2\n(?=fill "id=\\"direct-host-input)/m, "");
+      .replace(/^scroll down 0\.2\n(?=fill "id=\\"direct-host-input)/m, "")
+      .replace(
+        /^scroll bottom\nwait "id=\\"direct-host-submit\\"" 30000\n(?=press "id=\\"direct-host-submit)/m,
+        "",
+      );
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
   assert.doesNotMatch(
@@ -282,6 +293,8 @@ test("mobile Visual replays keep one cross-platform accessibility contract", () 
   assert.doesNotMatch(iosReplay, /paseo:\/\/visual" --relaunch/);
   assert.match(iosReplay, /direct-host-input\\"" 30000\nscroll down 0\.2\nfill/);
   assert.doesNotMatch(androidReplay, /direct-host-input\\"" 30000\nscroll down/);
+  assert.match(iosReplay, /keyboard dismiss\nscroll bottom\nwait "id=\\"direct-host-submit/);
+  assert.doesNotMatch(androidReplay, /keyboard dismiss\nscroll bottom/);
   assert.doesNotMatch(iosReplay, /settings animations off/);
   assert.match(androidReplay, /settings animations off/);
   assert.match(iosReplay, /orientation landscape-left/);
@@ -306,9 +319,7 @@ test("mobile Teams replays keep one cross-platform run contract", () => {
   const iosReplay = readFileSync(iosTeamsReplayPath, "utf8");
   const androidReplay = readFileSync(androidTeamsReplayPath, "utf8");
   const normalizePlatform = (source) =>
-    source
-      .replace(/^context platform=(ios|android)/, "context platform=native")
-      .replace(/^scroll down 0\.3\n(?=wait "id=\\"team-role-)/m, "scroll down 0.6\n");
+    source.replace(/^context platform=(ios|android)/, "context platform=native");
 
   assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
   assert.doesNotMatch(
@@ -326,7 +337,9 @@ test("mobile Teams replays keep one cross-platform run contract", () => {
   assert.match(iosReplay, /home\nopen "\$\{APP_ID\}"/);
   assert.match(iosReplay, /team-run-role-status-\$\{PRIMARY_TEAM_ROLE_ID\}-ready/);
   assert.match(iosReplay, /team-run-status-waiting_for_permission/);
-  assert.match(iosReplay, /team-run-cancel\\"" 30000\nscroll down 0\.3\nwait/);
+  assert.match(iosReplay, /get attrs "id=\\"team-role-/);
+  assert.match(iosReplay, /get attrs "id=\\"team-step-/);
+  assert.match(iosReplay, /team-run-cancel\\"" 30000\nscroll down 0\.8/);
   assert.match(iosReplay, /permission-request-accept/);
   assert.match(iosReplay, /team-run-status-succeeded/);
 });
