@@ -263,7 +263,7 @@ fi
 if [[ "${PLATFORM}" == "ios" ]]; then
   AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" prepare ios-runner \
     "${TARGET_ARGS[@]}" \
-    --timeout 240000
+    --timeout 360000
 fi
 
 # Expo's development-client shell has platform- and runtime-dependent prompts.
@@ -271,6 +271,8 @@ fi
 # Quickstep. Maestro owns only the conditional development-client prompts before
 # the strict Agent Device replay starts asserting product state.
 DEV_CLIENT_LAUNCH_SESSION="${MATRIX_SURFACE}-dev-client-launch-${PLATFORM}"
+DEV_CLIENT_REPLAY_LOG="${ARTIFACTS_DIR}/dev-client-replay.log"
+CAPTURE_AGENT_DEVICE_SESSIONS=1
 if [[ "${PLATFORM}" == "android" ]]; then
   adb shell am force-stop com.android.launcher3 >/dev/null 2>&1 || true
 fi
@@ -284,38 +286,16 @@ AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" open \
   "${TARGET_ARGS[@]}" \
   --metro-host "${DEVICE_HOST}" \
   --metro-port "${METRO_PORT}"
-AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" close \
-  --session "${DEV_CLIENT_LAUNCH_SESSION}"
-
-DEV_CLIENT_REPLAY_LOG="${ARTIFACTS_DIR}/dev-client-replay.log"
-CAPTURE_AGENT_DEVICE_SESSIONS=1
 AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" replay \
   "${DEV_CLIENT_FLOW}" \
   --maestro \
+  --session "${DEV_CLIENT_LAUNCH_SESSION}" \
   "${TARGET_ARGS[@]}" \
   --metro-host "${DEVICE_HOST}" \
   --metro-port "${METRO_PORT}" \
   --timeout 180000 | tee "${DEV_CLIENT_REPLAY_LOG}"
-
-DEV_CLIENT_SESSION="$(
-  node -e '
-    const output = require("node:fs").readFileSync(process.argv[1], "utf8");
-    const sessions = Array.from(
-      output.matchAll(/pass --session (\S+) on your next command/g),
-      (match) => match[1],
-    );
-    if (sessions.length !== 1) {
-      throw new Error(
-        `Expected one scoped Agent Device replay session, found ${sessions.length}.`,
-      );
-    }
-    process.stdout.write(sessions[0]);
-  ' "${DEV_CLIENT_REPLAY_LOG}"
-)"
-
-# Maestro replay keeps its returned session active so callers can continue it.
-# The matrix runner owns a fresh test session instead, so release the device.
-AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" close --session "${DEV_CLIENT_SESSION}"
+AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" close \
+  --session "${DEV_CLIENT_LAUNCH_SESSION}"
 
 REPORTER_ARGS=(--reporter default)
 if [[ -n "${PASEO_MOBILE_E2E_JUNIT_PATH:-}" ]]; then

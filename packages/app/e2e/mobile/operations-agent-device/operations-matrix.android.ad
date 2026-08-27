@@ -73,6 +73,8 @@ settings appearance dark
 wait "id=\"operations-screen\"" 30000
 screenshot "${AD_ARTIFACTS}/operations-dark-hierarchy.png" --scale 1
 
+scroll bottom
+wait "id=\"operations-agent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}\"" 30000
 press "id=\"operations-agent-${SECONDARY_SERVER_ID}-${SECONDARY_AGENT_ID}\""
 wait "id=\"message-input-root\"" 30000
 close

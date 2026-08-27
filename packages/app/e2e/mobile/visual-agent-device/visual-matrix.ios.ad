@@ -64,6 +64,8 @@ settings appearance dark
 wait "id=\"visual-screen\"" 30000
 screenshot "${AD_ARTIFACTS}/visual-dark-large-text-reduced-motion.png" --scale 1
 
+scroll bottom
+wait "id=\"visual-workspace-open-${SECONDARY_SERVER_ID}-${SECONDARY_WORKSPACE_ID}\"" 30000
 press "id=\"visual-workspace-open-${SECONDARY_SERVER_ID}-${SECONDARY_WORKSPACE_ID}\""
 wait "id=\"workspace-header-title\"" 30000
 press "id=\"menu-button\""

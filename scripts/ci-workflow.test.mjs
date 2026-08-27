@@ -224,11 +224,12 @@ test("mobile Operations, Visual, and Teams stay isolated from the upstream runne
   assert.match(operationsRunner, /DEV_CLIENT_REPLAY_LOG/);
   assert.match(operationsRunner, /CAPTURE_AGENT_DEVICE_SESSIONS=1/);
   assert.match(operationsRunner, /agent-device-sessions/);
-  assert.match(operationsRunner, /matchAll\(\/pass --session \(\\S\+\)/);
+  assert.doesNotMatch(operationsRunner, /matchAll\(\/pass --session/);
   assert.match(
     operationsRunner,
-    /replay[\s\S]*DEV_CLIENT_FLOW[\s\S]*close --session "\$\{DEV_CLIENT_SESSION\}"[\s\S]*test/,
+    /open[\s\S]*--session "\$\{DEV_CLIENT_LAUNCH_SESSION\}"[\s\S]*replay[\s\S]*--session "\$\{DEV_CLIENT_LAUNCH_SESSION\}"[\s\S]*close[\s\S]*--session "\$\{DEV_CLIENT_LAUNCH_SESSION\}"[\s\S]*test/,
   );
+  assert.match(operationsRunner, /prepare ios-runner[\s\S]*--timeout 360000/);
   assert.doesNotMatch(devClientFlow, /launchApp|openLink/);
   assert.match(devClientFlow, /visible: "Open in\.\*Consolidated Compute/);
   assert.match(devClientFlow, /visible: "Continue"/);
@@ -388,7 +389,7 @@ test("mobile Operations, Visual, and Teams bound Android replay resources", () =
   const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
   const matrixRunner = readFileSync(operationsMatrixRunnerPath, "utf8");
 
-  assert.match(source, /ram-size: 4096M/);
+  assert.match(source, /ram-size: 3072M/);
   assert.match(source, /heap-size: 512M/);
   assert.match(source, /PASEO_MOBILE_E2E_SERIAL: emulator-5554/);
   assert.match(
