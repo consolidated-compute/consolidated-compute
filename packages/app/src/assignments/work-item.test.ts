@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ASSIGNMENT_WORK_ITEM_TITLE_MAX_CHARS } from "@getpaseo/protocol/assignment/types";
 import {
   forgeSearchItemToWorkItem,
   pluginAttachmentItemToWorkItem,
@@ -50,6 +51,30 @@ describe("Assignment Work Item adapters", () => {
       title: "Implement UI",
       url: "https://linear.app/example/issue/ENG-12",
     });
+  });
+
+  it("rejects plugin resources that cannot be persisted as Work Items", () => {
+    const item = {
+      id: "ENG-12",
+      identifier: "ENG-12",
+      title: "Implement UI",
+      url: "https://linear.app/example/issue/ENG-12",
+      text: "body",
+      resourceType: "Project Issue",
+    };
+
+    expect(
+      pluginAttachmentItemToWorkItem("linear", "issues", "Linear issues", {
+        ...item,
+        url: "mailto:team@example.com",
+      }),
+    ).toBeNull();
+    expect(
+      pluginAttachmentItemToWorkItem("linear", "issues", "Linear issues", {
+        ...item,
+        title: "x".repeat(ASSIGNMENT_WORK_ITEM_TITLE_MAX_CHARS + 1),
+      }),
+    ).toBeNull();
   });
 
   it("surfaces Forge payload failures and authentication state", () => {

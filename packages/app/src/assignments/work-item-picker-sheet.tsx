@@ -77,17 +77,23 @@ function pluginResults(
   items: readonly PluginAttachmentItem[],
 ): WorkItemResult[] {
   if (!source) return [];
-  return items.map((item) => ({
-    id: `${source.plugin.id}:${source.source.id}:${item.id}`,
-    label: `${item.identifier} ${item.title}`,
-    description: item.subtitle,
-    workItem: pluginAttachmentItemToWorkItem(
+  const results: WorkItemResult[] = [];
+  for (const item of items) {
+    const workItem = pluginAttachmentItemToWorkItem(
       source.plugin.id,
       source.source.id,
       source.source.title,
       item,
-    ),
-  }));
+    );
+    if (!workItem) continue;
+    results.push({
+      id: `${source.plugin.id}:${source.source.id}:${item.id}`,
+      label: `${item.identifier} ${item.title}`,
+      description: item.subtitle,
+      workItem,
+    });
+  }
+  return results;
 }
 
 function buildSources(

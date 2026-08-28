@@ -2,6 +2,7 @@ import type { ForgeAuthState, ForgeSearchItem } from "@getpaseo/protocol/message
 import type { AssignmentWorkItemReferenceDto } from "@getpaseo/protocol/assignment/types";
 import type { PluginAttachmentItem } from "@getpaseo/plugin";
 import { getForgePresentation } from "@/git/forge";
+import { isValidAssignmentWorkItem } from "./work-item-validation";
 
 interface WorkItemSearchQuerySnapshot {
   error: unknown;
@@ -49,8 +50,8 @@ export function pluginAttachmentItemToWorkItem(
   sourceId: string,
   sourceLabel: string,
   item: PluginAttachmentItem,
-): AssignmentWorkItemReferenceDto {
-  return {
+): AssignmentWorkItemReferenceDto | null {
+  const workItem: AssignmentWorkItemReferenceDto = {
     sourceId: `plugin:${pluginId}:${sourceId}`,
     sourceLabel,
     resourceType: normalizeResourceType(item.resourceType),
@@ -59,6 +60,7 @@ export function pluginAttachmentItemToWorkItem(
     title: item.title,
     url: item.url,
   };
+  return isValidAssignmentWorkItem(workItem) ? workItem : null;
 }
 
 export function resolveWorkItemSearchSnapshot(input: {
