@@ -65,6 +65,7 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
   const { cancelCompletion, pending, startPress } = useTeamRunFormSubmission(
     model,
     props.onStarted,
+    retrySecurityPreview,
   );
 
   const header = useMemo<SheetHeader>(
