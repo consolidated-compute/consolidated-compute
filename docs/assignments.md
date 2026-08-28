@@ -8,7 +8,7 @@ Assignment and Artifact IDs are daemon-local. The app qualifies them with `serve
 
 The daemon owns the Assignment title, objective, link, and lifecycle. It does not own the linked Work Item or infer its state. Team Runs and Artifacts keep the accepted Assignment ID and revision so later edits cannot rewrite history.
 
-Disk schemas belong to the server. Future protocol DTOs project those records without exporting persistence schemas.
+Disk schemas belong to the server. Protocol DTOs project those records without exporting persistence schemas.
 
 The daemon stores one atomic JSON record per Assignment under `$PASEO_HOME/assignments/records/` and per Artifact under `$PASEO_HOME/assignments/artifacts/`. Collection reads return healthy records together with unknown or corrupt-file diagnostics; they do not hide the healthy records because one sibling is bad.
 

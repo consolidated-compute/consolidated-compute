@@ -32,6 +32,20 @@ export function matchesTeamRunRoute(run: TeamRunDto, teamId: string): boolean {
   return run.teamId === teamId && run.teamSnapshot.id === teamId;
 }
 
+export type TeamRunBackTarget =
+  | { kind: "history" }
+  | { kind: "assignment"; assignmentId: string }
+  | { kind: "team" };
+
+export function resolveTeamRunBackTarget(input: {
+  canGoBack: boolean;
+  assignmentId: string | undefined;
+}): TeamRunBackTarget {
+  if (input.canGoBack) return { kind: "history" };
+  if (input.assignmentId) return { kind: "assignment", assignmentId: input.assignmentId };
+  return { kind: "team" };
+}
+
 export function upsertTeamRun(runs: readonly TeamRunDto[], run: TeamRunDto): TeamRunDto[] {
   const next = runs.filter((entry) => entry.id !== run.id);
   next.push(run);

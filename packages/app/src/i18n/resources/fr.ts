@@ -272,6 +272,7 @@ export const fr: TranslationResources = {
       refreshFailed: "Impossible d’actualiser le visuel",
     },
   },
+  assignments: en.assignments,
   teams: {
     ...en.teams,
     title: "Équipes",

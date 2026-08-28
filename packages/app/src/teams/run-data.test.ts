@@ -6,6 +6,7 @@ import {
   isTerminalTeamRunStatus,
   matchesTeamRunRoute,
   newestTeamRunSnapshot,
+  resolveTeamRunBackTarget,
   teamRunHistoryPlaceholder,
   teamRunListQueryKey,
   teamRunQueryKey,
@@ -86,6 +87,19 @@ describe("Team Run data", () => {
   it("rejects a Run reached through another Team's route", () => {
     expect(matchesTeamRunRoute(run("run-1", "2026-08-26T00:00:00.000Z"), "team-1")).toBe(true);
     expect(matchesTeamRunRoute(run("run-1", "2026-08-26T00:00:00.000Z"), "team-2")).toBe(false);
+  });
+
+  it("preserves route history before an Assignment-backed Run loads", () => {
+    expect(resolveTeamRunBackTarget({ canGoBack: true, assignmentId: undefined })).toEqual({
+      kind: "history",
+    });
+    expect(resolveTeamRunBackTarget({ canGoBack: false, assignmentId: "assignment-1" })).toEqual({
+      kind: "assignment",
+      assignmentId: "assignment-1",
+    });
+    expect(resolveTeamRunBackTarget({ canGoBack: false, assignmentId: undefined })).toEqual({
+      kind: "team",
+    });
   });
 
   it("replaces a run by ID and keeps newest-first order", () => {

@@ -432,6 +432,19 @@ export function buildTeamsRoute() {
   return "/teams" as const;
 }
 
+export function buildAssignmentsRoute() {
+  return "/assignments" as const;
+}
+
+export function buildAssignmentRoute(serverId: string, assignmentId: string) {
+  const normalizedServerId = trimNonEmpty(serverId);
+  const normalizedAssignmentId = trimNonEmpty(assignmentId);
+  if (!normalizedServerId || !normalizedAssignmentId) {
+    throw new Error("buildAssignmentRoute requires a serverId and assignmentId");
+  }
+  return `/assignments/${encodeSegment(normalizedServerId)}/${encodeSegment(normalizedAssignmentId)}` as const;
+}
+
 export function buildTeamRoute(serverId: string, teamId: string) {
   const normalizedServerId = trimNonEmpty(serverId);
   const normalizedTeamId = trimNonEmpty(teamId);

@@ -271,6 +271,7 @@ export const es: TranslationResources = {
       refreshFailed: "No se pudo actualizar Visual",
     },
   },
+  assignments: en.assignments,
   teams: {
     ...en.teams,
     title: "Equipos",

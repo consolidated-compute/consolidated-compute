@@ -270,6 +270,7 @@ export const ru: TranslationResources = {
       refreshFailed: "Не удалось обновить визуализацию",
     },
   },
+  assignments: en.assignments,
   teams: {
     ...en.teams,
     title: "Команды",

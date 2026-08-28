@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentFeature, ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
+import type { AssignmentDto } from "@getpaseo/protocol/assignment/types";
 import type { AgentProfile } from "@getpaseo/protocol/messages";
 import type { TeamDefinitionDto } from "@getpaseo/protocol/team/types";
 import { TEAM_OBJECTIVE_MAX_CHARS } from "@getpaseo/protocol/team/types";
@@ -154,6 +155,47 @@ describe("Team Run form model", () => {
     model.setSubmitError("Connection lost");
     model.setObjective("Implement issue 49 again");
     expect(model.getState().submission?.idempotencyKey).toBe("retry-key");
+  });
+
+  it("freezes Assignment identity and prevents Objective edits", () => {
+    const assignment: AssignmentDto = {
+      id: "asgn_0123456789abcdef",
+      revision: 7,
+      title: "Assignment UI",
+      objective: "Implement Assignment surfaces",
+      workItem: null,
+      state: { status: "open" },
+      createdAt: "2026-08-27T00:00:00.000Z",
+      updatedAt: "2026-08-27T00:00:00.000Z",
+    };
+    const model = openTeamRunForm(
+      {
+        serverId: "host-a",
+        team: team(),
+        workspaces: [workspace],
+        profiles: [profile({ featureValues: {} })],
+        assignment,
+      },
+      { generateIdempotencyKey: () => "assignment-key" },
+    );
+    model.setObjective("Ignored override");
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+
+    expect(model.getState()).toMatchObject({
+      objective: "Implement Assignment surfaces",
+      assignment,
+      canSubmit: true,
+      submission: {
+        serverId: "host-a",
+        teamId: "team-1",
+        expectedRevision: 3,
+        expectedAssignmentRevision: 7,
+        assignmentId: "asgn_0123456789abcdef",
+        idempotencyKey: "assignment-key",
+        objective: "Implement Assignment surfaces",
+        workspaceId: "workspace-1",
+      },
+    });
   });
 
   it("blocks a missing or duplicated Agent Profile explicitly", () => {

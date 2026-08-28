@@ -268,6 +268,7 @@ export const ar: TranslationResources = {
       refreshFailed: "تعذر تحديث التصور",
     },
   },
+  assignments: en.assignments,
   teams: {
     ...en.teams,
     title: "الفرق",

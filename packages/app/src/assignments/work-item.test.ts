@@ -1,0 +1,110 @@
+import { describe, expect, it } from "vitest";
+import { ASSIGNMENT_WORK_ITEM_TITLE_MAX_CHARS } from "@getpaseo/protocol/assignment/types";
+import {
+  forgeSearchItemToWorkItem,
+  pluginAttachmentItemToWorkItem,
+  resolveWorkItemSearchSnapshot,
+} from "./work-item";
+
+describe("Assignment Work Item adapters", () => {
+  it("captures only a bounded forge reference snapshot", () => {
+    expect(
+      forgeSearchItemToWorkItem({
+        kind: "issue",
+        forge: "github",
+        number: 71,
+        title: "Assignment surfaces",
+        url: "https://github.com/owner/repo/issues/71",
+        state: "OPEN",
+        body: "must not be copied",
+        labels: ["roadmap"],
+        projectPath: "owner/repo",
+      }),
+    ).toEqual({
+      sourceId: "github",
+      sourceLabel: "GitHub",
+      resourceType: "issue",
+      resourceId: "owner/repo:issue:71",
+      identifier: "#71",
+      title: "Assignment surfaces",
+      url: "https://github.com/owner/repo/issues/71",
+    });
+  });
+
+  it("captures plugin resource identity without its text body", () => {
+    expect(
+      pluginAttachmentItemToWorkItem("linear", "issues", "Linear issues", {
+        id: "ENG-12",
+        identifier: "ENG-12",
+        title: "Implement UI",
+        subtitle: "Open",
+        url: "https://linear.app/example/issue/ENG-12",
+        text: "must not be copied",
+        resourceType: "Project Issue",
+      }),
+    ).toEqual({
+      sourceId: "plugin:linear:issues",
+      sourceLabel: "Linear issues",
+      resourceType: "project-issue",
+      resourceId: "ENG-12",
+      identifier: "ENG-12",
+      title: "Implement UI",
+      url: "https://linear.app/example/issue/ENG-12",
+    });
+  });
+
+  it("rejects plugin resources that cannot be persisted as Work Items", () => {
+    const item = {
+      id: "ENG-12",
+      identifier: "ENG-12",
+      title: "Implement UI",
+      url: "https://linear.app/example/issue/ENG-12",
+      text: "body",
+      resourceType: "Project Issue",
+    };
+
+    expect(
+      pluginAttachmentItemToWorkItem("linear", "issues", "Linear issues", {
+        ...item,
+        url: "mailto:team@example.com",
+      }),
+    ).toBeNull();
+    expect(
+      pluginAttachmentItemToWorkItem("linear", "issues", "Linear issues", {
+        ...item,
+        title: "x".repeat(ASSIGNMENT_WORK_ITEM_TITLE_MAX_CHARS + 1),
+      }),
+    ).toBeNull();
+  });
+
+  it("surfaces Forge payload failures and authentication state", () => {
+    const snapshot = resolveWorkItemSearchSnapshot({
+      useForge: true,
+      forge: {
+        data: { error: "Run gh auth login", authState: "unauthenticated" },
+        error: null,
+        isFetching: false,
+      },
+      plugin: { error: null, isFetching: false },
+      forgeSetupError: "Set up Forge on this host",
+    });
+
+    expect(snapshot).toEqual({
+      error: "Run gh auth login",
+      authState: "unauthenticated",
+      isFetching: false,
+    });
+    expect(
+      resolveWorkItemSearchSnapshot({
+        useForge: true,
+        forge: {
+          data: { error: null, authState: "cli_missing" },
+          error: null,
+          isFetching: false,
+        },
+        plugin: { error: null, isFetching: false },
+        forgeSetupError: "Set up Forge on this host",
+      }).error,
+    ).toBe("Set up Forge on this host");
+  });
+});

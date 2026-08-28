@@ -269,6 +269,7 @@ export const ko: TranslationResources = {
       refreshFailed: "비주얼을 새로 고칠 수 없습니다",
     },
   },
+  assignments: en.assignments,
   teams: {
     ...en.teams,
     title: "팀",
