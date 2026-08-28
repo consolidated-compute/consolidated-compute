@@ -50,6 +50,7 @@ import type {
 import type { GitCommandRuntimeMetricsSnapshot } from "../utils/git-command-runtime-metrics.js";
 import { snapshotGitCommandRuntimeMetrics } from "../utils/run-git-command.js";
 import type { WorkspaceAutoName } from "./workspace-auto-name.js";
+import type { AssignmentRepository } from "./assignment/repository.js";
 import { deriveProjectSlug } from "./workspace-git-metadata.js";
 import {
   createPushNotifications,
@@ -118,6 +119,14 @@ function resolveTeamServices(
   runService: TeamRunService | undefined,
 ): { repository: TeamRepository | null; runService: TeamRunService | null } {
   return { repository: repository ?? null, runService: runService ?? null };
+}
+
+function resolveAssignmentRepository(
+  repository: AssignmentRepository | undefined,
+  runService: TeamRunService | null,
+): AssignmentRepository | null {
+  if (!repository || !runService?.supportsAssignmentRepository(repository)) return null;
+  return repository;
 }
 
 export interface ExternalSocketMetadata {
@@ -616,6 +625,7 @@ export class VoiceAssistantWebSocketServer {
   private readonly orchestrationSkills: SessionOptions["orchestrationSkills"];
   private readonly teamRepository: TeamRepository | null;
   private readonly teamRunService: TeamRunService | null;
+  private readonly assignmentRepository: AssignmentRepository | null;
 
   constructor(
     server: HTTPServer,
@@ -665,6 +675,7 @@ export class VoiceAssistantWebSocketServer {
     workspaceLabelService?: WorkspaceLabelService,
     teamRepository?: TeamRepository,
     teamRunService?: TeamRunService,
+    assignmentRepository?: AssignmentRepository,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
     this.workspaceSetupRuntime = workspaceSetupRuntime;
@@ -684,6 +695,10 @@ export class VoiceAssistantWebSocketServer {
     const teamServices = resolveTeamServices(teamRepository, teamRunService);
     this.teamRepository = teamServices.repository;
     this.teamRunService = teamServices.runService;
+    this.assignmentRepository = resolveAssignmentRepository(
+      assignmentRepository,
+      teamServices.runService,
+    );
     this.agentManager = agentManager;
     this.agentStorage = agentStorage;
     this.projectRegistry = projectRegistry ?? createNoopProjectRegistry();
@@ -1451,6 +1466,7 @@ export class VoiceAssistantWebSocketServer {
       workspaceLabelService: this.workspaceLabelService ?? undefined,
       teamRepository: this.teamRepository ?? undefined,
       teamRunService: this.teamRunService ?? undefined,
+      assignmentRepository: this.assignmentRepository ?? undefined,
       directorySync: this.directorySync,
       scheduleService: this.scheduleService,
       checkoutDiffManager: this.checkoutDiffManager,
@@ -1784,6 +1800,8 @@ export class VoiceAssistantWebSocketServer {
         agentProfiles: true,
         // COMPAT(teams): added in v0.6.0, remove gate after 2027-02-26.
         ...(this.teamRepository && this.teamRunService ? { teams: true } : {}),
+        // COMPAT(assignments): added in v0.6.x, remove gate after 2027-02-27.
+        ...(this.assignmentRepository && this.teamRunService ? { assignments: true } : {}),
         // COMPAT(agentConfigApply): added in v0.3.2, remove gate after 2027-02-11.
         agentConfigApply: true,
       },

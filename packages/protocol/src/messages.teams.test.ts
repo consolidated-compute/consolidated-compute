@@ -6,7 +6,12 @@ import {
   SessionInboundMessageSchema,
   SessionOutboundMessageSchema,
 } from "./messages.js";
-import { TeamDefinitionDtoSchema, TeamRunDtoSchema } from "./team/types.js";
+import {
+  TeamDefinitionDtoSchema,
+  TeamRunDtoSchema,
+  TeamRunStepDtoSchema,
+  TeamRunStepSnapshotDtoSchema,
+} from "./team/types.js";
 
 const team = {
   id: "team_1",
@@ -85,6 +90,54 @@ describe("Team wire contracts", () => {
 
   test("carries the frozen resolved profile facts only in Team Run history", () => {
     expect(TeamRunDtoSchema.parse({ ...run, serverId: "must-not-cross-the-wire" })).toEqual(run);
+  });
+
+  test("keeps Assignment-backed run fields optional for old run payloads and ignorable by old clients", () => {
+    expect(TeamRunDtoSchema.parse(run)).toEqual(run);
+
+    const assignmentRun = {
+      ...run,
+      assignmentId: "asgn_0123456789abcdef",
+      assignmentRevision: 1,
+      assignmentSnapshot: {
+        id: "asgn_0123456789abcdef",
+        revision: 1,
+        title: "Ship the RPC",
+        objective: run.objective,
+        workItem: null,
+        state: { status: "open" as const },
+        createdAt: run.createdAt,
+        updatedAt: run.createdAt,
+      },
+      steps: [
+        {
+          ...run.steps[0],
+          snapshot: {
+            ...run.steps[0].snapshot,
+            inputArtifactIds: [],
+            outputArtifact: {
+              id: "aart_0123456789abcdef",
+              kind: "team_step_output" as const,
+              title: "Builder output",
+              mediaType: "text/markdown" as const,
+            },
+          },
+        },
+      ],
+    };
+    expect(TeamRunDtoSchema.parse(assignmentRun)).toEqual(assignmentRun);
+
+    const LegacyStepSnapshotSchema = TeamRunStepSnapshotDtoSchema.omit({
+      inputArtifactIds: true,
+      outputArtifact: true,
+    });
+    const LegacyStepSchema = TeamRunStepDtoSchema.extend({ snapshot: LegacyStepSnapshotSchema });
+    const LegacyRunSchema = TeamRunDtoSchema.omit({
+      assignmentId: true,
+      assignmentRevision: true,
+      assignmentSnapshot: true,
+    }).extend({ steps: z.array(LegacyStepSchema) });
+    expect(LegacyRunSchema.parse(assignmentRun)).toEqual(run);
   });
 
   test("requires Team updates to include at least one authored field", () => {

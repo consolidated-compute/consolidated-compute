@@ -41,7 +41,7 @@ export interface TeamSessionOptions {
   emit(message: SessionOutboundMessage): void;
 }
 
-interface TeamRpcError {
+export interface TeamRpcError {
   code: TeamRpcErrorCode;
   message: string;
 }
@@ -198,7 +198,7 @@ function requireHealthyTeamCollection(issues: TeamStorageCorruptError["issues"])
   if (invalidRecords.length > 0) throw new TeamStorageCorruptError(invalidRecords);
 }
 
-function toTeamRpcError(error: unknown): TeamRpcError {
+export function toTeamRpcError(error: unknown): TeamRpcError {
   if (error instanceof TeamExecutionPreflightError) {
     const issue = error.issues[0];
     if (issue?.kind === "profile_not_found") {

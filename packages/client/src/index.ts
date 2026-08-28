@@ -33,12 +33,22 @@ import type {
   ListTeamRunsInput,
   StartTeamRunInput,
   UpdateTeamInput,
+  CreateAssignmentInput,
+  PatchAssignmentInput,
+  TransitionAssignmentInput,
+  ListAssignmentArtifactsInput,
+  StartAssignmentTeamRunInput,
 } from "./daemon-client.js";
 import type {
   TeamDefinitionDto,
   TeamDefinitionInputDto,
   TeamRunDto,
 } from "@getpaseo/protocol/team/types";
+import type {
+  AssignmentArtifactDto,
+  AssignmentCollectionIssueDto,
+  AssignmentDto,
+} from "@getpaseo/protocol/assignment/types";
 
 /**
  * Coding turns routinely run for minutes, so the handle waits far longer than
@@ -391,12 +401,63 @@ export interface PaseoTeamActions {
   };
 }
 
+export type PaseoAssignment = AssignmentDto;
+export type PaseoAssignmentArtifact = AssignmentArtifactDto;
+export type PaseoAssignmentCollectionIssue = AssignmentCollectionIssueDto;
+export type PaseoAssignmentCreateOptions = CreateAssignmentInput;
+export type PaseoAssignmentPatchOptions = PatchAssignmentInput;
+export type PaseoAssignmentTransitionOptions = TransitionAssignmentInput;
+export type PaseoAssignmentArtifactListOptions = ListAssignmentArtifactsInput;
+export type PaseoAssignmentTeamRunStartOptions = StartAssignmentTeamRunInput;
+
+export interface PaseoAssignmentActions {
+  create(
+    options: PaseoAssignmentCreateOptions,
+  ): Promise<{ requestId: string; assignment: PaseoAssignment }>;
+  list(requestId?: string): Promise<{
+    requestId: string;
+    assignments: PaseoAssignment[];
+    issues?: PaseoAssignmentCollectionIssue[];
+  }>;
+  get(
+    assignmentId: string,
+    requestId?: string,
+  ): Promise<{ requestId: string; assignment: PaseoAssignment }>;
+  patch(
+    options: PaseoAssignmentPatchOptions,
+  ): Promise<{ requestId: string; assignment: PaseoAssignment }>;
+  complete(
+    options: PaseoAssignmentTransitionOptions,
+  ): Promise<{ requestId: string; assignment: PaseoAssignment }>;
+  cancel(
+    options: PaseoAssignmentTransitionOptions,
+  ): Promise<{ requestId: string; assignment: PaseoAssignment }>;
+  readonly artifacts: {
+    get(
+      artifactId: string,
+      requestId?: string,
+    ): Promise<{ requestId: string; artifact: PaseoAssignmentArtifact }>;
+    list(options: PaseoAssignmentArtifactListOptions): Promise<{
+      requestId: string;
+      artifacts: PaseoAssignmentArtifact[];
+      nextCursor: string | null;
+      issues?: PaseoAssignmentCollectionIssue[];
+    }>;
+  };
+  readonly runs: {
+    start(
+      options: PaseoAssignmentTeamRunStartOptions,
+    ): Promise<{ requestId: string; run: PaseoTeamRun }>;
+  };
+}
+
 export interface PaseoApi {
   readonly workspaces: PaseoWorkspaceActions;
   readonly agents: PaseoAgentActions;
   readonly providers: PaseoProviderActions;
   readonly config: PaseoConfigActions;
   readonly teams: PaseoTeamActions;
+  readonly assignments: PaseoAssignmentActions;
 }
 
 export interface PaseoClient extends PaseoApi {
@@ -510,6 +571,21 @@ export function createPaseoApi(daemonClient: DaemonClient): PaseoApi {
         list: (options) => daemonClient.listTeamRuns(options),
         get: (runId, requestId) => daemonClient.getTeamRun(runId, requestId),
         cancel: (runId, requestId) => daemonClient.cancelTeamRun(runId, requestId),
+      },
+    },
+    assignments: {
+      create: (options) => daemonClient.createAssignment(options),
+      list: (requestId) => daemonClient.listAssignments(requestId),
+      get: (assignmentId, requestId) => daemonClient.getAssignment(assignmentId, requestId),
+      patch: (options) => daemonClient.patchAssignment(options),
+      complete: (options) => daemonClient.completeAssignment(options),
+      cancel: (options) => daemonClient.cancelAssignment(options),
+      artifacts: {
+        get: (artifactId, requestId) => daemonClient.getAssignmentArtifact(artifactId, requestId),
+        list: (options) => daemonClient.listAssignmentArtifacts(options),
+      },
+      runs: {
+        start: (options) => daemonClient.startAssignmentTeamRun(options),
       },
     },
   };

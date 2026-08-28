@@ -65,6 +65,10 @@ function parseSentSessionMessage(data: string | ArrayBuffer | Uint8Array | undef
   page?: unknown;
   text?: string;
   teamId?: string;
+  assignmentId?: string;
+  expectedAssignmentRevision?: number;
+  artifactId?: string;
+  assignment?: unknown;
   runId?: string;
   expectedRevision?: number;
   idempotencyKey?: string;
@@ -235,6 +239,39 @@ const teamRun = {
   updatedAt: "2026-08-26T12:01:00.000Z",
 };
 
+const assignment = {
+  id: "asgn_0123456789abcdef",
+  revision: 2,
+  title: "Expose Assignment APIs",
+  objective: "Publish the durable Assignment contract.",
+  workItem: null,
+  state: { status: "open" },
+  createdAt: "2026-08-27T12:00:00.000Z",
+  updatedAt: "2026-08-27T12:01:00.000Z",
+};
+
+const assignmentArtifact = {
+  id: "aart_0123456789abcdef",
+  assignmentId: assignment.id,
+  assignmentRevision: assignment.revision,
+  kind: "team_step_output",
+  title: "Builder output",
+  mediaType: "text/markdown",
+  content: "Implemented the API.",
+  includedBytes: 20,
+  originalBytes: 20,
+  truncated: false,
+  producer: {
+    kind: "team_run_step",
+    teamRunId: "trun_0123456789abcdef",
+    stepId: "implement",
+    roleId: "builder",
+    agentId: "11111111-1111-4111-8111-111111111111",
+    turnId: "turn_1",
+  },
+  createdAt: "2026-08-27T12:02:00.000Z",
+};
+
 test("createPaseoClient exposes workspace list through the daemon client", async () => {
   const { client, ws } = await connectClient();
 
@@ -291,6 +328,7 @@ test("createPaseoApi borrows daemon capabilities without exposing connection own
 
   expect(Object.keys(paseo).sort()).toEqual([
     "agents",
+    "assignments",
     "config",
     "providers",
     "teams",
@@ -299,6 +337,125 @@ test("createPaseoApi borrows daemon capabilities without exposing connection own
   expect("connect" in paseo).toBe(false);
   expect("close" in paseo).toBe(false);
   expect("skills" in paseo.agents).toBe(false);
+});
+
+test("Assignment SDK exposes durable intent, artifacts, and Assignment-backed runs", async () => {
+  const { client, ws } = await connectClient({ assignments: true });
+
+  const createPromise = client.assignments.create({
+    title: assignment.title,
+    objective: assignment.objective,
+    workItem: null,
+  });
+  const createRequest = parseSentSessionMessage(ws.sent.at(-1));
+  expect(createRequest).toMatchObject({
+    type: "assignment.create.request",
+    assignment: { title: assignment.title, objective: assignment.objective },
+  });
+  ws.message(
+    sessionMessage({
+      type: "assignment.create.response",
+      payload: { requestId: createRequest.requestId, assignment },
+    }),
+  );
+  await expect(createPromise).resolves.toMatchObject({ assignment: { id: assignment.id } });
+
+  const artifactsPromise = client.assignments.artifacts.list({
+    assignmentId: assignment.id,
+    limit: 25,
+  });
+  const artifactsRequest = parseSentSessionMessage(ws.sent.at(-1));
+  expect(artifactsRequest).toMatchObject({
+    type: "assignment.artifact.list.request",
+    assignmentId: assignment.id,
+    limit: 25,
+  });
+  ws.message(
+    sessionMessage({
+      type: "assignment.artifact.list.response",
+      payload: {
+        requestId: artifactsRequest.requestId,
+        artifacts: [assignmentArtifact],
+        nextCursor: null,
+        issues: [
+          {
+            collection: "artifacts",
+            fileName: "broken.json",
+            kind: "invalid_record",
+            message: "Invalid record",
+          },
+        ],
+      },
+    }),
+  );
+  await expect(artifactsPromise).resolves.toMatchObject({
+    artifacts: [{ id: assignmentArtifact.id, content: assignmentArtifact.content }],
+    issues: [{ fileName: "broken.json", kind: "invalid_record" }],
+  });
+
+  const startPromise = client.assignments.runs.start({
+    teamId: team.id,
+    expectedRevision: team.revision,
+    idempotencyKey: "assignment-run-sdk",
+    assignmentId: assignment.id,
+    expectedAssignmentRevision: assignment.revision,
+    workspaceId: "workspace_sdk",
+  });
+  const startRequest = parseSentSessionMessage(ws.sent.at(-1));
+  expect(startRequest).toMatchObject({
+    type: "assignment.team_run.start.request",
+    assignmentId: assignment.id,
+    expectedAssignmentRevision: assignment.revision,
+  });
+  ws.message(
+    sessionMessage({
+      type: "assignment.team_run.start.response",
+      payload: {
+        requestId: startRequest.requestId,
+        run: {
+          ...teamRun,
+          assignmentId: assignment.id,
+          assignmentRevision: assignment.revision,
+          assignmentSnapshot: assignment,
+        },
+      },
+    }),
+  );
+  await expect(startPromise).resolves.toMatchObject({
+    run: { assignmentId: assignment.id, assignmentSnapshot: { revision: 2 } },
+  });
+  await client.close();
+});
+
+test("Assignment SDK gates old hosts without falling back to Team or agent RPCs", async () => {
+  const { client, ws } = await connectClient({ teams: true });
+
+  await expect(client.assignments.list()).rejects.toThrow("Update the host to use Assignments.");
+  expect(ws.sent).toHaveLength(1);
+  await client.close();
+});
+
+test("Assignment SDK preserves stable daemon lifecycle errors", async () => {
+  const { client, ws } = await connectClient({ assignments: true });
+  const completePromise = client.assignments.complete({
+    assignmentId: assignment.id,
+    expectedRevision: assignment.revision,
+  });
+  const request = parseSentSessionMessage(ws.sent.at(-1));
+  ws.message(
+    sessionMessage({
+      type: "rpc_error",
+      payload: {
+        requestId: request.requestId,
+        requestType: request.type,
+        error: "Assignment has an active Team Run",
+        code: "assignment_has_active_run",
+      },
+    }),
+  );
+
+  await expect(completePromise).rejects.toMatchObject({ code: "assignment_has_active_run" });
+  await client.close();
 });
 
 test("Team SDK authors profile-backed definitions through namespaced RPCs", async () => {

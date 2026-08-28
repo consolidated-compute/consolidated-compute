@@ -156,6 +156,7 @@ import type {
   BrowserAutomationExecuteResponse,
 } from "@getpaseo/protocol/browser-automation/rpc-schemas";
 import type { TeamDefinitionInputDto, TeamDefinitionPatchDto } from "@getpaseo/protocol/team/types";
+import type { AssignmentInputDto, AssignmentPatchDto } from "@getpaseo/protocol/assignment/types";
 
 export interface Logger {
   debug(obj: object, msg?: string): void;
@@ -210,6 +211,40 @@ export interface ListTeamRunsInput {
   teamId?: string;
   cursor?: string;
   limit?: number;
+  requestId?: string;
+}
+
+export interface CreateAssignmentInput extends AssignmentInputDto {
+  requestId?: string;
+}
+
+export interface PatchAssignmentInput {
+  assignmentId: string;
+  expectedRevision: number;
+  patch: AssignmentPatchDto;
+  requestId?: string;
+}
+
+export interface TransitionAssignmentInput {
+  assignmentId: string;
+  expectedRevision: number;
+  requestId?: string;
+}
+
+export interface ListAssignmentArtifactsInput {
+  assignmentId: string;
+  cursor?: string;
+  limit?: number;
+  requestId?: string;
+}
+
+export interface StartAssignmentTeamRunInput {
+  teamId: string;
+  expectedRevision: number;
+  idempotencyKey: string;
+  assignmentId: string;
+  expectedAssignmentRevision: number;
+  workspaceId: string;
   requestId?: string;
 }
 
@@ -5644,6 +5679,85 @@ export class DaemonClient {
     });
   }
 
+  async createAssignment(input: CreateAssignmentInput) {
+    this.requireAssignmentsSupport();
+    const { requestId, ...assignment } = input;
+    return this.sendNamespacedCorrelatedSessionRequest<"assignment.create.response">({
+      requestId,
+      message: { type: "assignment.create.request", assignment },
+    });
+  }
+
+  async listAssignments(requestId?: string) {
+    this.requireAssignmentsSupport();
+    return this.sendNamespacedCorrelatedSessionRequest<"assignment.list.response">({
+      requestId,
+      message: { type: "assignment.list.request" },
+    });
+  }
+
+  async getAssignment(assignmentId: string, requestId?: string) {
+    this.requireAssignmentsSupport();
+    return this.sendNamespacedCorrelatedSessionRequest<"assignment.get.response">({
+      requestId,
+      message: { type: "assignment.get.request", assignmentId },
+    });
+  }
+
+  async patchAssignment(input: PatchAssignmentInput) {
+    this.requireAssignmentsSupport();
+    const { requestId, ...message } = input;
+    return this.sendNamespacedCorrelatedSessionRequest<"assignment.patch.response">({
+      requestId,
+      message: { type: "assignment.patch.request", ...message },
+    });
+  }
+
+  async completeAssignment(input: TransitionAssignmentInput) {
+    this.requireAssignmentsSupport();
+    const { requestId, ...message } = input;
+    return this.sendNamespacedCorrelatedSessionRequest<"assignment.complete.response">({
+      requestId,
+      message: { type: "assignment.complete.request", ...message },
+    });
+  }
+
+  async cancelAssignment(input: TransitionAssignmentInput) {
+    this.requireAssignmentsSupport();
+    const { requestId, ...message } = input;
+    return this.sendNamespacedCorrelatedSessionRequest<"assignment.cancel.response">({
+      requestId,
+      message: { type: "assignment.cancel.request", ...message },
+    });
+  }
+
+  async getAssignmentArtifact(artifactId: string, requestId?: string) {
+    this.requireAssignmentsSupport();
+    return this.sendNamespacedCorrelatedSessionRequest<"assignment.artifact.get.response">({
+      requestId,
+      message: { type: "assignment.artifact.get.request", artifactId },
+    });
+  }
+
+  async listAssignmentArtifacts(input: ListAssignmentArtifactsInput) {
+    this.requireAssignmentsSupport();
+    const { requestId, ...message } = input;
+    return this.sendNamespacedCorrelatedSessionRequest<"assignment.artifact.list.response">({
+      requestId,
+      message: { type: "assignment.artifact.list.request", ...message },
+    });
+  }
+
+  async startAssignmentTeamRun(input: StartAssignmentTeamRunInput) {
+    this.requireAssignmentsSupport();
+    const { requestId, ...message } = input;
+    return this.sendNamespacedCorrelatedSessionRequest<"assignment.team_run.start.response">({
+      requestId,
+      message: { type: "assignment.team_run.start.request", ...message },
+      timeout: 0,
+    });
+  }
+
   // ============================================================================
   // Internals
   // ============================================================================
@@ -5667,6 +5781,13 @@ export class DaemonClient {
       this.lastServerInfoMessage.features.agentProfiles !== true
     ) {
       throw new Error("Update the host to use Agent Profiles with Teams.");
+    }
+  }
+
+  private requireAssignmentsSupport(): void {
+    // COMPAT(assignments): added in v0.6.x, remove gate after 2027-02-27.
+    if (this.lastServerInfoMessage?.features?.assignments !== true) {
+      throw new Error("Update the host to use Assignments.");
     }
   }
 

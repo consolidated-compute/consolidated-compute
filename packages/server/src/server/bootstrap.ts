@@ -475,6 +475,7 @@ export interface PaseoDaemon {
   browserToolsBroker: BrowserToolsBroker;
   teamRepository: TeamRepository;
   teamRunService: TeamRunService;
+  assignmentRepository: AssignmentRepository;
   start(): Promise<void>;
   stop(): Promise<void>;
   getListenTarget(): ListenTarget | null;
@@ -1678,6 +1679,7 @@ export async function createPaseoDaemon(
               workspaceLabelService,
               teamRepository,
               teamRunService,
+              assignmentRepository,
             );
             pluginRuntime.bindPaseoSessionHost(wsServer);
             await pluginRuntime.start();
@@ -1783,6 +1785,7 @@ export async function createPaseoDaemon(
     browserToolsBroker,
     teamRepository,
     teamRunService,
+    assignmentRepository,
     start,
     stop,
     getListenTarget: () => boundListenTarget,
