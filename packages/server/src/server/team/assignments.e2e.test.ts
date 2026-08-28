@@ -7,10 +7,29 @@ import type { TeamRunDto } from "@getpaseo/protocol/team/types";
 import { expect, test } from "vitest";
 
 import type { AgentPromptInput } from "../agent/agent-sdk-types.js";
-import { projectClaudeSecurityPosture } from "../agent/providers/claude/security-posture.js";
 import { projectCodexSecurityPosture } from "../agent/providers/codex/security-posture.js";
 import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
 import { DaemonClient, createTestPaseoDaemon } from "../test-utils/index.js";
+
+const readOnlyProviderOptions = {
+  approval_policy: "never",
+  sandbox_mode: "read-only",
+  web_search: "disabled",
+  features: { network_proxy: false },
+} as const;
+
+const workspaceWriteProviderOptions = {
+  approval_policy: "never",
+  sandbox_mode: "workspace-write",
+  sandbox_workspace_write: {
+    writable_roots: [],
+    network_access: false,
+    exclude_slash_tmp: true,
+    exclude_tmpdir_env_var: true,
+  },
+  web_search: "disabled",
+  features: { network_proxy: false },
+} as const;
 
 const profiles = [
   {
@@ -19,6 +38,7 @@ const profiles = [
     provider: "codex",
     model: "gpt-5.4-mini",
     modeId: "full-access",
+    providerOptions: readOnlyProviderOptions,
   },
   {
     id: "codex-builder",
@@ -27,13 +47,15 @@ const profiles = [
     model: "gpt-5.4-mini",
     modeId: "full-access",
     featureValues: { test_feature: true },
+    providerOptions: workspaceWriteProviderOptions,
   },
   {
     id: "security-review",
     name: "Security Review",
-    provider: "claude",
-    model: "sonnet",
+    provider: "codex",
+    model: "gpt-5.4-mini",
     modeId: "full-access",
+    providerOptions: readOnlyProviderOptions,
   },
 ] satisfies AgentProfile[];
 
@@ -178,7 +200,7 @@ test("freezes a three-role Assignment run and hands forward only declared Artifa
         securityPosture: projectCodexSecurityPosture({
           provider: "codex",
           modeId: "full-access",
-          providerOptions: {},
+          providerOptions: readOnlyProviderOptions,
         }),
       },
       {
@@ -191,28 +213,28 @@ test("freezes a three-role Assignment run and hands forward only declared Artifa
         securityPosture: projectCodexSecurityPosture({
           provider: "codex",
           modeId: "full-access",
-          providerOptions: {},
+          providerOptions: workspaceWriteProviderOptions,
         }),
       },
       {
         profileId: "security-review",
-        provider: "claude",
-        model: "sonnet",
+        provider: "codex",
+        model: "gpt-5.4-mini",
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: {},
-        securityPosture: projectClaudeSecurityPosture({
-          provider: "claude",
+        securityPosture: projectCodexSecurityPosture({
+          provider: "codex",
           modeId: "full-access",
-          providerOptions: {},
+          providerOptions: readOnlyProviderOptions,
         }),
       },
     ]);
     const persisted = await daemon.daemon.teamRepository.getRun(started.id);
     expect(persisted?.steps.map((step) => step.snapshot.resolvedLaunch.providerOptions)).toEqual([
-      {},
-      {},
-      {},
+      readOnlyProviderOptions,
+      workspaceWriteProviderOptions,
+      readOnlyProviderOptions,
     ]);
 
     const artifactsByStep = new Map(
