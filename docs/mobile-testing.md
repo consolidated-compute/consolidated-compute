@@ -62,7 +62,15 @@ Teams reuses the fixture with a profile-backed Team, its own state and artifact 
 PASEO_MOBILE_E2E_PLATFORM=ios npm run test:e2e:mobile:teams
 ```
 
-The replay checks the Team list and detail at large text, rotates and resumes the detail route, starts a run against the seeded Workspace, opens the waiting agent, accepts its plan permission, and returns to a succeeded frozen run. The scheduled workflow runs Operations, Visual, and Teams independently on iOS and Android, retains every evidence directory, then fails the platform job if any replay failed.
+The replay checks the Team list and detail at large text, rotates and resumes the detail route, starts a run against the seeded Workspace, opens the waiting agent, accepts its plan permission, and returns to a succeeded frozen run.
+
+Assignments uses the same profile-backed Team and Workspace with a durable seeded Assignment, its own state and artifact directories, and Metro port `8085`:
+
+```bash
+PASEO_MOBILE_E2E_PLATFORM=ios npm run test:e2e:mobile:assignments
+```
+
+The replay checks Assignment list, detail, Work Item reference, rotation, and resume before starting an Assignment-backed Team Run. It accepts the run's permission, verifies the frozen Assignment and durable Artifact on the run, then returns to the Assignment history. The scheduled workflow runs Operations, Visual, Teams, and Assignments independently on iOS and Android, retains every evidence directory, then fails the platform job if any replay failed.
 
 When replay diverges, read its ranked selector suggestions. Edit the script deliberately and rerun it from the beginning. `--update` is retained for compatibility but no longer rewrites scripts.
 
