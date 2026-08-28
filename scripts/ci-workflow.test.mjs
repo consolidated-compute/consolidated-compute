@@ -50,6 +50,7 @@ const upstreamReleaseMonitorPath = new URL(
   repoRoot,
 );
 const filtersPath = new URL(".github/ci-paths.yml", repoRoot);
+const serverPackagePath = new URL("packages/server/package.json", repoRoot);
 const serverTsconfigPath = new URL("packages/server/tsconfig.server.json", repoRoot);
 const desktopPackagePath = new URL("packages/desktop/package.json", repoRoot);
 
@@ -370,6 +371,7 @@ test("focused contracts stay inside existing required checks", () => {
   const jobs = jobBlocks(readFileSync(ciWorkflowPath, "utf8"));
   const changes = jobs.get("changes")?.join("\n") ?? "";
   const server = jobs.get("server-tests-ubuntu")?.join("\n") ?? "";
+  const serverPackage = JSON.parse(readFileSync(serverPackagePath, "utf8"));
   const desktop = jobs.get("desktop-tests-ubuntu")?.join("\n") ?? "";
 
   assert.match(changes, /scripts\/daemon-launch-contract\.test\.mjs/);
@@ -377,6 +379,10 @@ test("focused contracts stay inside existing required checks", () => {
 
   assert.match(server, /test:hub-cli-contract/);
   assert.match(server, /npm run test --workspace=@getpaseo\/server/);
+  assert.match(
+    serverPackage.scripts["test:integration"],
+    /src\/server\/team\/assignments\.e2e\.test\.ts/,
+  );
   assert.ok(!jobs.has("hub-cli-contract"));
 
   assert.match(desktop, /test:e2e:renderer/);
