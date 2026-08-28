@@ -5,6 +5,8 @@ import {
   TeamDefinitionInputDtoSchema,
   TeamDefinitionPatchDtoSchema,
   TeamRunDtoSchema,
+  TeamRunPreviewDtoSchema,
+  TeamRunPreviewFingerprintSchema,
 } from "./types.js";
 
 export const TEAM_RUN_PAGE_MAX_LIMIT = 100;
@@ -23,6 +25,7 @@ export const TEAM_RPC_ERROR_CODES = [
   "team_storage_corrupt",
   "team_run_service_shutting_down",
   "team_execution_preflight_failed",
+  "team_security_preview_stale",
   "team_profile_not_found",
   "team_profile_ambiguous",
   "team_profile_invalid",
@@ -73,6 +76,15 @@ export const TeamRunStartRequestSchema = z.object({
   expectedRevision: z.number().int().positive(),
   idempotencyKey: z.string(),
   objective: z.string(),
+  workspaceId: z.string(),
+  expectedPreviewFingerprint: TeamRunPreviewFingerprintSchema.optional(),
+});
+
+export const TeamRunPreviewRequestSchema = z.object({
+  type: z.literal("team.run.preview.request"),
+  requestId: z.string(),
+  teamId: z.string(),
+  expectedRevision: z.number().int().positive(),
   workspaceId: z.string(),
 });
 
@@ -126,6 +138,11 @@ export const TeamRunStartResponseSchema = z.object({
   payload: z.object({ requestId: z.string(), run: TeamRunDtoSchema }),
 });
 
+export const TeamRunPreviewResponseSchema = z.object({
+  type: z.literal("team.run.preview.response"),
+  payload: z.object({ requestId: z.string(), preview: TeamRunPreviewDtoSchema }),
+});
+
 export const TeamRunListResponseSchema = z.object({
   type: z.literal("team.run.list.response"),
   payload: z.object({
@@ -151,6 +168,7 @@ export type TeamGetRequest = z.infer<typeof TeamGetRequestSchema>;
 export type TeamUpdateRequest = z.infer<typeof TeamUpdateRequestSchema>;
 export type TeamDeleteRequest = z.infer<typeof TeamDeleteRequestSchema>;
 export type TeamRunStartRequest = z.infer<typeof TeamRunStartRequestSchema>;
+export type TeamRunPreviewRequest = z.infer<typeof TeamRunPreviewRequestSchema>;
 export type TeamRunListRequest = z.infer<typeof TeamRunListRequestSchema>;
 export type TeamRunGetRequest = z.infer<typeof TeamRunGetRequestSchema>;
 export type TeamRunCancelRequest = z.infer<typeof TeamRunCancelRequestSchema>;

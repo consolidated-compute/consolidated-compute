@@ -38,11 +38,13 @@ import type {
   TransitionAssignmentInput,
   ListAssignmentArtifactsInput,
   StartAssignmentTeamRunInput,
+  PreviewTeamRunInput,
 } from "./daemon-client.js";
 import type {
   TeamDefinitionDto,
   TeamDefinitionInputDto,
   TeamRunDto,
+  TeamRunPreviewDto,
 } from "@getpaseo/protocol/team/types";
 import type {
   AssignmentArtifactDto,
@@ -378,6 +380,7 @@ export type PaseoTeamRun = TeamRunDto;
 export type PaseoTeamUpdateOptions = UpdateTeamInput;
 export type PaseoTeamDeleteOptions = DeleteTeamInput;
 export type PaseoTeamRunStartOptions = StartTeamRunInput;
+export type PaseoTeamRunPreviewOptions = PreviewTeamRunInput;
 export type PaseoTeamRunListOptions = ListTeamRunsInput;
 export type PaseoTeamCreateOptions = TeamDefinitionInputDto & { requestId?: string };
 
@@ -390,6 +393,9 @@ export interface PaseoTeamActions {
     options: PaseoTeamDeleteOptions,
   ): Promise<{ requestId: string; teamId: string; revision: number }>;
   readonly runs: {
+    preview(
+      options: PaseoTeamRunPreviewOptions,
+    ): Promise<{ requestId: string; preview: TeamRunPreviewDto }>;
     start(options: PaseoTeamRunStartOptions): Promise<{ requestId: string; run: PaseoTeamRun }>;
     list(options?: PaseoTeamRunListOptions): Promise<{
       requestId: string;
@@ -567,6 +573,7 @@ export function createPaseoApi(daemonClient: DaemonClient): PaseoApi {
       update: (options) => daemonClient.updateTeam(options),
       delete: (options) => daemonClient.deleteTeam(options),
       runs: {
+        preview: (options) => daemonClient.previewTeamRun(options),
         start: (options) => daemonClient.startTeamRun(options),
         list: (options) => daemonClient.listTeamRuns(options),
         get: (runId, requestId) => daemonClient.getTeamRun(runId, requestId),

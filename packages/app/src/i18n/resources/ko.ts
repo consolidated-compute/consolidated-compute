@@ -2518,6 +2518,23 @@ export const ko: TranslationResources = {
         noModes: "이 프로바이더에는 선택할 수 있는 모드가 없습니다",
         thinkingLabel: "사고",
         noThinkingOptions: "이 모델에는 사고 수준이 없습니다",
+        securityBoundaryLabel: "보안 경계",
+        securityBoundaryPlaceholder: "프로바이더 보안 경계 선택",
+        noSecurityBoundaries: "이 프로바이더에는 지원되는 보안 경계가 없습니다",
+        customSecurityBoundary: "사용자 지정 네이티브 설정",
+        securityStates: {
+          idle: "프로바이더를 선택하여 지원되는 보안 경계를 확인하세요.",
+          pending: "프로바이더가 지원하는 보안 경계를 확인하는 중…",
+          available: "이 경계는 프로바이더가 제공하고 검증합니다.",
+          unrecognized:
+            "이 프로필에는 사용자 지정 네이티브 설정이 있습니다. 지원되는 경계를 선택할 때까지 유지됩니다.",
+          stale: "프로바이더의 보안 제어가 변경되었습니다. 저장하기 전에 경계를 다시 선택하세요.",
+          read_only: "기존 네이티브 보안 설정은 유지되지만 여기서는 편집할 수 없습니다.",
+          unavailable: "보안 경계를 불러오지 못했습니다. 프로바이더 스냅샷을 다시 시도하세요.",
+          unsupported: "이 프로바이더는 편집 가능한 보안 경계를 제공하지 않습니다.",
+          update_required:
+            "네이티브 보안 설정이 포함된 프로필을 변경하기 전에 이 호스트를 업데이트하세요.",
+        },
         featuresLabel: "기능",
         featureCount: "기능 {{count}}개",
         featureCountOne: "기능 {{count}}개",

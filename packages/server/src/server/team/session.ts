@@ -8,7 +8,7 @@ import type {
   TeamRepository,
 } from "./repository.js";
 import { TeamNotFoundError, TeamRunNotFoundError, TeamStorageCorruptError } from "./repository.js";
-import type { StartTeamRunInput, TeamRunService } from "./service.js";
+import type { PreviewTeamRunInput, StartTeamRunInput, TeamRunService } from "./service.js";
 import { toTeamDefinitionDto, toTeamRunDto } from "./wire.js";
 
 export interface TeamSessionRepository {
@@ -31,6 +31,7 @@ export interface TeamSessionRepository {
 }
 
 export interface TeamSessionRunService {
+  previewRun(input: PreviewTeamRunInput): ReturnType<TeamRunService["previewRun"]>;
   startRun(input: StartTeamRunInput): ReturnType<TeamRunService["startRun"]>;
   cancelRun(runId: string): ReturnType<TeamRunService["cancelRun"]>;
 }
@@ -129,8 +130,23 @@ export class TeamSession {
                 idempotencyKey: message.idempotencyKey,
                 objective: message.objective,
                 workspaceId: message.workspaceId,
+                ...(message.expectedPreviewFingerprint !== undefined
+                  ? { expectedPreviewFingerprint: message.expectedPreviewFingerprint }
+                  : {}),
               }),
             ),
+          },
+        }));
+      case "team.run.preview.request":
+        return this.respond(message, async () => ({
+          type: "team.run.preview.response",
+          payload: {
+            requestId: message.requestId,
+            preview: await this.runService.previewRun({
+              teamId: message.teamId,
+              expectedRevision: message.expectedRevision,
+              workspaceId: message.workspaceId,
+            }),
           },
         }));
       case "team.run.list.request":

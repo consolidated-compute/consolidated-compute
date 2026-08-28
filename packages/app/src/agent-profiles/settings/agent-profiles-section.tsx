@@ -14,6 +14,7 @@ import { confirmDialog } from "@/utils/confirm-dialog";
 import { useAgentProfiles } from "../internal/use-agent-profiles";
 import { generateAgentProfileId } from "../internal/profile-id";
 import type { AgentProfileValue } from "../internal/profile-form-model";
+import { buildAgentProfileFormDisplays } from "../internal/profile-summary";
 import { AgentProfileEditModal } from "./agent-profile-edit-modal";
 import { AgentProfileRow } from "./agent-profile-row";
 
@@ -24,6 +25,7 @@ const addIcon = <ThemedPlus size={ICON_SIZE.sm} uniProps={mutedColorMapping} />;
 interface EditTarget {
   mode: "create" | "edit";
   profile?: AgentProfile;
+  profileDisplays?: ReturnType<typeof buildAgentProfileFormDisplays>;
 }
 
 export function AgentProfilesSection({ serverId }: { serverId: string }): ReactElement {
@@ -42,9 +44,13 @@ export function AgentProfilesSection({ serverId }: { serverId: string }): ReactE
       if (!profile) {
         return;
       }
-      setEditTarget({ mode: "edit", profile });
+      setEditTarget({
+        mode: "edit",
+        profile,
+        profileDisplays: buildAgentProfileFormDisplays({ profile, entries }),
+      });
     },
-    [profiles],
+    [entries, profiles],
   );
 
   const handleSave = useCallback(
@@ -194,6 +200,7 @@ export function AgentProfilesSection({ serverId }: { serverId: string }): ReactE
         visible={editTarget !== null}
         mode={editTarget?.mode ?? "create"}
         {...(editTarget?.profile ? { profile: editTarget.profile } : {})}
+        {...(editTarget?.profileDisplays ? { profileDisplays: editTarget.profileDisplays } : {})}
         onClose={handleEditClose}
         onSave={handleSave}
       />

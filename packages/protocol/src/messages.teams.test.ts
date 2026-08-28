@@ -276,6 +276,55 @@ describe("Team wire contracts", () => {
     });
   });
 
+  test("parses sanitized Team Run previews and optional admission fingerprints", () => {
+    const fingerprint = "a".repeat(64);
+    expect(
+      SessionInboundMessageSchema.parse({
+        type: "team.run.preview.request",
+        requestId: "request_preview",
+        teamId: team.id,
+        expectedRevision: team.revision,
+        workspaceId: run.workspace.workspaceId,
+      }),
+    ).toMatchObject({ type: "team.run.preview.request", teamId: team.id });
+
+    const parsed = SessionOutboundMessageSchema.parse({
+      type: "team.run.preview.response",
+      payload: {
+        requestId: "request_preview",
+        preview: {
+          workspace: run.workspace,
+          roles: [
+            {
+              roleId: team.roles[0].id,
+              roleName: team.roles[0].name,
+              resolvedLaunch: run.steps[0].snapshot.resolvedLaunch,
+            },
+          ],
+          fingerprint,
+        },
+      },
+    });
+    expect(parsed).toMatchObject({
+      type: "team.run.preview.response",
+      payload: { preview: { fingerprint, roles: [{ roleId: "builder" }] } },
+    });
+    expect(JSON.stringify(parsed)).not.toMatch(/path-sentinel|proxy-sentinel/u);
+
+    expect(
+      SessionInboundMessageSchema.parse({
+        type: "team.run.start.request",
+        requestId: "request_start",
+        teamId: team.id,
+        expectedRevision: team.revision,
+        idempotencyKey: "previewed-start",
+        objective: "Use the accepted preview.",
+        workspaceId: run.workspace.workspaceId,
+        expectedPreviewFingerprint: fingerprint,
+      }),
+    ).toMatchObject({ expectedPreviewFingerprint: fingerprint });
+  });
+
   test("keeps the Team capability optional for old peers", () => {
     expect(
       ServerInfoStatusPayloadSchema.parse({
@@ -289,9 +338,19 @@ describe("Team wire contracts", () => {
       ServerInfoStatusPayloadSchema.parse({
         status: "server_info",
         serverId: "server_1",
-        features: { agentProfiles: true, teams: true, teamSecurity: true },
+        features: {
+          agentProfiles: true,
+          teams: true,
+          teamSecurity: true,
+          teamRunPreview: true,
+        },
       }).features,
-    ).toEqual({ agentProfiles: true, teams: true, teamSecurity: true });
+    ).toEqual({
+      agentProfiles: true,
+      teams: true,
+      teamSecurity: true,
+      teamRunPreview: true,
+    });
   });
 
   test("lets a legacy server-info schema ignore the new Team capability", () => {
@@ -305,7 +364,12 @@ describe("Team wire contracts", () => {
       LegacyServerInfoSchema.parse({
         status: "server_info",
         serverId: "server_1",
-        features: { agentProfiles: true, teams: true, teamSecurity: true },
+        features: {
+          agentProfiles: true,
+          teams: true,
+          teamSecurity: true,
+          teamRunPreview: true,
+        },
       }),
     ).toEqual({
       status: "server_info",

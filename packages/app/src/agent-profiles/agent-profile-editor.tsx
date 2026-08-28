@@ -1,8 +1,10 @@
 import { useCallback, useMemo, useState, type ReactElement } from "react";
 import type { AgentProfile, AgentProfilePatch } from "@getpaseo/protocol/messages";
+import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { AgentProfileEditModal } from "./settings/agent-profile-edit-modal";
 import { generateAgentProfileId } from "./internal/profile-id";
 import type { AgentProfileSeed, AgentProfileValue } from "./internal/profile-form-model";
+import { buildAgentProfileFormDisplays } from "./internal/profile-summary";
 import { useAgentProfiles } from "./internal/use-agent-profiles";
 
 export interface AgentProfileEditorControls {
@@ -16,7 +18,11 @@ export interface AgentProfileEditorControls {
 
 type EditorRequest =
   | { mode: "create"; seed?: AgentProfileSeed }
-  | { mode: "edit"; profile: AgentProfile };
+  | {
+      mode: "edit";
+      profile: AgentProfile;
+      profileDisplays: ReturnType<typeof buildAgentProfileFormDisplays>;
+    };
 
 /**
  * The model chooser's create/edit surface. Owns the write path so call sites
@@ -24,6 +30,7 @@ type EditorRequest =
  */
 export function useAgentProfileEditor(serverId: string | null): AgentProfileEditorControls {
   const { profiles, saveProfiles } = useAgentProfiles(serverId);
+  const { entries } = useProvidersSnapshot(serverId, { cwd: null });
   const [request, setRequest] = useState<EditorRequest | null>(null);
 
   const openCreateFromModel = useCallback((seed: AgentProfileSeed) => {
@@ -36,9 +43,13 @@ export function useAgentProfileEditor(serverId: string | null): AgentProfileEdit
       if (!profile) {
         return;
       }
-      setRequest({ mode: "edit", profile });
+      setRequest({
+        mode: "edit",
+        profile,
+        profileDisplays: buildAgentProfileFormDisplays({ profile, entries }),
+      });
     },
-    [profiles],
+    [entries, profiles],
   );
 
   const close = useCallback(() => setRequest(null), []);
@@ -63,6 +74,9 @@ export function useAgentProfileEditor(serverId: string | null): AgentProfileEdit
         visible={request !== null}
         mode={request?.mode ?? "create"}
         {...(request?.mode === "edit" && request.profile ? { profile: request.profile } : {})}
+        {...(request?.mode === "edit" && request.profileDisplays
+          ? { profileDisplays: request.profileDisplays }
+          : {})}
         {...(request?.mode === "create" && request.seed ? { seed: request.seed } : {})}
         onClose={close}
         onSave={handleSave}

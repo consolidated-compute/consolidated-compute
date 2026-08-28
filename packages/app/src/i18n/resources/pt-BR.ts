@@ -2546,6 +2546,26 @@ export const ptBR: TranslationResources = {
         noModes: "Este provedor não tem modos para escolher",
         thinkingLabel: "Raciocínio",
         noThinkingOptions: "Este modelo não tem níveis de raciocínio",
+        securityBoundaryLabel: "Limite de segurança",
+        securityBoundaryPlaceholder: "Selecione um limite de segurança do provedor",
+        noSecurityBoundaries: "Este provedor não oferece limites de segurança compatíveis",
+        customSecurityBoundary: "Configurações nativas personalizadas",
+        securityStates: {
+          idle: "Selecione um provedor para ver os limites de segurança compatíveis.",
+          pending: "Verificando os limites de segurança compatíveis do provedor…",
+          available: "Este limite é fornecido e validado pelo provedor.",
+          unrecognized:
+            "Este perfil tem configurações nativas personalizadas. Elas serão preservadas até você selecionar um limite compatível.",
+          stale:
+            "Os controles de segurança do provedor mudaram. Selecione novamente o limite antes de salvar.",
+          read_only:
+            "As configurações de segurança nativas existentes serão preservadas, mas não podem ser editadas aqui.",
+          unavailable:
+            "Não foi possível carregar os limites de segurança. Tente novamente o snapshot do provedor.",
+          unsupported: "Este provedor não anuncia limites de segurança editáveis.",
+          update_required:
+            "Atualize este host antes de alterar um perfil com configurações de segurança nativas.",
+        },
         featuresLabel: "Recursos",
         featureCount: "{{count}} recursos",
         featureCountOne: "{{count}} recurso",

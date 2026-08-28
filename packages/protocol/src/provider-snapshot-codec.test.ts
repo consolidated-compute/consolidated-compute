@@ -40,6 +40,16 @@ function providerEntry(): ProviderSnapshotEntry {
       },
     ],
     modes: [{ id: "build", label: "Build" }],
+    agentProfileSecurityPresets: [
+      {
+        id: "fail-closed-read-only",
+        label: "Fail-closed read only",
+        providerOptions: {
+          approval_policy: "never",
+          sandbox_mode: "read-only",
+        },
+      },
+    ],
   };
 }
 

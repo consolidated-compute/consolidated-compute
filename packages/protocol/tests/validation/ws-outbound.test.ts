@@ -176,10 +176,24 @@ const SourceSchema = z.object({
           compactSnapshot: {
             entries: [
               {
-                provider: "pi",
+                provider: "codex",
                 status: "ready",
                 enabled: true,
                 models: [{ id: "model-a", label: "Model A", thinkingSet: 0 }],
+                agentProfileSecurityPresets: [
+                  {
+                    id: "fail-closed-workspace-write",
+                    label: "Fail-closed Workspace write",
+                    providerOptions: {
+                      approval_policy: "never",
+                      sandbox_workspace_write: {
+                        writable_roots: [],
+                        network_access: false,
+                      },
+                      features: { network_proxy: false },
+                    },
+                  },
+                ],
               },
             ],
             thinkingSets: [

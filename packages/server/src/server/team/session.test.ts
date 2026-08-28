@@ -13,6 +13,7 @@ import {
   TeamRevisionConflictError,
   TeamWorkspaceHasActiveRunError,
 } from "./repository.js";
+import { TeamSecurityPreviewStaleError } from "./service.js";
 import { TeamSession, type TeamSessionRepository, type TeamSessionRunService } from "./session.js";
 
 const timestamp = "2026-08-26T12:00:00.000Z";
@@ -92,6 +93,22 @@ function createRepository(overrides: Partial<TeamSessionRepository> = {}): TeamS
 
 function createRunService(overrides: Partial<TeamSessionRunService> = {}): TeamSessionRunService {
   return {
+    previewRun: vi.fn(async () => ({
+      workspace: {
+        workspaceId: "workspace_delivery",
+        projectId: "project_delivery",
+        cwd: "/repo",
+        displayName: "main",
+      },
+      roles: [
+        {
+          roleId: "builder",
+          roleName: "Builder",
+          resolvedLaunch: createRun().steps[0]!.snapshot.resolvedLaunch,
+        },
+      ],
+      fingerprint: "a".repeat(64),
+    })),
     startRun: vi.fn(async () => createRun()),
     cancelRun: vi.fn(async () => createRun()),
     ...overrides,
@@ -155,6 +172,7 @@ describe("TeamSession", () => {
       idempotencyKey: "retry-safe-key",
       objective: "Ship the Team RPC.",
       workspaceId: "workspace_delivery",
+      expectedPreviewFingerprint: "b".repeat(64),
     });
 
     await harness.session.dispatch(message);
@@ -165,6 +183,7 @@ describe("TeamSession", () => {
       idempotencyKey: "retry-safe-key",
       objective: "Ship the Team RPC.",
       workspaceId: "workspace_delivery",
+      expectedPreviewFingerprint: "b".repeat(64),
     });
     expect(harness.messages).toMatchObject([
       {
@@ -184,6 +203,37 @@ describe("TeamSession", () => {
                 },
               },
             ],
+          },
+        },
+      },
+    ]);
+  });
+
+  test("returns an authoritative launch preview for every Team role", async () => {
+    const harness = createHarness();
+    await harness.session.dispatch(
+      SessionInboundMessageSchema.parse({
+        type: "team.run.preview.request",
+        requestId: "request_preview",
+        teamId: "team_delivery",
+        expectedRevision: 2,
+        workspaceId: "workspace_delivery",
+      }),
+    );
+
+    expect(harness.runService.previewRun).toHaveBeenCalledWith({
+      teamId: "team_delivery",
+      expectedRevision: 2,
+      workspaceId: "workspace_delivery",
+    });
+    expect(harness.messages).toMatchObject([
+      {
+        type: "team.run.preview.response",
+        payload: {
+          requestId: "request_preview",
+          preview: {
+            roles: [{ roleId: "builder", roleName: "Builder" }],
+            fingerprint: "a".repeat(64),
           },
         },
       },
@@ -242,6 +292,40 @@ describe("TeamSession", () => {
       {
         type: "rpc_error",
         payload: { requestId: "request_start", code },
+      },
+    ]);
+  });
+
+  test("maps stale preview rejection without exposing launch details", async () => {
+    const runService = createRunService({
+      startRun: vi.fn(async () => {
+        throw new TeamSecurityPreviewStaleError();
+      }),
+    });
+    const harness = createHarness({ runService });
+
+    await harness.session.dispatch(
+      SessionInboundMessageSchema.parse({
+        type: "team.run.start.request",
+        requestId: "request_stale_preview",
+        teamId: "team_delivery",
+        expectedRevision: 2,
+        idempotencyKey: "retry-safe-key",
+        objective: "Ship the Team RPC.",
+        workspaceId: "workspace_delivery",
+        expectedPreviewFingerprint: "a".repeat(64),
+      }),
+    );
+
+    expect(harness.messages).toEqual([
+      {
+        type: "rpc_error",
+        payload: {
+          requestId: "request_stale_preview",
+          requestType: "team.run.start.request",
+          error: "Team Run security preview is stale. Refresh it and try again.",
+          code: "team_security_preview_stale",
+        },
       },
     ]);
   });

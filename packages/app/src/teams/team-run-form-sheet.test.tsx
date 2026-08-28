@@ -28,6 +28,9 @@ const { formModel, sheetState, submissionState } = vi.hoisted(() => {
     catalogGeneration: 0,
     objective: "Ship it",
     roleResolutions: [],
+    securityPreviewStatus: "ready",
+    securityPreview: null,
+    securityPreviewError: null,
     validationIssue: null,
     canSubmit: true,
     submission: {
@@ -114,6 +117,10 @@ vi.mock("./use-team-run-form-feature-catalogs", () => ({
   useTeamRunFormFeatureCatalogs: () => ({ connected: true }),
 }));
 
+vi.mock("./use-team-run-form-security-preview", () => ({
+  useTeamRunFormSecurityPreview: () => undefined,
+}));
+
 vi.mock("./use-team-run-form-submission", () => ({
   useTeamRunFormSubmission: () => submissionState,
 }));
@@ -179,6 +186,7 @@ describe("TeamRunFormSheet", () => {
     submissionState.pending = false;
     submissionState.cancelCompletion.mockReset();
     submissionState.startPress.mockReset();
+    formModel.getState().securityPreviewStatus = "ready";
     sheetState.dismissible = true;
     sheetState.onClose = null;
   });
@@ -217,5 +225,15 @@ describe("TeamRunFormSheet", () => {
     act(() => sheetState.onClose?.());
     expect(submissionState.cancelCompletion).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the security posture notice visible while preview capability resolves", () => {
+    formModel.getState().securityPreviewStatus = "pending";
+
+    render(
+      <TeamRunFormSheet serverId="host-a" team={team} onClose={vi.fn()} onStarted={vi.fn()} />,
+    );
+
+    expect(screen.getByTestId("team-run-security-preview-pending")).toBeTruthy();
   });
 });

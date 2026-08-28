@@ -677,7 +677,27 @@ test("derived providers do not inherit built-in security posture claims", () => 
       posture.networkAccess.status,
       posture.toolShell.status,
     ]).toEqual(["unavailable", "unavailable", "unavailable"]);
+    expect(registry[provider].agentProfileSecurityPresets).toBeUndefined();
   }
+});
+
+test("only the exact built-in Codex provider publishes Agent Profile security presets", () => {
+  const registry = buildProviderRegistry(logger, {
+    providerOverrides: {
+      "codex-custom": {
+        extends: "codex",
+        label: "Custom Codex",
+      },
+    },
+  });
+
+  expect(registry.codex.agentProfileSecurityPresets?.map((preset) => preset.id)).toEqual([
+    "provider-defaults",
+    "fail-closed-read-only",
+    "fail-closed-workspace-write",
+  ]);
+  expect(registry["codex-custom"].agentProfileSecurityPresets).toBeUndefined();
+  expect(registry.claude.agentProfileSecurityPresets).toBeUndefined();
 });
 
 test("built-in OMP override keeps the real OMP adapter enabled and launchable", async () => {

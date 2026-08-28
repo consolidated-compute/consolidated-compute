@@ -1,4 +1,5 @@
 import type {
+  AgentProfileSecurityPreset,
   AgentProviderNotice,
   AgentTaskItem,
   ProviderOptions,
@@ -125,6 +126,7 @@ export interface ProviderSnapshotEntry {
   label?: string;
   description?: string;
   defaultModeId?: string | null;
+  agentProfileSecurityPresets?: AgentProfileSecurityPreset[];
 }
 
 export interface AgentCreateConfigParent {

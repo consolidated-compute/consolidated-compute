@@ -20,7 +20,9 @@ import { buildTeamRunWorkspaceOptions, type TeamRunFormValidationIssue } from ".
 import { useTeamRunFormFeatureCatalogs } from "./use-team-run-form-feature-catalogs";
 import { useTeamRunFormModel } from "./use-team-run-form-model";
 import { useTeamRunFormProviderSnapshot } from "./use-team-run-form-provider-snapshot";
+import { useTeamRunFormSecurityPreview } from "./use-team-run-form-security-preview";
 import { useTeamRunFormSubmission } from "./use-team-run-form-submission";
+import { TeamSecurityPostureFacts, TeamSecurityPostureNotice } from "./security-posture-facts";
 
 export interface TeamRunFormSheetProps {
   serverId: string;
@@ -59,6 +61,7 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
   const state = useSyncExternalStore(model.subscribe, model.getState, model.getState);
   useTeamRunFormProviderSnapshot(model, state);
   const { connected } = useTeamRunFormFeatureCatalogs(model, state);
+  useTeamRunFormSecurityPreview(model, state);
   const { cancelCompletion, pending, startPress } = useTeamRunFormSubmission(
     model,
     props.onStarted,
@@ -161,6 +164,22 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
         )}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t("teams.runs.form.launchPlan")}</Text>
+          {state.securityPreviewStatus === "unsupported" ? (
+            <TeamSecurityPostureNotice
+              kind="update_required"
+              testID="team-run-security-preview-update-required"
+            />
+          ) : null}
+          {state.securityPreviewStatus === "pending" ? (
+            <TeamSecurityPostureNotice kind="pending" testID="team-run-security-preview-pending" />
+          ) : null}
+          {state.securityPreviewStatus === "error" ? (
+            <TeamSecurityPostureNotice
+              kind="error"
+              message={state.securityPreviewError ?? undefined}
+              testID="team-run-security-preview-error"
+            />
+          ) : null}
           {state.roleResolutions.map((resolution) => (
             <View
               key={resolution.roleId}
@@ -193,6 +212,14 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
               >
                 {t(`teams.runs.profileStates.${resolution.status}`)}
               </Text>
+              {resolution.securityPosture ? (
+                <View style={styles.posture}>
+                  <TeamSecurityPostureFacts
+                    posture={resolution.securityPosture}
+                    testIDPrefix={`team-run-role-posture-${resolution.roleId}`}
+                  />
+                </View>
+              ) : null}
             </View>
           ))}
         </View>
@@ -201,7 +228,10 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
             {state.submitError}
           </Text>
         ) : null}
-        {state.validationIssue && state.validationIssue !== "profiles_loading" ? (
+        {state.validationIssue &&
+        state.validationIssue !== "profiles_loading" &&
+        state.validationIssue !== "security_preview_loading" &&
+        state.validationIssue !== "security_preview_failed" ? (
           <Text style={styles.validation} testID="team-run-validation">
             {validationMessage(state.validationIssue, t)}
           </Text>
@@ -251,6 +281,7 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.surface1,
   },
   roleText: { flex: 1, minWidth: 0, gap: theme.spacing[1] },
+  posture: { flexBasis: "100%", minWidth: 0 },
   roleName: { color: theme.colors.foreground, fontWeight: theme.fontWeight.medium },
   profileName: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
   launchSummary: { color: theme.colors.foregroundExtraMuted, fontSize: theme.fontSize.sm },

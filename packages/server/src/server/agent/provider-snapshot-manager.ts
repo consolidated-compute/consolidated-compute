@@ -706,6 +706,7 @@ export class ProviderSnapshotManager {
         label: definition.label,
         description: definition.description,
         defaultModeId: definition.defaultModeId,
+        agentProfileSecurityPresets: definition.agentProfileSecurityPresets,
         error: toErrorMessage(error),
       };
     }
@@ -753,6 +754,7 @@ export class ProviderSnapshotManager {
         label: definition?.label,
         description: definition?.description,
         defaultModeId: definition?.defaultModeId ?? null,
+        agentProfileSecurityPresets: definition?.agentProfileSecurityPresets,
       });
     }
     return entries;
@@ -772,6 +774,7 @@ export class ProviderSnapshotManager {
         label: definition?.label,
         description: definition?.description,
         defaultModeId: definition?.defaultModeId ?? null,
+        agentProfileSecurityPresets: definition?.agentProfileSecurityPresets,
       };
 
       if (!definition?.enabled) {
@@ -940,6 +943,7 @@ export class ProviderSnapshotManager {
       label: definition.label,
       description: definition.description,
       defaultModeId: definition.defaultModeId,
+      agentProfileSecurityPresets: definition.agentProfileSecurityPresets,
     };
     const setEntry = (entry: ProviderSnapshotEntry) => {
       if (!this.isCurrentProviderLoad(snapshotCwd, provider, load)) {
@@ -1159,6 +1163,9 @@ function cloneEntry(entry: ProviderSnapshotEntry): ProviderSnapshotEntry {
     ...entry,
     models: entry.models?.map((model) => ({ ...model })),
     modes: entry.modes?.map((mode) => ({ ...mode })),
+    agentProfileSecurityPresets: entry.agentProfileSecurityPresets?.map((preset) =>
+      structuredClone(preset),
+    ),
   };
 }
 

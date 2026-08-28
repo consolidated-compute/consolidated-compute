@@ -2531,6 +2531,25 @@ export const ja: TranslationResources = {
         noModes: "このプロバイダーには選択できるモードがありません",
         thinkingLabel: "思考",
         noThinkingOptions: "このモデルには思考レベルがありません",
+        securityBoundaryLabel: "セキュリティ境界",
+        securityBoundaryPlaceholder: "プロバイダーのセキュリティ境界を選択",
+        noSecurityBoundaries: "このプロバイダーには対応するセキュリティ境界がありません",
+        customSecurityBoundary: "カスタムのネイティブ設定",
+        securityStates: {
+          idle: "プロバイダーを選択して、対応するセキュリティ境界を確認してください。",
+          pending: "プロバイダーが対応するセキュリティ境界を確認中…",
+          available: "この境界はプロバイダーによって提供および検証されています。",
+          unrecognized:
+            "このプロファイルにはカスタムのネイティブ設定があります。対応する境界を選択するまで保持されます。",
+          stale:
+            "プロバイダーのセキュリティ制御が変更されました。保存する前に境界を選び直してください。",
+          read_only: "既存のネイティブセキュリティ設定は保持されますが、ここでは編集できません。",
+          unavailable:
+            "セキュリティ境界を読み込めませんでした。プロバイダーのスナップショットを再試行してください。",
+          unsupported: "このプロバイダーは編集可能なセキュリティ境界を提供していません。",
+          update_required:
+            "ネイティブセキュリティ設定を含むプロファイルを変更する前に、このホストを更新してください。",
+        },
         featuresLabel: "機能",
         featureCount: "{{count}}個の機能",
         featureCountOne: "{{count}}個の機能",

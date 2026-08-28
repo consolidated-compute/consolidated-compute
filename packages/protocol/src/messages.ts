@@ -73,6 +73,8 @@ import {
   TeamRunGetResponseSchema,
   TeamRunListRequestSchema,
   TeamRunListResponseSchema,
+  TeamRunPreviewRequestSchema,
+  TeamRunPreviewResponseSchema,
   TeamRunStartRequestSchema,
   TeamRunStartResponseSchema,
   TeamUpdateRequestSchema,
@@ -413,6 +415,17 @@ export const ProviderSnapshotEntrySchema = z.object({
   label: z.string().optional(),
   description: z.string().optional(),
   defaultModeId: z.string().nullable().optional(),
+  agentProfileSecurityPresets: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(128),
+        label: z.string().min(1).max(120),
+        description: z.string().max(240).optional(),
+        providerOptions: ProviderOptionsSchema,
+      }),
+    )
+    .max(12)
+    .optional(),
 });
 
 export const CompactProviderSnapshotModelSchema = AgentModelDefinitionSchema.omit({
@@ -3033,6 +3046,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   TeamUpdateRequestSchema,
   TeamDeleteRequestSchema,
   TeamRunStartRequestSchema,
+  TeamRunPreviewRequestSchema,
   TeamRunListRequestSchema,
   TeamRunGetRequestSchema,
   TeamRunCancelRequestSchema,
@@ -3506,6 +3520,8 @@ export const ServerInfoStatusPayloadSchema = z
         teams: z.boolean().optional(),
         // COMPAT(teamSecurity): added in v0.6.2, remove gate after 2027-02-28.
         teamSecurity: z.boolean().optional(),
+        // COMPAT(teamRunPreview): added in v0.6.2, remove gate after 2027-02-28.
+        teamRunPreview: z.boolean().optional(),
         // COMPAT(assignments): added in v0.6.x, remove gate after 2027-02-27.
         assignments: z.boolean().optional(),
         // COMPAT(agentConfigApply): added in v0.3.2, remove gate after 2027-02-11.
@@ -6366,6 +6382,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   TeamUpdateResponseSchema,
   TeamDeleteResponseSchema,
   TeamRunStartResponseSchema,
+  TeamRunPreviewResponseSchema,
   TeamRunListResponseSchema,
   TeamRunGetResponseSchema,
   TeamRunCancelResponseSchema,

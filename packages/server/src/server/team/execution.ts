@@ -124,7 +124,14 @@ export interface TeamRunPreflightInput {
 
 export interface AcceptedTeamRunFacts {
   workspace: TeamRunWorkspaceSnapshot;
+  roles: AcceptedTeamRunRole[];
   steps: TeamRunStep[];
+}
+
+export interface AcceptedTeamRunRole {
+  roleId: string;
+  roleName: string;
+  resolvedLaunch: TeamRunStepSnapshot["resolvedLaunch"];
 }
 
 export async function preflightTeamRun(
@@ -172,6 +179,14 @@ export async function preflightTeamRun(
   }
   if (issues.length > 0) throw new TeamExecutionPreflightError(issues);
 
+  const acceptedRoles = input.definition.roles.map(
+    (role): AcceptedTeamRunRole => ({
+      roleId: role.id,
+      roleName: role.name,
+      resolvedLaunch: launches.get(role.id)!,
+    }),
+  );
+
   const steps = input.definition.workflow.map((workflowStep, index): TeamRunStep => {
     const role = workflowRoles[index]!;
     return {
@@ -192,7 +207,7 @@ export async function preflightTeamRun(
     input.workspaceId,
     workspaceSnapshot(workspace),
   );
-  return { workspace: workspaceSnapshot(currentWorkspace), steps };
+  return { workspace: workspaceSnapshot(currentWorkspace), roles: acceptedRoles, steps };
 }
 
 export async function revalidateTeamRunWorkspace(

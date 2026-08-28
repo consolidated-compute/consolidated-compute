@@ -37,6 +37,14 @@ Each provider definition owns its option schema and exact MCP preapproval mappin
 must fail closed for Hub unattended execution until it can approve one exact injected MCP server
 and tool identity without approving native tools.
 
+A built-in provider may advertise a bounded `agentProfileSecurityPresets` list in its provider
+snapshot. Each preset owns an opaque, schema-valid `providerOptions` payload plus user-facing copy.
+The Agent Profile form selects one preset and stores its payload; it does not expose or interpret
+raw provider JSON. Advertise presets only for the exact provider contract that authored them.
+Derived and custom providers do not inherit a base provider's presets because their runtime and
+defaults may differ. If a stored payload no longer matches an advertised preset, keep it visible as
+custom state and require the user to select a current preset before replacing it.
+
 ## Two Integration Patterns
 
 ### ACP (Agent Client Protocol) -- recommended

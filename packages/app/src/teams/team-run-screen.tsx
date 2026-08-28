@@ -30,6 +30,7 @@ import {
 } from "./run-data";
 import { useTeamRunMutations } from "./use-team-run-mutations";
 import { useTeamRun } from "./use-team-runs";
+import { TeamSecurityPostureFacts, TeamSecurityPostureNotice } from "./security-posture-facts";
 
 export function TeamRunScreen({
   serverId,
@@ -385,6 +386,17 @@ function RunStepCard({
             {featureId}: {formatFeatureValue(value)}
           </Text>
         ))}
+        {launch.securityPosture ? (
+          <TeamSecurityPostureFacts
+            posture={launch.securityPosture}
+            testIDPrefix={`team-run-step-posture-${step.snapshot.stepId}`}
+          />
+        ) : (
+          <TeamSecurityPostureNotice
+            kind="legacy"
+            testID={`team-run-step-posture-${step.snapshot.stepId}-legacy`}
+          />
+        )}
       </View>
       {"error" in step.state ? <Text style={styles.error}>{step.state.error}</Text> : null}
     </View>
