@@ -2,7 +2,7 @@ import { useCallback } from "react";
 import type { AgentProfile, AgentProfilePatch } from "@getpaseo/protocol/messages";
 import { useDaemonConfig } from "@/hooks/use-daemon-config";
 import { useSessionStore } from "@/stores/session-store";
-import { supportsAgentProfiles } from "./capabilities";
+import { assertAgentProfilePatchesSupported, supportsAgentProfiles } from "./capabilities";
 
 export interface UseAgentProfilesResult {
   /** `null` until the daemon config has arrived. */
@@ -15,15 +15,15 @@ export interface UseAgentProfilesResult {
 
 export function useAgentProfiles(serverId: string | null): UseAgentProfilesResult {
   const { config, patchConfig } = useDaemonConfig(serverId);
-  const isSupported = useSessionStore((state) => {
-    return supportsAgentProfiles(state.sessions[serverId ?? ""]?.serverInfo?.features);
-  });
+  const features = useSessionStore((state) => state.sessions[serverId ?? ""]?.serverInfo?.features);
+  const isSupported = supportsAgentProfiles(features);
 
   const saveProfiles = useCallback(
     async (next: AgentProfilePatch[]) => {
+      assertAgentProfilePatchesSupported(features, next);
       await patchConfig({ agentProfiles: next });
     },
-    [patchConfig],
+    [features, patchConfig],
   );
 
   return {
