@@ -1,7 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { loadNextAssignmentRunPage } from "./run-data";
+import {
+  assignmentRunRecentQueryKey,
+  hasUnrecordedAssignmentRuns,
+  loadNextAssignmentRunPage,
+} from "./run-data";
 
 describe("Assignment Team Run data", () => {
+  it("qualifies the bounded recent-run activity query by host and Assignment", () => {
+    expect(assignmentRunRecentQueryKey("host-1", "assignment-1")).toEqual([
+      "assignmentRuns",
+      "host-1",
+      "assignment-1",
+      "recent",
+    ]);
+  });
+
+  it("detects newly observed runs missing from loaded history", () => {
+    expect(hasUnrecordedAssignmentRuns([{ id: "new" }], [{ id: "old" }])).toBe(true);
+    expect(hasUnrecordedAssignmentRuns([{ id: "known" }], [{ id: "known" }])).toBe(false);
+  });
+
   it("skips unrelated pages before returning Assignment runs", async () => {
     const cursors: Array<string | null> = [];
     const pages = new Map([

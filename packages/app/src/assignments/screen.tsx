@@ -696,7 +696,9 @@ function assignmentTransitionErrorMessage(
 
 function AssignmentRuns({ assignment }: { assignment: AggregatedAssignment }): ReactElement {
   const { t } = useTranslation();
-  const query = useAssignmentRuns(assignment.serverId, assignment.id);
+  const query = useAssignmentRuns(assignment.serverId, assignment.id, {
+    watchForNewRuns: assignment.state.status === "open",
+  });
   const { refetch, fetchNextPage } = query;
   const retry = useCallback(() => void refetch(), [refetch]);
   const loadMore = useCallback(() => void fetchNextPage(), [fetchNextPage]);

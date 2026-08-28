@@ -20,6 +20,18 @@ export function assignmentRunListQueryKey(serverId: string, assignmentId: string
   return [...assignmentRunsQueryBaseKey, serverId, assignmentId, "list"] as const;
 }
 
+export function assignmentRunRecentQueryKey(serverId: string, assignmentId: string) {
+  return [...assignmentRunsQueryBaseKey, serverId, assignmentId, "recent"] as const;
+}
+
+export function hasUnrecordedAssignmentRuns(
+  recentRuns: readonly { id: string }[],
+  recordedRuns: readonly { id: string }[],
+): boolean {
+  const recordedIds = new Set(recordedRuns.map((run) => run.id));
+  return recentRuns.some((run) => !recordedIds.has(run.id));
+}
+
 export function flattenAssignmentRunPages(pages: readonly AssignmentRunPage[]): TeamRunDto[] {
   const seen = new Set<string>();
   return pages.flatMap((page) =>
