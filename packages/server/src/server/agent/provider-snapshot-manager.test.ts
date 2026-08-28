@@ -276,6 +276,12 @@ describe("ProviderSnapshotManager public surface", () => {
       expect(claude?.label).toBe("Claude");
       expect(claude?.defaultModeId).toBe("auto");
       expect(codex?.defaultModeId).toBe("auto-review");
+      expect(codex?.agentProfileSecurityPresets?.map((preset) => preset.id)).toEqual([
+        "provider-defaults",
+        "fail-closed-read-only",
+        "fail-closed-workspace-write",
+      ]);
+      expect(claude?.agentProfileSecurityPresets).toBeUndefined();
     } finally {
       manager.destroy();
     }

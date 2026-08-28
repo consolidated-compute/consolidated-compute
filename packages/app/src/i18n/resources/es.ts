@@ -2563,6 +2563,26 @@ export const es: TranslationResources = {
         noModes: "Este proveedor no tiene modos para elegir",
         thinkingLabel: "Pensamiento",
         noThinkingOptions: "Este modelo no tiene niveles de pensamiento",
+        securityBoundaryLabel: "Límite de seguridad",
+        securityBoundaryPlaceholder: "Selecciona un límite de seguridad del proveedor",
+        noSecurityBoundaries: "Este proveedor no ofrece límites de seguridad compatibles",
+        customSecurityBoundary: "Configuración nativa personalizada",
+        securityStates: {
+          idle: "Selecciona un proveedor para consultar sus límites de seguridad compatibles.",
+          pending: "Comprobando los límites de seguridad compatibles del proveedor…",
+          available: "El proveedor suministra y valida este límite.",
+          unrecognized:
+            "Este perfil tiene configuración nativa personalizada. Se conservará hasta que selecciones un límite compatible.",
+          stale:
+            "Los controles de seguridad del proveedor cambiaron. Vuelve a seleccionar el límite antes de guardar.",
+          read_only:
+            "Se conservará la configuración de seguridad nativa existente, pero no puede editarse aquí.",
+          unavailable:
+            "No se pudieron cargar los límites de seguridad. Reintenta la instantánea del proveedor.",
+          unsupported: "Este proveedor no anuncia límites de seguridad editables.",
+          update_required:
+            "Actualiza este host antes de cambiar un perfil con configuración de seguridad nativa.",
+        },
         featuresLabel: "Características",
         featureCount: "{{count}} características",
         featureCountOne: "{{count}} característica",

@@ -20,12 +20,15 @@ import { AgentProfileAppearanceField } from "./agent-profile-appearance-field";
 import type {
   AgentProfileFormModel,
   AgentProfileFormOption,
+  AgentProfileFormState,
+  AgentProfileSelectionDisplays,
   AgentProfileSeed,
   AgentProfileValue,
 } from "../internal/profile-form-model";
 import {
   useAgentProfileFormCatalog,
   useAgentProfileFormFeatures,
+  useAgentProfileFormSecurityCapability,
 } from "../internal/use-profile-form-inputs";
 import {
   useAgentProfileFormModel,
@@ -37,6 +40,7 @@ export interface AgentProfileEditModalProps {
   visible: boolean;
   mode: "create" | "edit";
   profile?: AgentProfile;
+  profileDisplays?: AgentProfileSelectionDisplays;
   seed?: AgentProfileSeed;
   onClose: () => void;
   onSave: (value: AgentProfileValue) => Promise<void>;
@@ -50,14 +54,15 @@ const UNSET_VALUE = "";
 
 function openKey(props: AgentProfileEditModalProps): string {
   if (props.mode === "edit") {
-    return `edit:${props.profile?.id ?? ""}`;
+    return `${props.serverId}:edit:${props.profile?.id ?? ""}`;
   }
-  return `create:${props.seed?.provider ?? ""}:${props.seed?.modelId ?? ""}`;
+  return `${props.serverId}:create:${props.seed?.provider ?? ""}:${props.seed?.modelId ?? ""}`;
 }
 
 /**
- * Create and edit never share a mounted instance: the body is keyed on mode plus
- * profile id, so every open constructs a form model seeded from that record.
+ * Create and edit never share a mounted instance: the body is keyed on host,
+ * mode, and profile id, so every open constructs a form model seeded from that
+ * host-scoped record.
  */
 export function AgentProfileEditModal(props: AgentProfileEditModalProps): ReactElement | null {
   const [renderedProps, setRenderedProps] = useState<AgentProfileEditModalProps | null>(() =>
@@ -122,11 +127,83 @@ function toSelectOptions(options: AgentProfileFormOption[]): SelectFieldOption<s
   }));
 }
 
+function AgentProfileSecurityFields({
+  model,
+  state,
+  controlSize,
+  onRetryCatalog,
+}: {
+  model: AgentProfileFormModel;
+  state: AgentProfileFormState;
+  controlSize: FieldControlSize;
+  onRetryCatalog: () => void;
+}): ReactElement | null {
+  const { t } = useTranslation();
+  const options = useMemo(
+    () => toSelectOptions(state.securityPresetOptions),
+    [state.securityPresetOptions],
+  );
+  const handleChange = useCallback(
+    (value: string, display: SelectFieldDisplay) => model.setSecurityPreset(value, display),
+    [model],
+  );
+  const statusMessage = t(`settings.host.agentProfiles.securityStates.${state.securityStatus}`);
+  const error =
+    state.securityStatus === "stale" ||
+    state.securityStatus === "update_required" ||
+    state.securityStatus === "unavailable"
+      ? (state.catalogError ?? statusMessage)
+      : null;
+  const hint = error ? undefined : statusMessage;
+
+  if (!state.disclosure.showSecurityPresetField) return null;
+
+  return (
+    <View style={styles.securityField}>
+      <SelectField
+        label={t("settings.host.agentProfiles.securityBoundaryLabel")}
+        value={state.securityPresetId}
+        selectedDisplay={state.securityPresetDisplay}
+        options={options}
+        onChange={handleChange}
+        placeholder={t("settings.host.agentProfiles.securityBoundaryPlaceholder")}
+        emptyText={t("settings.host.agentProfiles.noSecurityBoundaries")}
+        loading={state.securityStatus === "pending"}
+        disabled={
+          state.isSubmitting ||
+          state.securityStatus === "pending" ||
+          state.securityStatus === "read_only" ||
+          state.securityStatus === "unavailable" ||
+          state.securityStatus === "update_required"
+        }
+        hint={hint}
+        error={error}
+        title={t("settings.host.agentProfiles.securityBoundaryLabel")}
+        size={controlSize}
+        testID="agent-profile-security-field"
+        triggerTestID="agent-profile-security-trigger"
+      />
+      {state.catalogRetryAvailable ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          onPress={onRetryCatalog}
+          disabled={state.isSubmitting}
+          testID="agent-profile-security-retry"
+        >
+          {t("common.actions.retry")}
+        </Button>
+      ) : null}
+    </View>
+  );
+}
+
 function OpenAgentProfileEditModal({
   serverId,
   visible,
   mode,
   profile,
+  profileDisplays,
   seed,
   onClose,
   onDismiss,
@@ -135,12 +212,21 @@ function OpenAgentProfileEditModal({
   const { t } = useTranslation();
   const controlSize: FieldControlSize = useIsCompactFormFactor() ? "md" : "sm";
   const snapshot = useMemo(
-    () => ({ mode, ...(profile ? { profile } : {}), ...(seed ? { seed } : {}) }),
-    [mode, profile, seed],
+    () => ({
+      mode,
+      ...(profile ? { profile } : {}),
+      ...(profileDisplays ? { profileDisplays } : {}),
+      ...(seed ? { seed } : {}),
+      customSecurityDisplay: {
+        label: t("settings.host.agentProfiles.customSecurityBoundary"),
+      },
+    }),
+    [mode, profile, profileDisplays, seed, t],
   );
   const model = useAgentProfileFormModel(snapshot);
   const state = useAgentProfileFormState(model);
-  useAgentProfileFormCatalog({ serverId, model });
+  const retryProviderCatalog = useAgentProfileFormCatalog({ serverId, model });
+  useAgentProfileFormSecurityCapability({ serverId, model });
   useAgentProfileFormFeatures({ serverId, model, state });
 
   const sheetHeader = useMemo<SheetHeader>(
@@ -154,8 +240,8 @@ function OpenAgentProfileEditModal({
   );
 
   const providerOptions = useMemo(
-    () => toSelectOptions(state.providerOptions),
-    [state.providerOptions],
+    () => toSelectOptions(state.providerChoices),
+    [state.providerChoices],
   );
   const modelOptions = useMemo(() => toSelectOptions(state.modelOptions), [state.modelOptions]);
   const modeOptions = useMemo(() => toSelectOptions(state.modeOptions), [state.modeOptions]);
@@ -327,6 +413,13 @@ function OpenAgentProfileEditModal({
             triggerTestID="agent-profile-thinking-trigger"
           />
         ) : null}
+
+        <AgentProfileSecurityFields
+          model={model}
+          state={state}
+          controlSize={controlSize}
+          onRetryCatalog={retryProviderCatalog}
+        />
 
         {state.disclosure.showFeaturesField ? (
           <Field
@@ -507,6 +600,10 @@ const styles = StyleSheet.create((theme) => ({
   },
   nameField: {
     flex: 1,
+  },
+  securityField: {
+    alignItems: "flex-start",
+    gap: theme.spacing[2],
   },
   featureCard: {
     backgroundColor: theme.colors.surface2,

@@ -1,3 +1,4 @@
+import equal from "fast-deep-equal";
 import type {
   AgentFeature,
   AgentModelDefinition,
@@ -6,7 +7,12 @@ import type {
 import { materializeAgentProfile } from "@getpaseo/protocol/agent-profiles";
 import type { AssignmentDto } from "@getpaseo/protocol/assignment/types";
 import type { AgentProfile } from "@getpaseo/protocol/messages";
-import { TEAM_OBJECTIVE_MAX_CHARS, type TeamDefinitionDto } from "@getpaseo/protocol/team/types";
+import {
+  TEAM_OBJECTIVE_MAX_CHARS,
+  type TeamDefinitionDto,
+  type TeamRunPreviewDto,
+  type TeamSecurityPostureDto,
+} from "@getpaseo/protocol/team/types";
 import { filterSelectableModels } from "@/provider-selection/model-catalog";
 import type { WorkspaceDescriptor } from "@/stores/session-store";
 
@@ -44,6 +50,7 @@ export interface TeamRunRoleResolution {
   modeId: string | null;
   thinkingOptionId: string | null;
   featureValues: Record<string, unknown>;
+  securityPosture: TeamSecurityPostureDto | null;
   status: TeamRunRoleResolutionStatus;
 }
 
@@ -53,7 +60,9 @@ export type TeamRunFormValidationIssue =
   | "objective_required"
   | "objective_too_long"
   | "profiles_loading"
-  | "profile_unavailable";
+  | "profile_unavailable"
+  | "security_preview_loading"
+  | "security_preview_failed";
 
 interface TeamRunFormSubmissionBase {
   serverId: string;
@@ -62,6 +71,7 @@ interface TeamRunFormSubmissionBase {
   idempotencyKey: string;
   objective: string;
   workspaceId: string;
+  expectedPreviewFingerprint?: string;
 }
 
 export type TeamRunFormSubmission = TeamRunFormSubmissionBase &
@@ -78,9 +88,13 @@ export interface TeamRunFormState {
   selectedWorkspaceDisplay: TeamRunFormDisplay | null;
   selectedWorkspaceCwd: string | null;
   catalogGeneration: number;
+  profileGeneration: number;
   objective: string;
   assignment: AssignmentDto | null;
   roleResolutions: TeamRunRoleResolution[];
+  securityPreviewStatus: "idle" | "pending" | "ready" | "error" | "unsupported";
+  securityPreviewRequest: TeamRunSecurityPreviewRequest | null;
+  securityPreviewError: string | null;
   validationIssue: TeamRunFormValidationIssue | null;
   canSubmit: boolean;
   submission: TeamRunFormSubmission | null;
@@ -106,6 +120,10 @@ export interface TeamRunFormModel {
     workspaceCwd: string,
     entries: readonly ProviderSnapshotEntry[] | null,
   ) => void;
+  applySecurityPreviewCapability: (supported: boolean) => void;
+  applySecurityPreviewPending: (requestKey: string) => void;
+  applySecurityPreview: (requestKey: string, preview: TeamRunPreviewDto) => void;
+  applySecurityPreviewError: (requestKey: string, error: string) => void;
   applyFeatureCatalog: (
     roleId: string,
     requestKey: string,
@@ -137,6 +155,15 @@ export interface TeamRunFeatureProbe {
   requestKey: string;
   roleIds: string[];
   config: TeamRunFeatureRequest["config"];
+}
+
+export interface TeamRunSecurityPreviewRequest {
+  requestKey: string;
+  input: {
+    teamId: string;
+    expectedRevision: number;
+    workspaceId: string;
+  };
 }
 
 export function buildTeamRunWorkspaceOptions(
@@ -274,6 +301,7 @@ function resolveProfile(
     modeId: null,
     thinkingOptionId: null,
     featureValues: {},
+    securityPosture: null,
   } satisfies RoleResolutionBase;
   if (profiles === null) return { resolved: false, resolution: { ...base, status: "loading" } };
   const matches = profiles.filter((profile) => profile.id === role.profileId);
@@ -365,7 +393,140 @@ function resolveRoles(input: {
   });
 }
 
-function validationIssue(state: TeamRunFormState): TeamRunFormValidationIssue | null {
+function applySecurityPreview(
+  resolutions: readonly TeamRunRoleResolution[],
+  preview: TeamRunPreviewDto | null,
+): TeamRunRoleResolution[] {
+  if (!preview) return [...resolutions];
+  const roles = new Map(preview.roles.map((role) => [role.roleId, role]));
+  return resolutions.map((resolution) => {
+    const previewRole = roles.get(resolution.roleId);
+    if (!previewRole || resolution.status !== "ready") return resolution;
+    const launch = previewRole.resolvedLaunch;
+    return {
+      ...resolution,
+      profileId: launch.profileId,
+      provider: launch.provider,
+      model: launch.model,
+      modeId: launch.modeId,
+      thinkingOptionId: launch.thinkingOptionId,
+      featureValues: launch.featureValues,
+      securityPosture: launch.securityPosture ?? null,
+    };
+  });
+}
+
+function buildSecurityPreviewRequest(
+  state: TeamRunFormState,
+): TeamRunSecurityPreviewRequest | null {
+  if (!state.selectedWorkspaceId || !state.selectedWorkspaceCwd) {
+    return null;
+  }
+  return {
+    requestKey: JSON.stringify([
+      state.team.id,
+      state.team.revision,
+      state.selectedWorkspaceId,
+      state.selectedWorkspaceCwd,
+      state.profileGeneration,
+      state.catalogGeneration,
+    ]),
+    input: {
+      teamId: state.team.id,
+      expectedRevision: state.team.revision,
+      workspaceId: state.selectedWorkspaceId,
+    },
+  };
+}
+
+interface ResolvedSecurityPreview {
+  requestKey: string;
+  preview: TeamRunPreviewDto;
+}
+
+interface SecurityPreviewFailure {
+  requestKey: string;
+  error: string;
+}
+
+function isCompleteSecurityPreview(preview: TeamRunPreviewDto, state: TeamRunFormState): boolean {
+  if (
+    preview.workspace.workspaceId !== state.selectedWorkspaceId ||
+    preview.workspace.cwd !== state.selectedWorkspaceCwd ||
+    preview.roles.length !== state.team.roles.length
+  ) {
+    return false;
+  }
+  const roles = new Map(preview.roles.map((role) => [role.roleId, role]));
+  return state.team.roles.every((role) => {
+    const previewRole = roles.get(role.id);
+    return (
+      previewRole?.roleName === role.name &&
+      previewRole.resolvedLaunch.securityPosture !== undefined
+    );
+  });
+}
+
+function resolveSecurityPreview(input: {
+  capability: boolean | null;
+  request: TeamRunSecurityPreviewRequest | null;
+  resolved: ResolvedSecurityPreview | null;
+  failure: SecurityPreviewFailure | null;
+  state: TeamRunFormState;
+}): {
+  status: TeamRunFormState["securityPreviewStatus"];
+  error: string | null;
+  preview: TeamRunPreviewDto | null;
+} {
+  if (input.capability === null) return { status: "pending", error: null, preview: null };
+  if (!input.capability) return { status: "unsupported", error: null, preview: null };
+  if (!input.request) return { status: "idle", error: null, preview: null };
+  if (input.failure?.requestKey === input.request.requestKey) {
+    return { status: "error", error: input.failure.error, preview: null };
+  }
+  if (input.resolved?.requestKey !== input.request.requestKey) {
+    return { status: "pending", error: null, preview: null };
+  }
+  if (!isCompleteSecurityPreview(input.resolved.preview, input.state)) {
+    return { status: "error", error: null, preview: null };
+  }
+  return { status: "ready", error: null, preview: input.resolved.preview };
+}
+
+function securityPreviewValidationIssue(
+  capability: boolean | null,
+  status: TeamRunFormState["securityPreviewStatus"],
+): TeamRunFormValidationIssue | null {
+  if (capability === null || (capability && (status === "idle" || status === "pending"))) {
+    return "security_preview_loading";
+  }
+  return capability && status === "error" ? "security_preview_failed" : null;
+}
+
+function buildSubmission(
+  state: TeamRunFormState,
+  idempotencyKey: string,
+  preview: TeamRunPreviewDto | null,
+): TeamRunFormSubmission | null {
+  if (!state.selectedWorkspaceId) return null;
+  const base = {
+    serverId: state.serverId,
+    teamId: state.team.id,
+    expectedRevision: state.team.revision,
+    idempotencyKey,
+    objective: state.objective.trim(),
+    workspaceId: state.selectedWorkspaceId,
+    ...(preview ? { expectedPreviewFingerprint: preview.fingerprint } : {}),
+  };
+  if (!state.assignment) return base;
+  return {
+    ...base,
+    assignmentId: state.assignment.id,
+    expectedAssignmentRevision: state.assignment.revision,
+  };
+}
+
+function baseValidationIssue(state: TeamRunFormState): TeamRunFormValidationIssue | null {
   if (!state.selectedWorkspaceId) return "workspace_required";
   if (!state.workspaces.some((workspace) => workspace.workspaceId === state.selectedWorkspaceId)) {
     return "workspace_missing";
@@ -393,6 +554,9 @@ export function openTeamRunForm(
   let providerEntries: readonly ProviderSnapshotEntry[] | null = null;
   let providerWorkspaceId: string | null = null;
   let providerWorkspaceCwd: string | null = null;
+  let securityPreviewCapability: boolean | null = null;
+  let resolvedSecurityPreview: { requestKey: string; preview: TeamRunPreviewDto } | null = null;
+  let securityPreviewFailure: { requestKey: string; error: string } | null = null;
   const featureCatalogs = new Map<string, FeatureCatalogResult>();
   const idempotencyKey = (options.generateIdempotencyKey ?? generateIdempotencyKey)();
   const initialWorkspace = snapshot.workspaces.length === 1 ? snapshot.workspaces[0]! : null;
@@ -406,9 +570,13 @@ export function openTeamRunForm(
     selectedWorkspaceDisplay: initialWorkspace?.display ?? null,
     selectedWorkspaceCwd: initialWorkspace?.cwd ?? null,
     catalogGeneration: 0,
+    profileGeneration: 0,
     objective: snapshot.assignment?.objective ?? "",
     assignment: snapshot.assignment ?? null,
     roleResolutions: [],
+    securityPreviewStatus: "idle",
+    securityPreviewRequest: null,
+    securityPreviewError: null,
     validationIssue: null,
     canSubmit: false,
     submission: null,
@@ -417,7 +585,7 @@ export function openTeamRunForm(
 
   const publish = (next: TeamRunFormState): void => {
     if (closed) return;
-    const roleResolutions = resolveRoles({
+    const localRoleResolutions = resolveRoles({
       team: next.team,
       profiles,
       providerEntries:
@@ -429,28 +597,28 @@ export function openTeamRunForm(
       catalogGeneration: next.catalogGeneration,
       featureCatalogs,
     });
-    const draft = { ...next, roleResolutions };
-    const issue = validationIssue(draft);
-    let submission: TeamRunFormSubmission | null = null;
-    if (issue === null && draft.selectedWorkspaceId) {
-      const base = {
-        serverId: draft.serverId,
-        teamId: draft.team.id,
-        expectedRevision: draft.team.revision,
-        idempotencyKey,
-        objective: draft.objective.trim(),
-        workspaceId: draft.selectedWorkspaceId,
-      };
-      if (draft.assignment) {
-        submission = {
-          ...base,
-          assignmentId: draft.assignment.id,
-          expectedAssignmentRevision: draft.assignment.revision,
-        };
-      } else {
-        submission = base;
-      }
-    }
+    const previewDraft = { ...next, roleResolutions: localRoleResolutions };
+    const previewRequest = buildSecurityPreviewRequest(previewDraft);
+    const securityPreview = resolveSecurityPreview({
+      capability: securityPreviewCapability,
+      request: previewRequest,
+      resolved: resolvedSecurityPreview,
+      failure: securityPreviewFailure,
+      state: previewDraft,
+    });
+    const roleResolutions = applySecurityPreview(localRoleResolutions, securityPreview.preview);
+    const draft = {
+      ...next,
+      roleResolutions,
+      securityPreviewStatus: securityPreview.status,
+      securityPreviewRequest: securityPreviewCapability === true ? previewRequest : null,
+      securityPreviewError: securityPreview.error,
+    };
+    const issue =
+      baseValidationIssue(draft) ??
+      securityPreviewValidationIssue(securityPreviewCapability, securityPreview.status);
+    const submission =
+      issue === null ? buildSubmission(draft, idempotencyKey, securityPreview.preview) : null;
     state = {
       ...draft,
       validationIssue: issue,
@@ -478,12 +646,17 @@ export function openTeamRunForm(
       const selectedWasAvailable = state.workspaces.some(
         (workspace) => workspace.workspaceId === state.selectedWorkspaceId,
       );
+      const previousSelected = state.workspaces.find(
+        (workspace) => workspace.workspaceId === state.selectedWorkspaceId,
+      );
       const selected = nextWorkspaces.find(
         (workspace) => workspace.workspaceId === state.selectedWorkspaceId,
       );
       const selectionContextChanged =
         Boolean(selected) !== selectedWasAvailable ||
         (selected !== undefined && selected.cwd !== state.selectedWorkspaceCwd);
+      const previewContextChanged =
+        selectionContextChanged || selected?.display.label !== previousSelected?.display.label;
       if (selectionContextChanged) {
         providerWorkspaceId = null;
         providerWorkspaceCwd = null;
@@ -493,14 +666,18 @@ export function openTeamRunForm(
         ...state,
         workspaces: nextWorkspaces,
         selectedWorkspaceCwd: selected?.cwd ?? null,
-        catalogGeneration: selectionContextChanged
+        catalogGeneration: previewContextChanged
           ? state.catalogGeneration + 1
           : state.catalogGeneration,
       });
     },
     applyProfiles: (nextProfiles) => {
+      const changed = !equal(profiles, nextProfiles);
       profiles = nextProfiles;
-      publish(state);
+      publish({
+        ...state,
+        profileGeneration: changed ? state.profileGeneration + 1 : state.profileGeneration,
+      });
     },
     applyProviderCatalog: (workspaceId, workspaceCwd, entries) => {
       if (
@@ -509,14 +686,61 @@ export function openTeamRunForm(
       ) {
         return;
       }
+      if (
+        providerWorkspaceId === workspaceId &&
+        providerWorkspaceCwd === workspaceCwd &&
+        equal(providerEntries, entries)
+      ) {
+        return;
+      }
       providerWorkspaceId = workspaceId;
       providerWorkspaceCwd = workspaceCwd;
       providerEntries = entries;
-      publish({ ...state, catalogGeneration: state.catalogGeneration + 1 });
+      const previewInFlight =
+        state.securityPreviewStatus === "pending" && state.securityPreviewRequest !== null;
+      publish({
+        ...state,
+        catalogGeneration: previewInFlight ? state.catalogGeneration : state.catalogGeneration + 1,
+      });
+    },
+    applySecurityPreviewCapability: (supported) => {
+      if (securityPreviewCapability === supported) return;
+      securityPreviewCapability = supported;
+      publish(state);
+    },
+    applySecurityPreviewPending: (requestKey) => {
+      if (requestKey !== state.securityPreviewRequest?.requestKey) return;
+      if (!securityPreviewFailure && resolvedSecurityPreview?.requestKey !== requestKey) return;
+      resolvedSecurityPreview = null;
+      securityPreviewFailure = null;
+      publish(state);
+    },
+    applySecurityPreview: (requestKey, preview) => {
+      if (requestKey !== state.securityPreviewRequest?.requestKey) return;
+      if (
+        resolvedSecurityPreview?.requestKey === requestKey &&
+        equal(resolvedSecurityPreview.preview, preview)
+      ) {
+        return;
+      }
+      resolvedSecurityPreview = { requestKey, preview };
+      securityPreviewFailure = null;
+      publish(state);
+    },
+    applySecurityPreviewError: (requestKey, error) => {
+      if (requestKey !== state.securityPreviewRequest?.requestKey) return;
+      if (
+        securityPreviewFailure?.requestKey === requestKey &&
+        securityPreviewFailure.error === error
+      ) {
+        return;
+      }
+      securityPreviewFailure = { requestKey, error };
+      publish(state);
     },
     applyFeatureCatalog: (roleId, requestKey, features) => {
       const current = featureCatalogs.get(roleId);
-      if (current?.requestKey === requestKey && current.features === features) return;
+      if (current?.requestKey === requestKey && equal(current.features, features)) return;
       featureCatalogs.set(roleId, { requestKey, features });
       publish(state);
     },

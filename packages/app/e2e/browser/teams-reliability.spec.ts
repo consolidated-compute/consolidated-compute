@@ -90,6 +90,7 @@ test.describe("Teams reliability", () => {
           const preview = form.getByTestId(`team-run-role-${role.id}`);
           await expect(preview).toContainText("Ready", { timeout: 30_000 });
           await expect(preview).toContainText("mock · ten-second-stream · load-test");
+          await expectUnavailableSecurityPosture(page, `team-run-role-posture-${role.id}`);
         }
         await expect(form.getByTestId("team-run-start")).toBeEnabled();
         await form.getByTestId("team-run-start").click();
@@ -117,6 +118,7 @@ test.describe("Teams reliability", () => {
           await expect(card).toContainText(ORIGINAL_PROFILES[index]!.id);
           await expect(card).toContainText("mock · ten-second-stream · load-test");
           await expect(card).toContainText("Succeeded");
+          await expectUnavailableSecurityPosture(page, `team-run-step-posture-${step.id}`);
         }
       });
 
@@ -425,6 +427,20 @@ async function rewriteTeamId(
 
 async function expectTestId(locator: Locator, expected: string): Promise<void> {
   await expect.poll(() => locator.getAttribute("data-testid"), { timeout: 30_000 }).toBe(expected);
+}
+
+async function expectUnavailableSecurityPosture(page: Page, testIDPrefix: string): Promise<void> {
+  const facts = page.getByTestId(`${testIDPrefix}-facts`);
+  await expect(facts).toContainText("Provider: mock", { timeout: 30_000 });
+  await expect(page.getByTestId(`${testIDPrefix}-filesystemWrite-unavailable`)).toContainText(
+    "No filesystem enforcement mapping is available for this provider.",
+  );
+  await expect(page.getByTestId(`${testIDPrefix}-networkAccess-unavailable`)).toContainText(
+    "No network enforcement mapping is available for this provider.",
+  );
+  await expect(page.getByTestId(`${testIDPrefix}-toolShell-unavailable`)).toContainText(
+    "No tool or shell enforcement mapping is available for this provider.",
+  );
 }
 
 async function acceptNextDialog(page: Page): Promise<string> {

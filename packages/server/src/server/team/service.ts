@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { Logger } from "pino";
+import type { TeamRunPreviewDto } from "@getpaseo/protocol/team/types";
 
 import type { AgentRunCancellationResult } from "../agent/agent-manager.js";
 import type { CreateAgentFromMcpInput } from "../agent/create-agent/create.js";
@@ -14,6 +15,7 @@ import {
   TeamExecutionPreflightError,
   type TeamAgentProfileConfigStore,
   type TeamAgentStream,
+  type AcceptedTeamRunFacts,
   type TeamFeatureCatalog,
   type TeamProviderCatalog,
   type TeamStepExecutionEvent,
@@ -25,6 +27,7 @@ import {
   type PersistedTeamRunRecord,
   type PersistedTeamRunState,
   type PersistedTeamRunStepState,
+  type PersistedTeamDefinition,
   type TeamRunStepStatus,
 } from "./model.js";
 import {
@@ -35,6 +38,7 @@ import {
   type TeamRunUpdate,
 } from "./repository.js";
 import { materializeTeamStepArtifact, resolveTeamStepInputArtifacts } from "./artifacts.js";
+import { buildTeamRunPreview, createTeamRunPreviewFingerprint } from "./security-preview.js";
 
 type TeamRunStep = PersistedTeamRunRecord["steps"][number];
 type TeamRunTerminationReason = "cancel" | "workspace" | "shutdown";
@@ -60,6 +64,13 @@ export interface StartTeamRunInput {
   idempotencyKey: string;
   objective: string;
   workspaceId: string;
+  expectedPreviewFingerprint?: string;
+}
+
+export interface PreviewTeamRunInput {
+  teamId: string;
+  expectedRevision: number;
+  workspaceId: string;
 }
 
 export interface StartAssignmentTeamRunInput {
@@ -69,6 +80,7 @@ export interface StartAssignmentTeamRunInput {
   assignmentId: string;
   expectedAssignmentRevision: number;
   workspaceId: string;
+  expectedPreviewFingerprint?: string;
 }
 
 export interface TeamRunServiceOptions {
@@ -100,6 +112,15 @@ export class TeamAssignmentRepositoryUnavailableError extends Error {
   constructor() {
     super("Assignment-backed Team Runs require an Assignment repository");
     this.name = "TeamAssignmentRepositoryUnavailableError";
+  }
+}
+
+export class TeamSecurityPreviewStaleError extends Error {
+  readonly code = "team_security_preview_stale";
+
+  constructor() {
+    super("Team Run security preview is stale. Refresh it and try again.");
+    this.name = "TeamSecurityPreviewStaleError";
   }
 }
 
@@ -194,6 +215,13 @@ export class TeamRunService {
     return this.assignmentRepository?.persistenceBoundaryKey === repository.persistenceBoundaryKey;
   }
 
+  async previewRun(input: PreviewTeamRunInput): Promise<TeamRunPreviewDto> {
+    this.requireAcceptingStarts();
+    const definition = await this.requireDefinition(input.teamId, input.expectedRevision);
+    const accepted = await this.preflight(definition, input.workspaceId);
+    return buildTeamRunPreview(accepted);
+  }
+
   async startRun(input: StartTeamRunInput): Promise<PersistedTeamRunRecord> {
     const identity = {
       kind: "objective" as const,
@@ -207,29 +235,14 @@ export class TeamRunService {
     if (existing) return existing;
     this.requireAcceptingStarts();
 
-    const definition = await this.repository.getDefinition(input.teamId);
-    if (!definition) throw new TeamNotFoundError(input.teamId);
-    if (definition.revision !== input.expectedRevision) {
-      throw new TeamRevisionConflictError(
-        input.teamId,
-        input.expectedRevision,
-        definition.revision,
-      );
-    }
-    const accepted = await preflightTeamRun(
-      {
-        workspaceRegistry: this.workspaceRegistry,
-        providerCatalog: this.providerCatalog,
-        featureCatalog: this.agentManager,
-        daemonConfigStore: this.daemonConfigStore,
-      },
-      { definition, workspaceId: input.workspaceId },
-    );
+    const definition = await this.requireDefinition(input.teamId, input.expectedRevision);
+    const accepted = await this.preflight(definition, input.workspaceId);
     return this.withWorkspaceOperation(input.workspaceId, () =>
       this.serializeAdmission(async () => {
         const acceptedExisting = await this.repository.getRunByAdmissionIdentity(identity);
         if (acceptedExisting) return acceptedExisting;
         this.requireAcceptingStarts();
+        this.requireMatchingPreview(input.expectedPreviewFingerprint, accepted);
         await revalidateTeamRunWorkspace(this.workspaceRegistry, accepted.workspace);
         const run = await this.repository.createRun({
           teamId: input.teamId,
@@ -261,29 +274,14 @@ export class TeamRunService {
     if (existing) return existing;
     this.requireAcceptingStarts();
 
-    const definition = await this.repository.getDefinition(input.teamId);
-    if (!definition) throw new TeamNotFoundError(input.teamId);
-    if (definition.revision !== input.expectedRevision) {
-      throw new TeamRevisionConflictError(
-        input.teamId,
-        input.expectedRevision,
-        definition.revision,
-      );
-    }
-    const accepted = await preflightTeamRun(
-      {
-        workspaceRegistry: this.workspaceRegistry,
-        providerCatalog: this.providerCatalog,
-        featureCatalog: this.agentManager,
-        daemonConfigStore: this.daemonConfigStore,
-      },
-      { definition, workspaceId: input.workspaceId },
-    );
+    const definition = await this.requireDefinition(input.teamId, input.expectedRevision);
+    const accepted = await this.preflight(definition, input.workspaceId);
     return this.withWorkspaceOperation(input.workspaceId, () =>
       this.serializeAdmission(async () => {
         const acceptedExisting = await this.repository.getRunByAdmissionIdentity(identity);
         if (acceptedExisting) return acceptedExisting;
         this.requireAcceptingStarts();
+        this.requireMatchingPreview(input.expectedPreviewFingerprint, accepted);
         await revalidateTeamRunWorkspace(this.workspaceRegistry, accepted.workspace);
         const run = await this.repository.createAssignmentRun(
           {
@@ -349,6 +347,45 @@ export class TeamRunService {
 
   private requireAcceptingStarts(): void {
     if (!this.acceptingStarts) throw new TeamRunServiceShuttingDownError();
+  }
+
+  private async requireDefinition(
+    teamId: string,
+    expectedRevision: number,
+  ): Promise<PersistedTeamDefinition> {
+    const definition = await this.repository.getDefinition(teamId);
+    if (!definition) throw new TeamNotFoundError(teamId);
+    if (definition.revision !== expectedRevision) {
+      throw new TeamRevisionConflictError(teamId, expectedRevision, definition.revision);
+    }
+    return definition;
+  }
+
+  private preflight(
+    definition: PersistedTeamDefinition,
+    workspaceId: string,
+  ): Promise<AcceptedTeamRunFacts> {
+    return preflightTeamRun(
+      {
+        workspaceRegistry: this.workspaceRegistry,
+        providerCatalog: this.providerCatalog,
+        featureCatalog: this.agentManager,
+        daemonConfigStore: this.daemonConfigStore,
+      },
+      { definition, workspaceId },
+    );
+  }
+
+  private requireMatchingPreview(
+    expectedFingerprint: string | undefined,
+    accepted: AcceptedTeamRunFacts,
+  ): void {
+    if (
+      expectedFingerprint !== undefined &&
+      expectedFingerprint !== createTeamRunPreviewFingerprint(accepted)
+    ) {
+      throw new TeamSecurityPreviewStaleError();
+    }
   }
 
   private requireAssignmentRepository(): AssignmentRepository {

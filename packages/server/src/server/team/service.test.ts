@@ -31,6 +31,7 @@ import {
   type CreateTeamDefinitionInput,
 } from "./repository.js";
 import {
+  TeamSecurityPreviewStaleError,
   TeamRunService,
   TeamRunServiceShuttingDownError,
   type TeamRunWorkspaceRegistry,
@@ -260,6 +261,15 @@ class MemoryProviderCatalog implements TeamProviderCatalog {
     providerOptions?: AgentSessionConfig["providerOptions"];
   }) {
     return { issues: [], providerOptions: input.providerOptions };
+  }
+
+  projectSecurityPosture(input: { provider: string }) {
+    return {
+      source: { provider: input.provider },
+      filesystemWrite: { status: "enforced" as const, summary: "Filesystem policy enforced." },
+      networkAccess: { status: "unavailable" as const, summary: "Network proof unavailable." },
+      toolShell: { status: "policy_only" as const, summary: "Tool policy configured." },
+    };
   }
 }
 
@@ -513,6 +523,190 @@ describe("TeamRunService", () => {
       workspaceId: "wks_team_service",
     });
   }
+
+  test("previews every role without exposing provider options and rejects stale admission", async () => {
+    const harness = await createHarness();
+    harness.daemonConfigStore.agentProfiles.push({
+      id: "profile_observer",
+      name: "Observer",
+      provider: "codex",
+      model: "gpt-5.6",
+    });
+    harness.daemonConfigStore.agentProfiles[0] = {
+      ...harness.daemonConfigStore.agentProfiles[0]!,
+      providerOptions: {
+        sandbox_mode: "workspace-write",
+        approval_policy: "never",
+        sensitive_path_sentinel: "/private/preview-must-not-leak",
+      },
+    };
+    const definition = await harness.repository.updateDefinition({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      patch: {
+        roles: [
+          ...harness.definition.roles,
+          {
+            id: "role_observer",
+            name: "Observer",
+            instructions: "Observe without joining the workflow.",
+            profileId: "profile_observer",
+          },
+        ],
+      },
+    });
+
+    const preview = await harness.service.previewRun({
+      teamId: definition.id,
+      expectedRevision: definition.revision,
+      workspaceId: "wks_team_service",
+    });
+    expect(preview.roles.map((role) => role.roleId)).toEqual([
+      "role_builder",
+      "role_reviewer",
+      "role_observer",
+    ]);
+    expect(JSON.stringify(preview)).not.toContain("preview-must-not-leak");
+    expect(preview.roles[0]?.resolvedLaunch).not.toHaveProperty("providerOptions");
+
+    harness.daemonConfigStore.agentProfiles[0] = {
+      ...harness.daemonConfigStore.agentProfiles[0]!,
+      providerOptions: {
+        sensitive_path_sentinel: "/private/preview-must-not-leak",
+        approval_policy: "never",
+        sandbox_mode: "workspace-write",
+      },
+    };
+    const reorderedPreview = await harness.service.previewRun({
+      teamId: definition.id,
+      expectedRevision: definition.revision,
+      workspaceId: "wks_team_service",
+    });
+    expect(reorderedPreview.fingerprint).toBe(preview.fingerprint);
+
+    harness.daemonConfigStore.agentProfiles[0] = {
+      ...harness.daemonConfigStore.agentProfiles[0]!,
+      providerOptions: {
+        sandbox_mode: "read-only",
+        approval_policy: "never",
+        sensitive_path_sentinel: "/private/changed-preview-must-not-leak",
+      },
+    };
+    const admission = harness.service.startRun({
+      teamId: definition.id,
+      expectedRevision: definition.revision,
+      idempotencyKey: "stale-preview",
+      objective: "Reject stale security controls.",
+      workspaceId: "wks_team_service",
+      expectedPreviewFingerprint: preview.fingerprint,
+    });
+    await expect(admission).rejects.toBeInstanceOf(TeamSecurityPreviewStaleError);
+    await expect(admission).rejects.not.toThrow(/changed-preview-must-not-leak/u);
+    await expect(harness.repository.listRuns()).resolves.toMatchObject({ runs: [] });
+  });
+
+  test("returns an idempotent accepted run before checking a later preview fingerprint", async () => {
+    const harness = await createHarness();
+    const preview = await harness.service.previewRun({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      workspaceId: "wks_team_service",
+    });
+    const input = {
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      idempotencyKey: "preview-idempotency",
+      objective: "Keep retry identity stable.",
+      workspaceId: "wks_team_service",
+      expectedPreviewFingerprint: preview.fingerprint,
+    };
+    const accepted = await harness.service.startRun(input);
+    harness.daemonConfigStore.agentProfiles[0] = {
+      ...harness.daemonConfigStore.agentProfiles[0]!,
+      providerOptions: { sandbox_mode: "read-only" },
+    };
+
+    await expect(
+      harness.service.startRun({ ...input, expectedPreviewFingerprint: "f".repeat(64) }),
+    ).resolves.toEqual(accepted);
+  });
+
+  test("returns a concurrently admitted idempotent run before checking a stale retry", async () => {
+    const harness = await createHarness();
+    const preview = await harness.service.previewRun({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      workspaceId: "wks_team_service",
+    });
+    const input = {
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      idempotencyKey: "concurrent-preview-idempotency",
+      objective: "Keep a concurrent retry idempotent.",
+      workspaceId: "wks_team_service",
+      expectedPreviewFingerprint: preview.fingerprint,
+    };
+    const createRun = harness.repository.createRun.bind(harness.repository);
+    let signalCreateRunReached!: () => void;
+    const createRunReached = new Promise<void>((resolve) => {
+      signalCreateRunReached = resolve;
+    });
+    let releaseCreateRun!: () => void;
+    const createRunReleased = new Promise<void>((resolve) => {
+      releaseCreateRun = resolve;
+    });
+    harness.repository.createRun = async (createInput) => {
+      signalCreateRunReached();
+      await createRunReleased;
+      return createRun(createInput);
+    };
+
+    const admission = harness.service.startRun(input);
+    await createRunReached;
+    harness.daemonConfigStore.agentProfiles[0] = {
+      ...harness.daemonConfigStore.agentProfiles[0]!,
+      providerOptions: { sandbox_mode: "read-only" },
+    };
+    const retry = harness.service.startRun(input);
+    releaseCreateRun();
+
+    const [accepted, retried] = await Promise.all([admission, retry]);
+    expect(retried).toEqual(accepted);
+    await expect(harness.repository.listRuns()).resolves.toMatchObject({
+      runs: [{ id: accepted.id }],
+    });
+  });
+
+  test("rejects stale previews before Assignment-backed run persistence", async () => {
+    const harness = await createHarness();
+    const assignment = await harness.assignments.createAssignment({
+      title: "Previewed Assignment admission",
+      objective: "Keep Assignment security controls stable.",
+      workItem: null,
+    });
+    const preview = await harness.service.previewRun({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      workspaceId: "wks_team_service",
+    });
+    harness.daemonConfigStore.agentProfiles[0] = {
+      ...harness.daemonConfigStore.agentProfiles[0]!,
+      providerOptions: { sandbox_mode: "read-only" },
+    };
+
+    await expect(
+      harness.service.startAssignmentRun({
+        teamId: harness.definition.id,
+        expectedRevision: harness.definition.revision,
+        idempotencyKey: "stale-assignment-preview",
+        assignmentId: assignment.id,
+        expectedAssignmentRevision: assignment.revision,
+        workspaceId: "wks_team_service",
+        expectedPreviewFingerprint: preview.fingerprint,
+      }),
+    ).rejects.toBeInstanceOf(TeamSecurityPreviewStaleError);
+    await expect(harness.repository.listRuns()).resolves.toMatchObject({ runs: [] });
+  });
 
   test("admits Assignment intent and launches only after its frozen run is durable", async () => {
     const harness = await createHarness();

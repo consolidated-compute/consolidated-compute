@@ -4,9 +4,15 @@ import { toErrorMessage } from "@/utils/error-messages";
 import type { TeamRunFormModel } from "./run-form-model";
 import { useTeamRunMutations } from "./use-team-run-mutations";
 
+function rpcErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("code" in error)) return null;
+  return typeof error.code === "string" ? error.code : null;
+}
+
 export function useTeamRunFormSubmission(
   model: TeamRunFormModel,
   onStarted: (run: TeamRunDto) => void,
+  onSecurityPreviewStale: () => void,
 ) {
   const mutations = useTeamRunMutations();
   const acceptsCompletionRef = useRef(true);
@@ -31,9 +37,13 @@ export function useTeamRunFormSubmission(
       onStarted(payload.run);
     } catch (error) {
       if (!acceptsCompletionRef.current) return;
+      if (rpcErrorCode(error) === "team_security_preview_stale") {
+        onSecurityPreviewStale();
+        return;
+      }
       model.setSubmitError(toErrorMessage(error));
     }
-  }, [model, mutations.start, onStarted]);
+  }, [model, mutations.start, onSecurityPreviewStale, onStarted]);
   const startPress = useCallback(() => void start(), [start]);
 
   return {

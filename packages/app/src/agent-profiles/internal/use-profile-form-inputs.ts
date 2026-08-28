@@ -1,8 +1,10 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useFetchQuery } from "@/data/query";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
+import { useSessionStore } from "@/stores/session-store";
+import { supportsAgentProfileProviderOptions } from "./capabilities";
 import type { AgentProfileFormModel, AgentProfileFormState } from "./profile-form-model";
 
 /**
@@ -13,18 +15,36 @@ import type { AgentProfileFormModel, AgentProfileFormState } from "./profile-for
  */
 const HOME_SCOPE_CWD = "~";
 
-export function useAgentProfileFormCatalog(input: {
+export function useAgentProfileFormSecurityCapability(input: {
   serverId: string;
   model: AgentProfileFormModel;
 }): void {
-  const { entries } = useProvidersSnapshot(input.serverId, { cwd: null });
+  const serverInfo = useSessionStore((state) => state.sessions[input.serverId]?.serverInfo ?? null);
 
   useEffect(() => {
-    if (!entries) {
+    if (!serverInfo) return;
+    input.model.applySecurityCapability(supportsAgentProfileProviderOptions(serverInfo.features));
+  }, [input.model, serverInfo]);
+}
+
+export function useAgentProfileFormCatalog(input: {
+  serverId: string;
+  model: AgentProfileFormModel;
+}): () => void {
+  const { entries, error, refresh } = useProvidersSnapshot(input.serverId, { cwd: null });
+
+  useEffect(() => {
+    if (entries) {
+      input.model.applyProviderCatalog(entries);
       return;
     }
-    input.model.applyProviderCatalog(entries);
-  }, [entries, input.model]);
+    if (error) input.model.applyProviderCatalogUnavailable(error);
+  }, [entries, error, input.model]);
+
+  return useCallback(() => {
+    const provider = input.model.getState().provider;
+    void refresh(provider ? [provider] : undefined).catch(() => undefined);
+  }, [input.model, refresh]);
 }
 
 export function useAgentProfileFormFeatures(input: {

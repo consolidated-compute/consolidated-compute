@@ -191,6 +191,9 @@ export class AssignmentSession {
                 assignmentId: message.assignmentId,
                 expectedAssignmentRevision: message.expectedAssignmentRevision,
                 workspaceId: message.workspaceId,
+                ...(message.expectedPreviewFingerprint !== undefined
+                  ? { expectedPreviewFingerprint: message.expectedPreviewFingerprint }
+                  : {}),
               }),
             ),
           },

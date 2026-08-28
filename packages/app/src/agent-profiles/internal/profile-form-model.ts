@@ -1,7 +1,9 @@
+import equal from "fast-deep-equal";
 import type {
   AgentFeature,
   AgentMode,
   AgentModelDefinition,
+  AgentProfileSecurityPreset,
   AgentSelectOption,
   ProviderSnapshotEntry,
 } from "@getpaseo/protocol/agent-types";
@@ -48,12 +50,23 @@ export interface AgentProfileSeed {
   provider: string;
   modelId?: string;
   name?: string;
+  providerDisplay?: AgentProfileFormDisplay;
+  modelDisplay?: AgentProfileFormDisplay;
+}
+
+export interface AgentProfileSelectionDisplays {
+  provider?: AgentProfileFormDisplay;
+  model?: AgentProfileFormDisplay;
+  mode?: AgentProfileFormDisplay;
+  thinking?: AgentProfileFormDisplay;
 }
 
 export interface AgentProfileFormSnapshot {
   mode: "create" | "edit";
   profile?: AgentProfile;
+  profileDisplays?: AgentProfileSelectionDisplays;
   seed?: AgentProfileSeed;
+  customSecurityDisplay?: AgentProfileFormDisplay;
 }
 
 /**
@@ -69,11 +82,23 @@ export interface AgentProfileFeatureRequest {
 
 export type AgentProfileResolutionStatus = "idle" | "pending" | "complete";
 
+export type AgentProfileSecurityStatus =
+  | "idle"
+  | "pending"
+  | "available"
+  | "unrecognized"
+  | "stale"
+  | "read_only"
+  | "unavailable"
+  | "unsupported"
+  | "update_required";
+
 export interface AgentProfileFormDisclosure {
   showModelField: boolean;
   showModeField: boolean;
   showThinkingField: boolean;
   showFeaturesField: boolean;
+  showSecurityPresetField: boolean;
 }
 
 export interface AgentProfileFormState {
@@ -88,21 +113,28 @@ export interface AgentProfileFormState {
   thinkingOptionId: string;
   featureValues: Record<string, unknown>;
 
-  providerOptions: AgentProfileFormOption[];
+  providerChoices: AgentProfileFormOption[];
   modelOptions: AgentProfileFormOption[];
   modeOptions: AgentProfileFormOption[];
   thinkingOptions: AgentProfileFormOption[];
+  securityPresetOptions: AgentProfileFormOption[];
   features: AgentFeature[];
 
   providerDisplay: AgentProfileFormDisplay | null;
   modelDisplay: AgentProfileFormDisplay | null;
   modeDisplay: AgentProfileFormDisplay | null;
   thinkingDisplay: AgentProfileFormDisplay | null;
+  securityPresetId: string | null;
+  securityPresetDisplay: AgentProfileFormDisplay | null;
 
   catalogResolution: AgentProfileResolutionStatus;
+  catalogError: string | null;
+  catalogRetryAvailable: boolean;
   featureResolution: AgentProfileResolutionStatus;
   featureRequest: AgentProfileFeatureRequest | null;
   featureRequestKey: string | null;
+  securityCapabilityResolution: AgentProfileResolutionStatus;
+  securityStatus: AgentProfileSecurityStatus;
 
   disclosure: AgentProfileFormDisclosure;
   isSubmitting: boolean;
@@ -117,6 +149,10 @@ export interface AgentProfileFormModel {
   close: () => void;
   /** Late input: the host-scoped provider catalog. Never touches selections. */
   applyProviderCatalog: (entries: readonly ProviderSnapshotEntry[]) => void;
+  /** Resolve a provider catalog request that failed without usable cached data. */
+  applyProviderCatalogUnavailable: (error: string) => void;
+  /** Late input: whether this host can persist provider-native profile options. */
+  applySecurityCapability: (supported: boolean) => void;
   /** Late input: the feature list for one request. Stale keys are ignored. */
   applyFeatures: (requestKey: string, features: readonly AgentFeature[]) => void;
   /** Resolve a request that produced no usable features (provider error). */
@@ -128,9 +164,22 @@ export interface AgentProfileFormModel {
   setModel: (modelId: string, display: AgentProfileFormDisplay | null) => void;
   setMode: (modeId: string, display: AgentProfileFormDisplay | null) => void;
   setThinking: (thinkingOptionId: string, display: AgentProfileFormDisplay | null) => void;
+  setSecurityPreset: (presetId: string, display: AgentProfileFormDisplay) => void;
   setFeatureValue: (featureId: string, value: unknown) => void;
   setSubmitting: (value: boolean) => void;
   setSubmitError: (value: string | null) => void;
+}
+
+interface CapturedSecurityPreset {
+  provider: string;
+  id: string;
+  display: AgentProfileFormDisplay;
+  providerOptions: NonNullable<AgentProfile["providerOptions"]>;
+}
+
+interface SecurityResolution {
+  status: AgentProfileSecurityStatus;
+  presets: readonly AgentProfileSecurityPreset[];
 }
 
 function findEntry(
@@ -194,7 +243,7 @@ function formOption(input: {
   };
 }
 
-function buildProviderOptions(entries: readonly ProviderSnapshotEntry[]): AgentProfileFormOption[] {
+function buildProviderChoices(entries: readonly ProviderSnapshotEntry[]): AgentProfileFormOption[] {
   return entries
     .filter((entry) => entry.enabled)
     .map((entry) =>
@@ -205,6 +254,145 @@ function buildProviderOptions(entries: readonly ProviderSnapshotEntry[]): AgentP
         testID: `agent-profile-provider-option-${entry.provider}`,
       }),
     );
+}
+
+function buildSecurityPresetOptions(
+  presets: readonly AgentProfileSecurityPreset[],
+): AgentProfileFormOption[] {
+  return presets.map((preset) =>
+    formOption({
+      id: preset.id,
+      label: preset.label,
+      description: preset.description,
+      testID: `agent-profile-security-option-${preset.id}`,
+    }),
+  );
+}
+
+function cloneProviderOptions(
+  value: NonNullable<AgentProfile["providerOptions"]>,
+): NonNullable<AgentProfile["providerOptions"]> {
+  return JSON.parse(JSON.stringify(value)) as NonNullable<AgentProfile["providerOptions"]>;
+}
+
+function resolveLegacySecurityState(input: {
+  provider: string;
+  preservedProvider: string | undefined;
+  preservedProviderOptions: AgentProfile["providerOptions"] | undefined;
+}): SecurityResolution {
+  const providerChanged =
+    input.preservedProvider !== undefined && input.provider !== input.preservedProvider;
+  if (providerChanged && input.preservedProviderOptions !== undefined) {
+    return { status: "update_required", presets: [] };
+  }
+  if (input.provider === input.preservedProvider && input.preservedProviderOptions !== undefined) {
+    return { status: "read_only", presets: [] };
+  }
+  return { status: "unsupported", presets: [] };
+}
+
+function resolveLegacyCapabilitySecurityState(input: {
+  provider: string;
+  preservedProvider: string | undefined;
+  preservedProviderOptions: AgentProfile["providerOptions"] | undefined;
+  captured: CapturedSecurityPreset | null;
+}): SecurityResolution {
+  if (
+    input.captured?.provider === input.provider &&
+    (input.provider !== input.preservedProvider ||
+      input.preservedProviderOptions === undefined ||
+      !equal(input.captured.providerOptions, input.preservedProviderOptions))
+  ) {
+    return { status: "update_required", presets: [] };
+  }
+  return resolveLegacySecurityState(input);
+}
+
+function resolveCatalogSecurityFailure(input: {
+  provider: string;
+  preservedProvider: string | undefined;
+  preservedProviderOptions: AgentProfile["providerOptions"] | undefined;
+  catalogError: string | null;
+  entry: ProviderSnapshotEntry | null;
+}): SecurityResolution | null {
+  if (input.entry?.status === "loading") return { status: "pending", presets: [] };
+  const failed =
+    Boolean(input.catalogError) ||
+    input.entry?.status === "error" ||
+    input.entry?.status === "unavailable";
+  if (!failed) return null;
+  if (input.provider === input.preservedProvider && input.preservedProviderOptions !== undefined) {
+    return { status: "read_only", presets: [] };
+  }
+  return { status: "unavailable", presets: [] };
+}
+
+function resolveCapturedSecurityState(
+  entry: ProviderSnapshotEntry | null,
+  presets: readonly AgentProfileSecurityPreset[],
+  captured: CapturedSecurityPreset,
+): SecurityResolution {
+  if (entry?.status === "loading") return { status: "pending", presets: [] };
+  const current = presets.find((preset) => preset.id === captured.id);
+  if (
+    entry?.status !== "ready" ||
+    !current ||
+    !equal(current.providerOptions, captured.providerOptions)
+  ) {
+    return { status: "stale", presets: entry?.status === "ready" ? presets : [] };
+  }
+  return { status: "available", presets };
+}
+
+function resolveUnrecognizedSecurityState(
+  entry: ProviderSnapshotEntry | null,
+  presets: readonly AgentProfileSecurityPreset[],
+): SecurityResolution {
+  if (entry?.status !== "ready" || presets.length === 0) {
+    return { status: "read_only", presets: [] };
+  }
+  return { status: "unrecognized", presets };
+}
+
+function buildDisclosure(input: {
+  hasProvider: boolean;
+  models: readonly AgentModelDefinition[];
+  modes: readonly AgentMode[];
+  thinking: readonly AgentSelectOption[];
+  features: readonly AgentFeature[];
+  modelId: string;
+  modeId: string;
+  thinkingOptionId: string;
+  security: SecurityResolution;
+}): AgentProfileFormDisclosure {
+  const editableSecurityStatuses: ReadonlySet<AgentProfileSecurityStatus> = new Set([
+    "available",
+    "unrecognized",
+    "stale",
+  ]);
+  const securityNoticeStatuses: ReadonlySet<AgentProfileSecurityStatus> = new Set([
+    "pending",
+    "unrecognized",
+    "stale",
+    "read_only",
+    "unavailable",
+    "update_required",
+  ]);
+  return {
+    showModelField: input.hasProvider && (input.models.length > 0 || Boolean(input.modelId)),
+    showModeField: input.hasProvider && (input.modes.length > 0 || Boolean(input.modeId)),
+    showThinkingField:
+      input.hasProvider && (input.thinking.length > 0 || Boolean(input.thinkingOptionId)),
+    showFeaturesField: input.hasProvider && input.features.length > 0,
+    showSecurityPresetField:
+      input.hasProvider &&
+      (editableSecurityStatuses.has(input.security.status) ||
+        securityNoticeStatuses.has(input.security.status)),
+  };
+}
+
+function securityBlocksSubmit(status: AgentProfileSecurityStatus): boolean {
+  return status === "pending" || status === "stale" || status === "update_required";
 }
 
 function buildModelOptions(models: readonly AgentModelDefinition[]): AgentProfileFormOption[] {
@@ -270,6 +458,54 @@ function defaultThinkingOptionId(model: AgentModelDefinition | null): string {
   );
 }
 
+function catalogDisplay(label: string, description: string | undefined): AgentProfileFormDisplay {
+  return { label, ...(description ? { description } : {}) };
+}
+
+function seedModelSelection(
+  state: AgentProfileFormState,
+  models: readonly AgentModelDefinition[],
+): { id: string; display: AgentProfileFormDisplay | null } {
+  if (state.modelId) return { id: state.modelId, display: state.modelDisplay };
+  const selected = models.find((model) => model.id === defaultModelId(models));
+  return {
+    id: selected?.id ?? "",
+    display: selected ? catalogDisplay(selected.label, selected.description) : null,
+  };
+}
+
+function seedModeSelection(
+  state: AgentProfileFormState,
+  entry: ProviderSnapshotEntry | null,
+  modes: readonly AgentMode[],
+): { id: string; display: AgentProfileFormDisplay | null } {
+  if (state.modeId) return { id: state.modeId, display: state.modeDisplay };
+  const selected = modes.find((mode) => mode.id === defaultModeId(entry, modes));
+  return {
+    id: selected?.id ?? "",
+    display: selected ? catalogDisplay(formatAgentModeLabel(selected), selected.description) : null,
+  };
+}
+
+function seedThinkingSelection(
+  state: AgentProfileFormState,
+  models: readonly AgentModelDefinition[],
+  modelId: string,
+): { id: string; display: AgentProfileFormDisplay | null } {
+  if (state.thinkingOptionId) {
+    return { id: state.thinkingOptionId, display: state.thinkingDisplay };
+  }
+  const effectiveModel = resolveEffectiveModel(models, modelId);
+  const defaultId = defaultThinkingOptionId(effectiveModel);
+  const selected = effectiveModel?.thinkingOptions?.find((option) => option.id === defaultId);
+  return {
+    id: selected?.id ?? "",
+    display: selected
+      ? catalogDisplay(formatThinkingOptionLabel(selected), selected.description)
+      : null,
+  };
+}
+
 function seedSelections(
   next: AgentProfileFormState,
   input: {
@@ -278,38 +514,39 @@ function seedSelections(
     modes: readonly AgentMode[];
   },
 ): AgentProfileFormState {
-  const modelId = next.modelId || defaultModelId(input.models);
-  const modeId = next.modeId || defaultModeId(input.entry, input.modes);
-  const thinkingOptionId =
-    next.thinkingOptionId || defaultThinkingOptionId(resolveEffectiveModel(input.models, modelId));
+  const model = seedModelSelection(next, input.models);
+  const mode = seedModeSelection(next, input.entry, input.modes);
+  const thinking = seedThinkingSelection(next, input.models, model.id);
   if (
-    modelId === next.modelId &&
-    modeId === next.modeId &&
-    thinkingOptionId === next.thinkingOptionId
+    model.id === next.modelId &&
+    mode.id === next.modeId &&
+    thinking.id === next.thinkingOptionId
   ) {
     return next;
   }
-  return { ...next, modelId, modeId, thinkingOptionId };
+  return {
+    ...next,
+    modelId: model.id,
+    modelDisplay: model.display,
+    modeId: mode.id,
+    modeDisplay: mode.display,
+    thinkingOptionId: thinking.id,
+    thinkingDisplay: thinking.display,
+  };
 }
 
-/**
- * Selected labels upgrade from the stored id to the catalog label once the
- * catalog lands, and fall back to the id when the catalog does not know the
- * value. They never blank out — a profile pointing at a retired model still
- * reads as that model.
- */
-function refineDisplay(
-  current: AgentProfileFormDisplay | null,
-  selectedId: string,
-  resolvedLabel: string | null,
-): AgentProfileFormDisplay | null {
-  if (!selectedId) {
-    return null;
+function resolveSecuritySelection(input: {
+  provider: string;
+  captured: CapturedSecurityPreset | null;
+  unrecognized: boolean;
+  customDisplay: AgentProfileFormDisplay;
+}): { id: string | null; display: AgentProfileFormDisplay | null } {
+  if (input.captured?.provider === input.provider) {
+    return { id: input.captured.id, display: input.captured.display };
   }
-  if (resolvedLabel) {
-    return { label: resolvedLabel };
-  }
-  return current ?? { label: selectedId };
+  return input.unrecognized
+    ? { id: "custom", display: input.customDisplay }
+    : { id: null, display: null };
 }
 
 function buildFeatureRequest(state: AgentProfileFormState): AgentProfileFeatureRequest | null {
@@ -338,8 +575,7 @@ export function buildFeatureRequestKey(request: AgentProfileFeatureRequest | nul
 
 function buildSubmitValue(
   state: AgentProfileFormState,
-  preservedProvider: string | undefined,
-  preservedProviderOptions: AgentProfile["providerOptions"] | undefined,
+  providerOptions: AgentProfile["providerOptions"] | null | undefined,
 ): AgentProfileValue | null {
   const name = state.name.trim();
   const notes = state.notes.trim();
@@ -356,11 +592,7 @@ function buildSubmitValue(
     ...(state.thinkingOptionId ? { thinkingOptionId: state.thinkingOptionId } : {}),
     ...(Object.keys(state.featureValues).length > 0 ? { featureValues: state.featureValues } : {}),
     ...(notes ? { notes } : {}),
-    ...(preservedProviderOptions !== undefined
-      ? {
-          providerOptions: state.provider === preservedProvider ? preservedProviderOptions : null,
-        }
-      : {}),
+    ...(providerOptions !== undefined ? { providerOptions } : {}),
   };
 }
 
@@ -376,14 +608,42 @@ function resolveFeatureStatus(
 
 const BLANK_PROFILE: AgentProfileValue = { name: "", provider: "" };
 
-/** A stored id doubles as its own label until the catalog can upgrade it. */
+/** A stored id doubles as its own captured label when no display was provided. */
 function seedDisplay(value: string | undefined): AgentProfileFormDisplay | null {
   return value ? { label: value } : null;
 }
 
+function buildInitialDisplays(input: {
+  snapshot: AgentProfileFormSnapshot;
+  provider: string;
+  modelId: string;
+  modeId: string | undefined;
+  thinkingOptionId: string | undefined;
+}): {
+  provider: AgentProfileFormDisplay | null;
+  model: AgentProfileFormDisplay | null;
+  mode: AgentProfileFormDisplay | null;
+  thinking: AgentProfileFormDisplay | null;
+} {
+  if (input.snapshot.mode === "create") {
+    return {
+      provider: input.snapshot.seed?.providerDisplay ?? seedDisplay(input.provider),
+      model: input.snapshot.seed?.modelDisplay ?? seedDisplay(input.modelId),
+      mode: seedDisplay(input.modeId),
+      thinking: seedDisplay(input.thinkingOptionId),
+    };
+  }
+  return {
+    provider: input.snapshot.profileDisplays?.provider ?? seedDisplay(input.provider),
+    model: input.snapshot.profileDisplays?.model ?? seedDisplay(input.modelId),
+    mode: input.snapshot.profileDisplays?.mode ?? seedDisplay(input.modeId),
+    thinking: input.snapshot.profileDisplays?.thinking ?? seedDisplay(input.thinkingOptionId),
+  };
+}
+
 /**
- * Edit mode seeds every value AND display from the stored profile alone: the
- * catalog is not loaded yet, so `applyProviderCatalog` does the upgrading later.
+ * Edit mode seeds every value and display from the stored profile alone. Late
+ * catalogs populate option lists without rewriting those captured displays.
  */
 function buildInitialState(snapshot: AgentProfileFormSnapshot): AgentProfileFormState {
   const profile = snapshot.profile ?? BLANK_PROFILE;
@@ -391,6 +651,13 @@ function buildInitialState(snapshot: AgentProfileFormSnapshot): AgentProfileForm
   const name = seed?.name ?? profile.name;
   const provider = seed?.provider ?? profile.provider;
   const modelId = seed?.modelId ?? profile.model ?? "";
+  const displays = buildInitialDisplays({
+    snapshot,
+    provider,
+    modelId,
+    modeId: profile.modeId,
+    thinkingOptionId: profile.thinkingOptionId,
+  });
   return {
     mode: snapshot.mode,
     name,
@@ -402,24 +669,32 @@ function buildInitialState(snapshot: AgentProfileFormSnapshot): AgentProfileForm
     modeId: profile.modeId ?? "",
     thinkingOptionId: profile.thinkingOptionId ?? "",
     featureValues: { ...profile.featureValues },
-    providerOptions: [],
+    providerChoices: [],
     modelOptions: [],
     modeOptions: [],
     thinkingOptions: [],
+    securityPresetOptions: [],
     features: [],
-    providerDisplay: seedDisplay(provider),
-    modelDisplay: seedDisplay(modelId),
-    modeDisplay: seedDisplay(profile.modeId),
-    thinkingDisplay: seedDisplay(profile.thinkingOptionId),
+    providerDisplay: displays.provider,
+    modelDisplay: displays.model,
+    modeDisplay: displays.mode,
+    thinkingDisplay: displays.thinking,
+    securityPresetId: null,
+    securityPresetDisplay: null,
     catalogResolution: "idle",
+    catalogError: null,
+    catalogRetryAvailable: false,
     featureResolution: "idle",
     featureRequest: null,
     featureRequestKey: null,
+    securityCapabilityResolution: "idle",
+    securityStatus: "idle",
     disclosure: {
       showModelField: false,
       showModeField: false,
       showThinkingField: false,
       showFeaturesField: false,
+      showSecurityPresetField: false,
     },
     isSubmitting: false,
     submitError: null,
@@ -429,19 +704,103 @@ function buildInitialState(snapshot: AgentProfileFormSnapshot): AgentProfileForm
 }
 
 export function openAgentProfileForm(snapshot: AgentProfileFormSnapshot): AgentProfileFormModel {
-  // Provider options are provider-native security configuration. Until this
-  // form has a dedicated authoring surface, edit mode carries the stored value
-  // through opaquely while the provider stays unchanged. A provider transition
-  // emits the patch protocol's explicit clear sentinel.
   const preservedProvider = snapshot.mode === "edit" ? snapshot.profile?.provider : undefined;
   const preservedProviderOptions =
     snapshot.mode === "edit" ? snapshot.profile?.providerOptions : undefined;
+  const customSecurityDisplay = snapshot.customSecurityDisplay ?? { label: "Custom" };
   let entries: readonly ProviderSnapshotEntry[] = [];
   let catalogResolution: AgentProfileResolutionStatus = "idle";
+  let catalogError: string | null = null;
+  let securityCapability: boolean | null = null;
+  let securitySeedResolvedProvider: string | null = null;
+  let securityOptionsAreUnrecognized = false;
+  let capturedSecurityPreset: CapturedSecurityPreset | null = null;
   let resolvedFeatureKey: string | null = null;
   let resolvedFeatures: AgentFeature[] = [];
   let listeners = new Set<() => void>();
   let closed = false;
+
+  function captureSecurityPreset(provider: string, preset: AgentProfileSecurityPreset): void {
+    capturedSecurityPreset = {
+      provider,
+      id: preset.id,
+      display: {
+        label: preset.label,
+        ...(preset.description ? { description: preset.description } : {}),
+      },
+      providerOptions: cloneProviderOptions(preset.providerOptions),
+    };
+    securityOptionsAreUnrecognized = false;
+  }
+
+  function seedSecuritySelection(provider: string, presets: readonly AgentProfileSecurityPreset[]) {
+    if (securitySeedResolvedProvider === provider) return;
+    securitySeedResolvedProvider = provider;
+    const usesPreservedOptions = provider === preservedProvider;
+    const targetOptions = usesPreservedOptions ? (preservedProviderOptions ?? {}) : {};
+    const match = presets.find((preset) => equal(preset.providerOptions, targetOptions));
+    if (match) {
+      captureSecurityPreset(provider, match);
+      return;
+    }
+    capturedSecurityPreset = null;
+    securityOptionsAreUnrecognized = usesPreservedOptions && preservedProviderOptions !== undefined;
+  }
+
+  function resolveSecurityState(provider: string): {
+    status: AgentProfileSecurityStatus;
+    presets: readonly AgentProfileSecurityPreset[];
+  } {
+    if (!provider) return { status: "idle", presets: [] };
+    if (securityCapability === null) return { status: "pending", presets: [] };
+    if (!securityCapability) {
+      return resolveLegacyCapabilitySecurityState({
+        provider,
+        preservedProvider,
+        preservedProviderOptions,
+        captured: capturedSecurityPreset,
+      });
+    }
+    if (catalogResolution !== "complete") return { status: "pending", presets: [] };
+    const entry = findEntry(entries, provider);
+    const failure = resolveCatalogSecurityFailure({
+      provider,
+      preservedProvider,
+      preservedProviderOptions,
+      catalogError,
+      entry,
+    });
+    if (failure?.status === "read_only") {
+      securityOptionsAreUnrecognized = true;
+    }
+    if (failure) return failure;
+    const presets = entry?.agentProfileSecurityPresets ?? [];
+    if (entry?.status === "ready") seedSecuritySelection(provider, presets);
+
+    const captured = capturedSecurityPreset;
+    if (captured?.provider === provider) {
+      return resolveCapturedSecurityState(entry, presets, captured);
+    }
+    if (securityOptionsAreUnrecognized) {
+      return resolveUnrecognizedSecurityState(entry, presets);
+    }
+    return { status: "unsupported", presets: [] };
+  }
+
+  function resolveProviderOptionsPatch(
+    provider: string,
+  ): AgentProfile["providerOptions"] | null | undefined {
+    if (capturedSecurityPreset?.provider === provider) {
+      return capturedSecurityPreset.providerOptions;
+    }
+    if (provider === preservedProvider && preservedProviderOptions !== undefined) {
+      return preservedProviderOptions;
+    }
+    if (provider !== preservedProvider && preservedProviderOptions !== undefined) {
+      return null;
+    }
+    return undefined;
+  }
 
   function derive(incoming: AgentProfileFormState): AgentProfileFormState {
     const models = resolveModels(entries, incoming.provider);
@@ -460,65 +819,62 @@ export function openAgentProfileForm(snapshot: AgentProfileFormSnapshot): AgentP
       ? applyFeatureValues(resolvedFeatures, next.featureValues)
       : [];
     const featureResolution = resolveFeatureStatus(featureRequestKey, featuresAreCurrent);
+    const security = resolveSecurityState(next.provider);
+    const providerEntry = findEntry(entries, next.provider);
+    const catalogRetryAvailable = Boolean(
+      catalogError || providerEntry?.status === "error" || providerEntry?.status === "unavailable",
+    );
+    const selectedSecurity = resolveSecuritySelection({
+      provider: next.provider,
+      captured: capturedSecurityPreset,
+      unrecognized: securityOptionsAreUnrecognized,
+      customDisplay: customSecurityDisplay,
+    });
 
     const withOptions: AgentProfileFormState = {
       ...next,
-      providerOptions: buildProviderOptions(entries),
+      providerChoices: buildProviderChoices(entries),
       modelOptions: buildModelOptions(models),
       modeOptions: buildModeOptions(modes),
       thinkingOptions: buildThinkingOptions(thinking),
+      securityPresetOptions: buildSecurityPresetOptions(security.presets),
       features,
-      providerDisplay: refineDisplay(
-        next.providerDisplay,
-        next.provider,
-        findEntry(entries, next.provider)?.label ?? null,
-      ),
-      modelDisplay: refineDisplay(
-        next.modelDisplay,
-        next.modelId,
-        models.find((model) => model.id === next.modelId)?.label ?? null,
-      ),
-      modeDisplay: refineDisplay(
-        next.modeDisplay,
-        next.modeId,
-        (() => {
-          const mode = modes.find((entry) => entry.id === next.modeId);
-          return mode ? formatAgentModeLabel(mode) : null;
-        })(),
-      ),
-      thinkingDisplay: refineDisplay(
-        next.thinkingDisplay,
-        next.thinkingOptionId,
-        (() => {
-          const option = thinking.find((entry) => entry.id === next.thinkingOptionId);
-          return option ? formatThinkingOptionLabel(option) : null;
-        })(),
-      ),
+      securityPresetId: selectedSecurity.id,
+      securityPresetDisplay: selectedSecurity.display,
       catalogResolution,
+      catalogError,
+      catalogRetryAvailable,
       featureResolution,
       featureRequest,
       featureRequestKey,
+      securityCapabilityResolution: securityCapability === null ? "pending" : "complete",
+      securityStatus: security.status,
     };
 
     // A field appears once the catalog can populate it, and stays visible while
     // a stored value needs a home even if this host cannot resolve it.
     const hasProvider = Boolean(withOptions.provider);
-    const disclosure: AgentProfileFormDisclosure = {
-      showModelField: hasProvider && (models.length > 0 || Boolean(withOptions.modelId)),
-      showModeField: hasProvider && (modes.length > 0 || Boolean(withOptions.modeId)),
-      showThinkingField:
-        hasProvider && (thinking.length > 0 || Boolean(withOptions.thinkingOptionId)),
-      showFeaturesField: hasProvider && features.length > 0,
-    };
+    const disclosure = buildDisclosure({
+      hasProvider,
+      models,
+      modes,
+      thinking,
+      features,
+      modelId: withOptions.modelId,
+      modeId: withOptions.modeId,
+      thinkingOptionId: withOptions.thinkingOptionId,
+      security,
+    });
     const canSubmit =
       withOptions.name.trim().length > 0 &&
       withOptions.provider.length > 0 &&
+      !securityBlocksSubmit(security.status) &&
       !withOptions.isSubmitting;
     const resolved: AgentProfileFormState = { ...withOptions, disclosure, canSubmit };
     return {
       ...resolved,
       submitValue: canSubmit
-        ? buildSubmitValue(resolved, preservedProvider, preservedProviderOptions)
+        ? buildSubmitValue(resolved, resolveProviderOptionsPatch(resolved.provider))
         : null,
     };
   }
@@ -550,6 +906,17 @@ export function openAgentProfileForm(snapshot: AgentProfileFormSnapshot): AgentP
     applyProviderCatalog: (nextEntries) => {
       entries = [...nextEntries];
       catalogResolution = "complete";
+      catalogError = null;
+      publish((current) => current);
+    },
+    applyProviderCatalogUnavailable: (error) => {
+      entries = [];
+      catalogResolution = "complete";
+      catalogError = error;
+      publish((current) => current);
+    },
+    applySecurityCapability: (supported) => {
+      securityCapability = supported;
       publish((current) => current);
     },
     applyFeatures: (requestKey, features) => {
@@ -580,6 +947,9 @@ export function openAgentProfileForm(snapshot: AgentProfileFormSnapshot): AgentP
         if (current.provider === providerId) {
           return current;
         }
+        capturedSecurityPreset = null;
+        securityOptionsAreUnrecognized = false;
+        securitySeedResolvedProvider = null;
         // Everything below the provider is provider-scoped: a model id, mode id,
         // thinking id or feature id from the old provider means nothing here.
         // Clearing them is enough — `derive` seeds the new provider's defaults.
@@ -619,6 +989,22 @@ export function openAgentProfileForm(snapshot: AgentProfileFormSnapshot): AgentP
       publish((current) => ({ ...current, modeId, modeDisplay: display })),
     setThinking: (thinkingOptionId, display) =>
       publish((current) => ({ ...current, thinkingOptionId, thinkingDisplay: display })),
+    setSecurityPreset: (presetId, display) => {
+      const entry = findEntry(entries, state.provider);
+      if (!securityCapability || entry?.status !== "ready") return;
+      const preset = entry.agentProfileSecurityPresets?.find(
+        (candidate) => candidate.id === presetId,
+      );
+      if (!preset) return;
+      captureSecurityPreset(state.provider, preset);
+      if (capturedSecurityPreset) capturedSecurityPreset.display = display;
+      publish((current) => ({
+        ...current,
+        securityPresetId: preset.id,
+        securityPresetDisplay: display,
+        submitError: null,
+      }));
+    },
     setFeatureValue: (featureId, value) =>
       publish((current) => ({
         ...current,

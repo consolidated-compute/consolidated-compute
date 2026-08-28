@@ -453,6 +453,23 @@ export const en = {
         features_loading: "Checking features",
         feature_unavailable: "Feature settings unavailable",
       },
+      security: {
+        source: "Provider: {{provider}}",
+        dimensions: {
+          filesystemWrite: "Filesystem writes",
+          networkAccess: "Network access",
+          toolShell: "Tool and shell",
+        },
+        status: {
+          enforced: "Enforced",
+          policy_only: "Policy only",
+          unavailable: "Unavailable",
+        },
+        legacy: "No enforcement snapshot was recorded for this historical run.",
+        update_required: "Update this host to inspect frozen security posture.",
+        pending: "Resolving the exact provider security posture…",
+        error: "The security posture could not be resolved.",
+      },
       form: {
         title: "Run Team",
         workspace: "Workspace",
@@ -468,6 +485,8 @@ export const en = {
           objective_too_long: "Objectives must be 32,000 characters or fewer.",
           profiles_loading: "Agent Profiles are being checked.",
           profile_unavailable: "Repair unavailable Agent Profile settings before starting.",
+          security_preview_loading: "The exact provider security posture is being resolved.",
+          security_preview_failed: "Resolve the provider security posture before starting.",
         },
       },
       recent: {
@@ -2823,6 +2842,25 @@ export const en = {
         noModes: "This provider has no modes to choose from",
         thinkingLabel: "Thinking",
         noThinkingOptions: "This model has no thinking levels",
+        securityBoundaryLabel: "Security boundary",
+        securityBoundaryPlaceholder: "Select a provider security boundary",
+        noSecurityBoundaries: "This provider has no supported security boundaries",
+        customSecurityBoundary: "Custom native settings",
+        securityStates: {
+          idle: "Select a provider to inspect its supported security boundaries.",
+          pending: "Checking the provider's supported security boundaries…",
+          available: "This boundary is supplied and validated by the provider.",
+          unrecognized:
+            "This profile has custom native settings. They will be preserved until you select a supported boundary.",
+          stale:
+            "The provider's security controls changed while this form was open. Reselect the boundary before saving.",
+          read_only:
+            "Existing native security settings will be preserved. This provider or host cannot edit them here.",
+          unavailable: "Security boundaries could not be loaded. Retry the provider snapshot.",
+          unsupported: "This provider does not advertise editable security boundaries.",
+          update_required:
+            "Update this host before changing a profile that contains native security settings.",
+        },
         featuresLabel: "Features",
         featureCount: "{{count}} features",
         featureCountOne: "{{count}} feature",

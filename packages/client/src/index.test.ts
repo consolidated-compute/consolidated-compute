@@ -72,6 +72,7 @@ function parseSentSessionMessage(data: string | ArrayBuffer | Uint8Array | undef
   runId?: string;
   expectedRevision?: number;
   idempotencyKey?: string;
+  expectedPreviewFingerprint?: string;
   objective?: string;
   definition?: unknown;
   patch?: unknown;
@@ -549,6 +550,86 @@ test("Team SDK starts a run and exposes its frozen resolved launch snapshot", as
       ],
     },
   });
+  await client.close();
+});
+
+test("Team SDK previews authoritative role launches before admission", async () => {
+  const { client, ws } = await connectClient({
+    providersSnapshotCwd: true,
+    agentProfiles: true,
+    teams: true,
+    teamRunPreview: true,
+  });
+  const fingerprint = "a".repeat(64);
+  const previewPromise = client.teams.runs.preview({
+    teamId: team.id,
+    expectedRevision: team.revision,
+    workspaceId: "workspace_sdk",
+  });
+  const previewRequest = parseSentSessionMessage(ws.sent.at(-1));
+  expect(previewRequest).toMatchObject({
+    type: "team.run.preview.request",
+    teamId: team.id,
+    workspaceId: "workspace_sdk",
+  });
+  ws.message(
+    sessionMessage({
+      type: "team.run.preview.response",
+      payload: {
+        requestId: previewRequest.requestId,
+        preview: {
+          workspace: teamRun.workspace,
+          roles: [
+            {
+              roleId: team.roles[0]!.id,
+              roleName: team.roles[0]!.name,
+              resolvedLaunch: teamRun.steps[0]!.snapshot.resolvedLaunch,
+            },
+          ],
+          fingerprint,
+        },
+      },
+    }),
+  );
+  await expect(previewPromise).resolves.toMatchObject({
+    preview: { fingerprint, roles: [{ roleId: "builder" }] },
+  });
+
+  const startPromise = client.teams.runs.start({
+    teamId: team.id,
+    expectedRevision: team.revision,
+    idempotencyKey: "previewed-sdk-run",
+    objective: "Start the previewed run.",
+    workspaceId: "workspace_sdk",
+    expectedPreviewFingerprint: fingerprint,
+  });
+  const startRequest = parseSentSessionMessage(ws.sent.at(-1));
+  expect(startRequest).toMatchObject({ expectedPreviewFingerprint: fingerprint });
+  ws.message(
+    sessionMessage({
+      type: "team.run.start.response",
+      payload: { requestId: startRequest.requestId, run: teamRun },
+    }),
+  );
+  await startPromise;
+  await client.close();
+});
+
+test("Team SDK gates security previews separately from established Team support", async () => {
+  const { client, ws } = await connectClient({
+    providersSnapshotCwd: true,
+    agentProfiles: true,
+    teams: true,
+  });
+
+  await expect(
+    client.teams.runs.preview({
+      teamId: team.id,
+      expectedRevision: team.revision,
+      workspaceId: "workspace_sdk",
+    }),
+  ).rejects.toThrow("Update the host to preview Team Run security controls.");
+  expect(ws.sent).toHaveLength(1);
   await client.close();
 });
 

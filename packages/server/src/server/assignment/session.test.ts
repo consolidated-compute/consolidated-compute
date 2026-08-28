@@ -261,6 +261,7 @@ describe("AssignmentSession", () => {
         assignmentId: "asgn_0123456789abcdef",
         expectedAssignmentRevision: 2,
         workspaceId: "workspace_delivery",
+        expectedPreviewFingerprint: "b".repeat(64),
       }),
     );
 
@@ -271,6 +272,7 @@ describe("AssignmentSession", () => {
       assignmentId: "asgn_0123456789abcdef",
       expectedAssignmentRevision: 2,
       workspaceId: "workspace_delivery",
+      expectedPreviewFingerprint: "b".repeat(64),
     });
     expect(harness.messages).toMatchObject([
       { type: "assignment.team_run.start.response", payload: { run: { id: createRun().id } } },

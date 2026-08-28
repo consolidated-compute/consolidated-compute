@@ -1,5 +1,9 @@
 import type { Logger } from "pino";
-import type { ProviderOptions, ToolPolicy } from "@getpaseo/protocol/agent-types";
+import type {
+  AgentProfileSecurityPreset,
+  ProviderOptions,
+  ToolPolicy,
+} from "@getpaseo/protocol/agent-types";
 import { z } from "zod";
 
 import type {
@@ -52,6 +56,7 @@ import { ClaudeProviderOptionsSchema } from "./providers/claude/options.js";
 import { projectClaudeSecurityPosture } from "./providers/claude/security-posture.js";
 import { CodexProviderOptionsSchema } from "./providers/codex/options.js";
 import { projectCodexSecurityPosture } from "./providers/codex/security-posture.js";
+import { CODEX_AGENT_PROFILE_SECURITY_PRESETS } from "./providers/codex/security-controls.js";
 import { OpenCodeProviderOptionsSchema } from "./providers/opencode/options.js";
 import {
   projectUnavailableProviderSecurityPosture,
@@ -83,6 +88,7 @@ export interface ProviderDefinition extends AgentProviderDefinition {
    * generic ACP providers (which only extend the literal "acp" sentinel).
    */
   derivedFromProviderId: string | null;
+  agentProfileSecurityPresets?: AgentProfileSecurityPreset[];
   optionsSchema: z.ZodType<ProviderOptions>;
   supportsExactMcpPreapproval: boolean;
   validateOptions: (options: ProviderOptions | undefined) => ProviderOptions | undefined;
@@ -611,8 +617,10 @@ function createRegistryEntry(
 
   const hasStaticModes = resolved.definition.modes.length > 0;
   let projectSecurityPosture = projectUnavailableProviderSecurityPosture;
+  let agentProfileSecurityPresets: AgentProfileSecurityPreset[] | undefined;
   if (resolved.derivedFromProviderId === null && provider === "codex") {
     projectSecurityPosture = projectCodexSecurityPosture;
+    agentProfileSecurityPresets = CODEX_AGENT_PROFILE_SECURITY_PRESETS;
   } else if (resolved.derivedFromProviderId === null && provider === "claude") {
     projectSecurityPosture = projectClaudeSecurityPosture;
   }
@@ -621,6 +629,7 @@ function createRegistryEntry(
     ...resolved.definition,
     enabled: resolved.enabled,
     derivedFromProviderId: resolved.derivedFromProviderId,
+    agentProfileSecurityPresets,
     optionsSchema: resolved.contract.optionsSchema,
     supportsExactMcpPreapproval: resolved.contract.supportsExactMcpPreapproval,
     validateOptions: (options) =>

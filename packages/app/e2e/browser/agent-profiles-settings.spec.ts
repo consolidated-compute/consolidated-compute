@@ -5,6 +5,7 @@ import {
   editAgentProfile,
   expectAgentProfile,
   expectAgentProfileForm,
+  expectHostAgentProfileProviderOptions,
   expectAgentProfileOrder,
   expectAgentProfileTagsGone,
   expectHostAgentProfiles,
@@ -19,6 +20,34 @@ import {
 const MOCK_PROVIDER_LABEL = "Mock Load Test";
 
 test.describe("Agent profiles settings", () => {
+  test("creates a restricted Codex profile from provider-supplied controls", async ({ page }) => {
+    const seed = await seedAgentProfiles([]);
+
+    try {
+      await openAgentProfileSettings(page);
+      await createAgentProfileFromEmptyState(page, {
+        name: "Restricted builder",
+        provider: "Codex",
+        securityBoundary: "Fail-closed Workspace write",
+      });
+
+      await expectHostAgentProfileProviderOptions("Restricted builder", {
+        approval_policy: "never",
+        sandbox_mode: "workspace-write",
+        sandbox_workspace_write: {
+          writable_roots: [],
+          network_access: false,
+          exclude_slash_tmp: true,
+          exclude_tmpdir_env_var: true,
+        },
+        web_search: "disabled",
+        features: { network_proxy: false },
+      });
+    } finally {
+      await seed.restore();
+    }
+  });
+
   test("legacy model favourites migrate into provider-and-model-only host profiles", async ({
     page,
   }) => {

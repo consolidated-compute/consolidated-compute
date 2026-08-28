@@ -102,6 +102,26 @@ export async function expectHostAgentProfiles(expected: AgentProfile[]): Promise
   }
 }
 
+export async function expectHostAgentProfileProviderOptions(
+  name: string,
+  expected: AgentProfile["providerOptions"],
+): Promise<void> {
+  const client = await connectAgentProfilesClient();
+  try {
+    await expect
+      .poll(
+        async () =>
+          (await client.getDaemonConfig()).config.agentProfiles?.find(
+            (profile) => profile.name === name,
+          )?.providerOptions,
+        { timeout: 30_000 },
+      )
+      .toEqual(expected);
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
 export interface SeededProviderModel {
   id: string;
   label: string;
@@ -242,6 +262,7 @@ export interface AgentProfileDraft {
   model?: string;
   thinking?: string;
   mode?: string;
+  securityBoundary?: string;
   notes?: string;
 }
 
@@ -251,7 +272,10 @@ function editModal(page: Page): Locator {
 
 async function chooseSelectFieldOption(
   page: Page,
-  input: { field: "provider" | "model" | "mode" | "thinking"; option: string },
+  input: {
+    field: "provider" | "model" | "mode" | "thinking" | "security";
+    option: string;
+  },
 ): Promise<void> {
   await editModal(page).getByTestId(`agent-profile-${input.field}-trigger`).click();
   const option = page
@@ -259,9 +283,10 @@ async function chooseSelectFieldOption(
     .getByRole("button", { name: input.option, exact: true });
   await expect(option).toBeVisible({ timeout: 30_000 });
   await option.click();
-  await expect(
-    page.getByRole("button", { name: `${capitalize(input.field)} (${input.option})` }),
-  ).toBeVisible({ timeout: 30_000 });
+  const fieldLabel = input.field === "security" ? "Security boundary" : capitalize(input.field);
+  await expect(page.getByRole("button", { name: `${fieldLabel} (${input.option})` })).toBeVisible({
+    timeout: 30_000,
+  });
 }
 
 function capitalize(value: string): string {
@@ -287,6 +312,12 @@ async function fillAgentProfileForm(page: Page, draft: AgentProfileDraft): Promi
   }
   if (draft.mode !== undefined) {
     await chooseSelectFieldOption(page, { field: "mode", option: draft.mode });
+  }
+  if (draft.securityBoundary !== undefined) {
+    await chooseSelectFieldOption(page, {
+      field: "security",
+      option: draft.securityBoundary,
+    });
   }
   if (draft.notes !== undefined) {
     await modal.getByRole("textbox", { name: "When to use", exact: true }).fill(draft.notes);

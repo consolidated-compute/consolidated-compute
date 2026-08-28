@@ -16,6 +16,7 @@ const discriminatedUnionPath = resolve(
   zodAotRoot,
   "dist/core/codegen/schemas/discriminated-union.js",
 );
+const lazyExtractorPath = resolve(zodAotRoot, "dist/core/extract/extractors/lazy.js");
 
 async function ensureZodAotRuntimeImportExtensionPatch() {
   const emitter = await readFile(emitterPath, "utf8");
@@ -67,9 +68,24 @@ async function ensureZodAotDiscriminatedUnionOutputPatch() {
   await writeFile(discriminatedUnionPath, discriminatedUnionEmitter);
 }
 
+async function ensureZodAotRecursiveLazyFallbackPatch() {
+  const lazyExtractor = await readFile(lazyExtractorPath, "utf8");
+  if (lazyExtractor.includes('return ctx.fallback("lazy");\n    }\n    return ctx.visit')) {
+    return;
+  }
+
+  const before = 'return { type: "recursiveRef" };';
+  const after = 'return ctx.fallback("lazy");';
+  if (!lazyExtractor.includes(before)) {
+    throw new Error("zod-aot lazy extractor shape changed; update the recursive fallback patch");
+  }
+  await writeFile(lazyExtractorPath, lazyExtractor.replace(before, after));
+}
+
 await Promise.all([
   ensureZodAotRuntimeImportExtensionPatch(),
   ensureZodAotDiscriminatedUnionOutputPatch(),
+  ensureZodAotRecursiveLazyFallbackPatch(),
 ]);
 
 const [{ discoverSchemas }, { compileSchemas }, { generateCompiledFileContent }] =

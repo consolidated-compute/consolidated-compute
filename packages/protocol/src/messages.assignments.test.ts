@@ -88,10 +88,12 @@ describe("Assignment wire contracts", () => {
         assignmentId: assignment.id,
         expectedAssignmentRevision: 2,
         workspaceId: "workspace_delivery",
+        expectedPreviewFingerprint: "a".repeat(64),
       }),
     ).toMatchObject({
       type: "assignment.team_run.start.request",
       assignmentId: assignment.id,
+      expectedPreviewFingerprint: "a".repeat(64),
     });
 
     expect(

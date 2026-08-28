@@ -204,6 +204,14 @@ export interface StartTeamRunInput {
   idempotencyKey: string;
   objective: string;
   workspaceId: string;
+  expectedPreviewFingerprint?: string;
+  requestId?: string;
+}
+
+export interface PreviewTeamRunInput {
+  teamId: string;
+  expectedRevision: number;
+  workspaceId: string;
   requestId?: string;
 }
 
@@ -245,6 +253,7 @@ export interface StartAssignmentTeamRunInput {
   assignmentId: string;
   expectedAssignmentRevision: number;
   workspaceId: string;
+  expectedPreviewFingerprint?: string;
   requestId?: string;
 }
 
@@ -5643,6 +5652,7 @@ export class DaemonClient {
 
   async startTeamRun(input: StartTeamRunInput) {
     this.requireTeamsSupport({ requiresAgentProfiles: true });
+    if (input.expectedPreviewFingerprint !== undefined) this.requireTeamRunPreviewSupport();
     const { requestId, ...message } = input;
     return this.sendNamespacedCorrelatedSessionRequest<"team.run.start.response">({
       requestId,
@@ -5650,6 +5660,17 @@ export class DaemonClient {
       // Provider preflight has a daemon-configurable deadline. Keep the request
       // pending until admission finishes so a client timeout cannot precede a
       // successful run start.
+      timeout: 0,
+    });
+  }
+
+  async previewTeamRun(input: PreviewTeamRunInput) {
+    this.requireTeamsSupport({ requiresAgentProfiles: true });
+    this.requireTeamRunPreviewSupport();
+    const { requestId, ...message } = input;
+    return this.sendNamespacedCorrelatedSessionRequest<"team.run.preview.response">({
+      requestId,
+      message: { type: "team.run.preview.request", ...message },
       timeout: 0,
     });
   }
@@ -5750,6 +5771,7 @@ export class DaemonClient {
 
   async startAssignmentTeamRun(input: StartAssignmentTeamRunInput) {
     this.requireAssignmentsSupport();
+    if (input.expectedPreviewFingerprint !== undefined) this.requireTeamRunPreviewSupport();
     const { requestId, ...message } = input;
     return this.sendNamespacedCorrelatedSessionRequest<"assignment.team_run.start.response">({
       requestId,
@@ -5788,6 +5810,13 @@ export class DaemonClient {
     // COMPAT(assignments): added in v0.6.x, remove gate after 2027-02-27.
     if (this.lastServerInfoMessage?.features?.assignments !== true) {
       throw new Error("Update the host to use Assignments.");
+    }
+  }
+
+  private requireTeamRunPreviewSupport(): void {
+    // COMPAT(teamRunPreview): added in v0.6.2, remove gate after 2027-02-28.
+    if (this.lastServerInfoMessage?.features?.teamRunPreview !== true) {
+      throw new Error("Update the host to preview Team Run security controls.");
     }
   }
 

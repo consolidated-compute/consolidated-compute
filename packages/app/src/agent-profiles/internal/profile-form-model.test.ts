@@ -1,4 +1,7 @@
-import type { ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
+import type {
+  AgentProfileSecurityPreset,
+  ProviderSnapshotEntry,
+} from "@getpaseo/protocol/agent-types";
 import { describe, expect, it } from "vitest";
 import {
   buildFeatureRequestKey,
@@ -43,6 +46,24 @@ const CODEX: ProviderSnapshotEntry = {
   label: "Codex",
   modes: [{ id: "read-only", label: "Read only" }],
   models: [{ provider: "codex", id: "gpt-5.2-codex", label: "GPT-5.2 Codex", isDefault: true }],
+  agentProfileSecurityPresets: [
+    {
+      id: "provider-defaults",
+      label: "Provider defaults",
+      providerOptions: {},
+    },
+    {
+      id: "fail-closed-read-only",
+      label: "Read only (fail closed)",
+      description: "No provider-native write or approval escape.",
+      providerOptions: {
+        approval_policy: "never",
+        sandbox_mode: "read-only",
+        web_search: "disabled",
+        features: { network_proxy: false },
+      },
+    },
+  ],
 };
 
 const DISABLED: ProviderSnapshotEntry = {
@@ -54,12 +75,29 @@ const DISABLED: ProviderSnapshotEntry = {
 
 const ENTRIES = [CLAUDE, CODEX, DISABLED];
 
+function updateCodexSecurityPreset(
+  presetId: string,
+  patch: Partial<AgentProfileSecurityPreset>,
+): ProviderSnapshotEntry {
+  return {
+    ...CODEX,
+    agentProfileSecurityPresets: CODEX.agentProfileSecurityPresets?.map((preset) =>
+      preset.id === presetId ? Object.assign({}, preset, patch) : preset,
+    ),
+  };
+}
+
 function openWithCatalog(
   snapshot: Parameters<typeof openAgentProfileForm>[0],
 ): AgentProfileFormModel {
   const model = openAgentProfileForm(snapshot);
-  model.applyProviderCatalog(ENTRIES);
+  applyLegacyCatalog(model);
   return model;
+}
+
+function applyLegacyCatalog(model: AgentProfileFormModel): void {
+  model.applySecurityCapability(false);
+  model.applyProviderCatalog(ENTRIES);
 }
 
 function selectClaude(model: AgentProfileFormModel): void {
@@ -97,12 +135,18 @@ describe("openAgentProfileForm", () => {
     expect(state.catalogResolution).toBe("idle");
   });
 
-  it("upgrades a seeded model to catalog labels without touching the selection", () => {
+  it("preserves captured seed displays when the catalog lands", () => {
     const model = openAgentProfileForm({
       mode: "create",
-      seed: { provider: "claude", modelId: "claude-opus-5", name: "Opus 5" },
+      seed: {
+        provider: "claude",
+        modelId: "claude-opus-5",
+        name: "Opus 5",
+        providerDisplay: { label: "Claude Code" },
+        modelDisplay: { label: "Opus 5" },
+      },
     });
-    model.applyProviderCatalog(ENTRIES);
+    applyLegacyCatalog(model);
     const state = model.getState();
 
     expect(state.providerDisplay).toEqual({ label: "Claude Code" });
@@ -132,7 +176,7 @@ describe("openAgentProfileForm", () => {
   it("lists only enabled providers", () => {
     const model = openWithCatalog({ mode: "create" });
 
-    expect(optionValues(model.getState().providerOptions)).toEqual(["claude", "codex"]);
+    expect(optionValues(model.getState().providerChoices)).toEqual(["claude", "codex"]);
   });
 
   it("requires a name and a provider before it can submit", () => {
@@ -208,7 +252,7 @@ describe("openAgentProfileForm", () => {
         providerOptions,
       },
     });
-    model.applyProviderCatalog(ENTRIES);
+    applyLegacyCatalog(model);
 
     model.setName("UI implementation");
     model.setModel("claude-haiku-4-5", { label: "Haiku 4.5" });
@@ -244,7 +288,8 @@ describe("openAgentProfileForm", () => {
         providerOptions: { sandbox_mode: "read-only" },
       },
     });
-    model.applyProviderCatalog(ENTRIES);
+    applyLegacyCatalog(model);
+    model.applySecurityCapability(true);
 
     model.setProvider("claude", { label: "Claude" });
 
@@ -254,7 +299,232 @@ describe("openAgentProfileForm", () => {
     });
   });
 
-  it("upgrades seeded displays to catalog labels without touching selections", () => {
+  it("requires a host update before an old daemon clears native options", () => {
+    const model = openAgentProfileForm({
+      mode: "edit",
+      profile: {
+        id: "p1",
+        name: "Restricted review",
+        provider: "codex",
+        providerOptions: { sandbox_mode: "read-only" },
+      },
+    });
+    applyLegacyCatalog(model);
+
+    model.setProvider("claude", { label: "Claude" });
+
+    expect(model.getState()).toMatchObject({
+      securityStatus: "update_required",
+      disclosure: { showSecurityPresetField: true },
+      canSubmit: false,
+      submitValue: null,
+    });
+  });
+
+  it("captures a provider-supplied security preset as opaque profile options", () => {
+    const model = openAgentProfileForm({
+      mode: "create",
+      seed: { provider: "codex", name: "Restricted reviewer" },
+    });
+    model.applySecurityCapability(true);
+    model.applyProviderCatalog(ENTRIES);
+
+    expect(model.getState()).toMatchObject({
+      securityStatus: "available",
+      securityPresetId: "provider-defaults",
+      securityPresetDisplay: { label: "Provider defaults" },
+    });
+
+    model.setSecurityPreset("fail-closed-read-only", {
+      label: "Read only (fail closed)",
+      description: "No provider-native write or approval escape.",
+    });
+
+    expect(model.getState().submitValue?.providerOptions).toEqual({
+      approval_policy: "never",
+      sandbox_mode: "read-only",
+      web_search: "disabled",
+      features: { network_proxy: false },
+    });
+  });
+
+  it("blocks a newly authored security preset after the host capability disappears", () => {
+    const model = openAgentProfileForm({
+      mode: "create",
+      seed: { provider: "codex", name: "Restricted reviewer" },
+    });
+    model.applySecurityCapability(true);
+    model.applyProviderCatalog(ENTRIES);
+    model.setSecurityPreset("fail-closed-read-only", { label: "Read only (fail closed)" });
+    expect(model.getState().canSubmit).toBe(true);
+
+    model.applySecurityCapability(false);
+
+    expect(model.getState()).toMatchObject({
+      securityStatus: "update_required",
+      disclosure: { showSecurityPresetField: true },
+      canSubmit: false,
+      submitValue: null,
+    });
+  });
+
+  it("seeds the default security preset after a loading catalog becomes ready", () => {
+    const model = openAgentProfileForm({
+      mode: "create",
+      seed: { provider: "codex", name: "Restricted reviewer" },
+    });
+    model.applySecurityCapability(true);
+    model.applyProviderCatalog([{ ...CODEX, status: "loading" }]);
+
+    expect(model.getState()).toMatchObject({
+      securityStatus: "pending",
+      disclosure: { showSecurityPresetField: true },
+    });
+
+    model.applyProviderCatalog([CODEX]);
+
+    expect(model.getState()).toMatchObject({
+      securityStatus: "available",
+      securityPresetId: "provider-defaults",
+      securityPresetDisplay: { label: "Provider defaults" },
+      disclosure: { showSecurityPresetField: true },
+      canSubmit: true,
+    });
+  });
+
+  it("surfaces a failed provider catalog without blocking unrelated edits", () => {
+    const model = openAgentProfileForm({
+      mode: "create",
+      seed: { provider: "codex", name: "Reviewer" },
+    });
+    model.applySecurityCapability(true);
+
+    model.applyProviderCatalogUnavailable("Provider snapshot failed");
+
+    expect(model.getState()).toMatchObject({
+      catalogResolution: "complete",
+      catalogError: "Provider snapshot failed",
+      catalogRetryAvailable: true,
+      securityStatus: "unavailable",
+      disclosure: { showSecurityPresetField: true },
+      canSubmit: true,
+    });
+  });
+
+  it("keeps stored native options visible when the provider entry fails", () => {
+    const providerOptions = { sandbox_mode: "read-only" };
+    const model = openAgentProfileForm({
+      mode: "edit",
+      profile: {
+        id: "p1",
+        name: "Restricted reviewer",
+        provider: "codex",
+        providerOptions,
+      },
+    });
+    model.applySecurityCapability(true);
+
+    model.applyProviderCatalog([{ ...CODEX, status: "error", error: "Codex unavailable" }]);
+
+    expect(model.getState()).toMatchObject({
+      securityStatus: "read_only",
+      securityPresetId: "custom",
+      securityPresetDisplay: { label: "Custom" },
+      catalogRetryAvailable: true,
+      disclosure: { showSecurityPresetField: true },
+      canSubmit: true,
+      submitValue: { providerOptions },
+    });
+  });
+
+  it("preserves a captured preset display and blocks a changed catalog payload", () => {
+    const model = openAgentProfileForm({
+      mode: "create",
+      seed: { provider: "codex", name: "Restricted reviewer" },
+    });
+    model.applySecurityCapability(true);
+    model.applyProviderCatalog(ENTRIES);
+    model.setSecurityPreset("fail-closed-read-only", {
+      label: "Captured read-only boundary",
+    });
+
+    model.applyProviderCatalog([
+      CLAUDE,
+      updateCodexSecurityPreset("fail-closed-read-only", {
+        label: "Renamed read-only boundary",
+      }),
+    ]);
+    expect(model.getState()).toMatchObject({
+      securityStatus: "available",
+      securityPresetDisplay: { label: "Captured read-only boundary" },
+      canSubmit: true,
+    });
+
+    model.applyProviderCatalog([
+      CLAUDE,
+      updateCodexSecurityPreset("fail-closed-read-only", {
+        providerOptions: { sandbox_mode: "read-only" },
+      }),
+    ]);
+    expect(model.getState()).toMatchObject({
+      securityStatus: "stale",
+      canSubmit: false,
+      submitValue: null,
+    });
+
+    model.setSecurityPreset("fail-closed-read-only", { label: "Current read-only boundary" });
+    expect(model.getState()).toMatchObject({
+      securityStatus: "available",
+      securityPresetDisplay: { label: "Current read-only boundary" },
+      canSubmit: true,
+    });
+    expect(model.getState().submitValue?.providerOptions).toEqual({ sandbox_mode: "read-only" });
+  });
+
+  it("offers supported presets as a repair path for custom native settings", () => {
+    const model = openAgentProfileForm({
+      mode: "edit",
+      customSecurityDisplay: { label: "Custom native settings" },
+      profile: {
+        id: "p1",
+        name: "Custom reviewer",
+        provider: "codex",
+        providerOptions: { sandbox_mode: "read-only" },
+      },
+    });
+    model.applySecurityCapability(true);
+    model.applyProviderCatalog(ENTRIES);
+
+    expect(model.getState()).toMatchObject({
+      securityStatus: "unrecognized",
+      securityPresetId: "custom",
+      securityPresetDisplay: { label: "Custom native settings" },
+      canSubmit: true,
+    });
+    expect(model.getState().disclosure.showSecurityPresetField).toBe(true);
+
+    model.setSecurityPreset("fail-closed-read-only", { label: "Read only (fail closed)" });
+    expect(model.getState()).toMatchObject({
+      securityStatus: "available",
+      securityPresetId: "fail-closed-read-only",
+    });
+  });
+
+  it("hides security authoring for providers without advertised controls", () => {
+    const model = openAgentProfileForm({
+      mode: "create",
+      seed: { provider: "claude", name: "Planner" },
+    });
+    model.applySecurityCapability(true);
+    model.applyProviderCatalog(ENTRIES);
+
+    expect(model.getState()).toMatchObject({
+      securityStatus: "unsupported",
+      disclosure: { showSecurityPresetField: false },
+    });
+  });
+
+  it("preserves stored id displays when the catalog lands", () => {
     const model = openAgentProfileForm({
       mode: "edit",
       profile: {
@@ -266,15 +536,91 @@ describe("openAgentProfileForm", () => {
         thinkingOptionId: "think-hard",
       },
     });
-    model.applyProviderCatalog(ENTRIES);
+    applyLegacyCatalog(model);
     const state = model.getState();
 
-    expect(state.providerDisplay).toEqual({ label: "Claude Code" });
-    expect(state.modelDisplay).toEqual({ label: "Opus 5" });
-    expect(state.modeDisplay).toEqual({ label: "Plan" });
-    expect(state.thinkingDisplay).toEqual({ label: "Think hard" });
+    expect(state.providerDisplay).toEqual({ label: "claude" });
+    expect(state.modelDisplay).toEqual({ label: "claude-opus-5" });
+    expect(state.modeDisplay).toEqual({ label: "plan" });
+    expect(state.thinkingDisplay).toEqual({ label: "think-hard" });
     expect(state.modelId).toBe("claude-opus-5");
     expect(state.catalogResolution).toBe("complete");
+  });
+
+  it("preserves captured edit displays when the catalog lands", () => {
+    const model = openAgentProfileForm({
+      mode: "edit",
+      profile: {
+        id: "p1",
+        name: "UI work",
+        provider: "claude",
+        model: "claude-opus-5",
+        modeId: "plan",
+        thinkingOptionId: "think-hard",
+      },
+      profileDisplays: {
+        provider: { label: "Captured Claude" },
+        model: { label: "Captured Opus" },
+        mode: { label: "Captured plan" },
+        thinking: { label: "Captured thinking" },
+      },
+    });
+    applyLegacyCatalog(model);
+
+    expect(model.getState()).toMatchObject({
+      providerDisplay: { label: "Captured Claude" },
+      modelDisplay: { label: "Captured Opus" },
+      modeDisplay: { label: "Captured plan" },
+      thinkingDisplay: { label: "Captured thinking" },
+    });
+  });
+
+  it("preserves user-selected displays across catalog label churn", () => {
+    const model = openWithCatalog({ mode: "create" });
+    model.setName("Planner");
+    model.setProvider("claude", { label: "Captured Claude" });
+    model.setModel("claude-haiku-4-5", { label: "Captured Haiku" });
+    model.setMode("accept-edits", { label: "Captured mode" });
+    model.setThinking("think", { label: "Captured thinking" });
+
+    model.applyProviderCatalog([
+      {
+        provider: "claude",
+        status: "ready",
+        enabled: true,
+        label: "Renamed provider",
+        defaultModeId: "plan",
+        modes: [
+          { id: "plan", label: "Renamed plan" },
+          { id: "accept-edits", label: "Renamed accept edits" },
+        ],
+        models: [
+          {
+            provider: "claude",
+            id: "claude-opus-5",
+            label: "Renamed Opus",
+            isDefault: true,
+            thinkingOptions: [
+              { id: "think", label: "Renamed think" },
+              { id: "think-hard", label: "Renamed think hard" },
+            ],
+          },
+          {
+            provider: "claude",
+            id: "claude-haiku-4-5",
+            label: "Renamed Haiku",
+            thinkingOptions: [{ id: "think", label: "Renamed think" }],
+          },
+        ],
+      },
+    ]);
+
+    expect(model.getState()).toMatchObject({
+      providerDisplay: { label: "Captured Claude" },
+      modelDisplay: { label: "Captured Haiku" },
+      modeDisplay: { label: "Captured mode" },
+      thinkingDisplay: { label: "Captured thinking" },
+    });
   });
 
   it("keeps a stored value the catalog does not know", () => {
@@ -282,7 +628,7 @@ describe("openAgentProfileForm", () => {
       mode: "edit",
       profile: { id: "p1", name: "Legacy", provider: "claude", model: "claude-retired-3" },
     });
-    model.applyProviderCatalog(ENTRIES);
+    applyLegacyCatalog(model);
 
     expect(model.getState().modelId).toBe("claude-retired-3");
     expect(model.getState().modelDisplay).toEqual({ label: "claude-retired-3" });
@@ -467,7 +813,7 @@ describe("openAgentProfileForm", () => {
           featureValues: { webSearch: true },
         },
       });
-      model.applyProviderCatalog(ENTRIES);
+      applyLegacyCatalog(model);
 
       expect(model.getState().featureResolution).toBe("pending");
       expect(model.getState().submitValue?.featureValues).toEqual({ webSearch: true });
@@ -483,7 +829,7 @@ describe("openAgentProfileForm", () => {
           featureValues: { webSearch: true, retiredFlag: true },
         },
       });
-      model.applyProviderCatalog(ENTRIES);
+      applyLegacyCatalog(model);
       model.applyFeatures(model.getState().featureRequestKey ?? "", [
         { type: "toggle", id: "webSearch", label: "Web search", value: false },
       ]);

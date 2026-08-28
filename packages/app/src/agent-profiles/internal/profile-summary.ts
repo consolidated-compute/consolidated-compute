@@ -1,6 +1,7 @@
 import type { ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
 import type { AgentProfile } from "@getpaseo/protocol/messages";
 import { formatAgentModeLabel, formatThinkingOptionLabel } from "@/agent-controls/labels";
+import type { AgentProfileFormDisplay, AgentProfileSelectionDisplays } from "./profile-form-model";
 
 export interface AgentProfileTag {
   id: string;
@@ -12,6 +13,42 @@ function findEntry(
   provider: string,
 ): ProviderSnapshotEntry | null {
   return entries.find((entry) => entry.provider === provider) ?? null;
+}
+
+function display(
+  label: string | undefined,
+  fallback: string | undefined,
+  description?: string,
+): AgentProfileFormDisplay | undefined {
+  const resolved = label ?? fallback;
+  return resolved ? { label: resolved, ...(description ? { description } : {}) } : undefined;
+}
+
+/** Capture edit-form labels once so later provider catalog churn cannot rewrite them. */
+export function buildAgentProfileFormDisplays(input: {
+  profile: AgentProfile;
+  entries: readonly ProviderSnapshotEntry[] | undefined;
+}): AgentProfileSelectionDisplays {
+  const entry = findEntry(input.entries ?? [], input.profile.provider);
+  const model = entry?.models?.find((candidate) => candidate.id === input.profile.model);
+  const mode = entry?.modes?.find((candidate) => candidate.id === input.profile.modeId);
+  const thinking = model?.thinkingOptions?.find(
+    (candidate) => candidate.id === input.profile.thinkingOptionId,
+  );
+  return {
+    provider: display(entry?.label, input.profile.provider, entry?.description),
+    model: display(model?.label, input.profile.model, model?.description),
+    mode: display(
+      mode ? formatAgentModeLabel(mode) : undefined,
+      input.profile.modeId,
+      mode?.description,
+    ),
+    thinking: display(
+      thinking ? formatThinkingOptionLabel(thinking) : undefined,
+      input.profile.thinkingOptionId,
+      thinking?.description,
+    ),
+  };
 }
 
 /**

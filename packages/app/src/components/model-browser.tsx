@@ -684,8 +684,20 @@ function ModelRow({
       provider: row.provider,
       modelId: row.modelId,
       name: row.modelLabel,
+      providerDisplay: { label: row.providerLabel },
+      modelDisplay: {
+        label: row.modelLabel,
+        ...(row.description ? { description: row.description } : {}),
+      },
     });
-  }, [onCreateProfile, row.modelId, row.modelLabel, row.provider]);
+  }, [
+    onCreateProfile,
+    row.description,
+    row.modelId,
+    row.modelLabel,
+    row.provider,
+    row.providerLabel,
+  ]);
 
   const handleEditProfile = useCallback(() => {
     onEditProfile?.(primary.id);

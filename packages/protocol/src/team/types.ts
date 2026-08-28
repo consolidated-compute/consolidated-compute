@@ -79,6 +79,20 @@ export const TeamRunWorkspaceDtoSchema = z.object({
   displayName: z.string(),
 });
 
+export const TeamRunPreviewFingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
+
+export const TeamRunPreviewRoleDtoSchema = z.object({
+  roleId: z.string(),
+  roleName: z.string(),
+  resolvedLaunch: TeamResolvedLaunchDtoSchema,
+});
+
+export const TeamRunPreviewDtoSchema = z.object({
+  workspace: TeamRunWorkspaceDtoSchema,
+  roles: z.array(TeamRunPreviewRoleDtoSchema),
+  fingerprint: TeamRunPreviewFingerprintSchema,
+});
+
 export const TeamRunStepSnapshotDtoSchema = z.object({
   stepId: z.string(),
   roleId: z.string(),
@@ -252,6 +266,8 @@ export const TeamRunDtoSchema = z.object({
 });
 
 export type TeamResolvedLaunchDto = z.infer<typeof TeamResolvedLaunchDtoSchema>;
+export type TeamRunPreviewDto = z.infer<typeof TeamRunPreviewDtoSchema>;
+export type TeamRunPreviewRoleDto = z.infer<typeof TeamRunPreviewRoleDtoSchema>;
 export type TeamSecurityFactDto = z.infer<typeof TeamSecurityFactDtoSchema>;
 export type TeamSecurityPostureDto = z.infer<typeof TeamSecurityPostureDtoSchema>;
 export type TeamRoleDto = z.infer<typeof TeamRoleDtoSchema>;

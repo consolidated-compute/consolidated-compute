@@ -71,6 +71,13 @@ export interface AgentMode {
 
 export type ProviderStatus = "ready" | "loading" | "error" | "unavailable";
 
+export interface AgentProfileSecurityPreset {
+  id: string;
+  label: string;
+  description?: string;
+  providerOptions: ProviderOptions;
+}
+
 export interface AgentModelDefinition {
   provider: AgentProvider;
   id: string;
@@ -114,6 +121,8 @@ export interface ProviderSnapshotEntry {
   label?: string;
   description?: string;
   defaultModeId?: string | null;
+  /** Provider-authored launch boundaries that Agent Profiles can apply without raw JSON. */
+  agentProfileSecurityPresets?: AgentProfileSecurityPreset[];
 }
 
 export interface AgentFeatureToggle {

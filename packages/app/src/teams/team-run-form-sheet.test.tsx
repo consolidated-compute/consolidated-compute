@@ -7,7 +7,7 @@ import type { TeamDefinitionDto } from "@getpaseo/protocol/team/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TeamRunFormSheet } from "./team-run-form-sheet";
 
-const { formModel, sheetState, submissionState } = vi.hoisted(() => {
+const { formModel, previewState, sheetState, submissionState } = vi.hoisted(() => {
   const team: TeamDefinitionDto = {
     id: "team-1",
     revision: 1,
@@ -28,6 +28,9 @@ const { formModel, sheetState, submissionState } = vi.hoisted(() => {
     catalogGeneration: 0,
     objective: "Ship it",
     roleResolutions: [],
+    securityPreviewStatus: "ready",
+    securityPreview: null,
+    securityPreviewError: null as string | null,
     validationIssue: null,
     canSubmit: true,
     submission: {
@@ -52,6 +55,9 @@ const { formModel, sheetState, submissionState } = vi.hoisted(() => {
       setWorkspace: vi.fn(),
       setObjective: vi.fn(),
       setSubmitError: vi.fn(),
+    },
+    previewState: {
+      retry: vi.fn(),
     },
     sheetState: {
       dismissible: true,
@@ -112,6 +118,10 @@ vi.mock("./use-team-run-form-provider-snapshot", () => ({
 
 vi.mock("./use-team-run-form-feature-catalogs", () => ({
   useTeamRunFormFeatureCatalogs: () => ({ connected: true }),
+}));
+
+vi.mock("./use-team-run-form-security-preview", () => ({
+  useTeamRunFormSecurityPreview: () => ({ retry: previewState.retry }),
 }));
 
 vi.mock("./use-team-run-form-submission", () => ({
@@ -179,6 +189,8 @@ describe("TeamRunFormSheet", () => {
     submissionState.pending = false;
     submissionState.cancelCompletion.mockReset();
     submissionState.startPress.mockReset();
+    previewState.retry.mockReset();
+    formModel.getState().securityPreviewStatus = "ready";
     sheetState.dismissible = true;
     sheetState.onClose = null;
   });
@@ -217,5 +229,30 @@ describe("TeamRunFormSheet", () => {
     act(() => sheetState.onClose?.());
     expect(submissionState.cancelCompletion).toHaveBeenCalledOnce();
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the security posture notice visible while preview capability resolves", () => {
+    formModel.getState().securityPreviewStatus = "pending";
+
+    render(
+      <TeamRunFormSheet serverId="host-a" team={team} onClose={vi.fn()} onStarted={vi.fn()} />,
+    );
+
+    expect(screen.getByTestId("team-run-security-preview-pending")).toBeTruthy();
+  });
+
+  it("retries a failed security preview from the sheet", () => {
+    formModel.getState().securityPreviewStatus = "error";
+    formModel.getState().securityPreviewError = "Provider preflight timed out";
+
+    render(
+      <TeamRunFormSheet serverId="host-a" team={team} onClose={vi.fn()} onStarted={vi.fn()} />,
+    );
+
+    expect(screen.getByTestId("team-run-security-preview-error").textContent).toBe(
+      "Provider preflight timed out",
+    );
+    fireEvent.click(screen.getByTestId("team-run-security-preview-retry"));
+    expect(previewState.retry).toHaveBeenCalledOnce();
   });
 });

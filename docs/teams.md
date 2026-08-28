@@ -34,6 +34,14 @@ Team updates, deletion, and run start use the expected Team revision. Run start 
 
 Run admission reads the daemon's authoritative Agent Profile configuration once. It materializes each referenced profile with vanilla Paseo semantics, validates the provider, model, mode, thinking, feature settings, and provider-native options against the selected Workspace, and freezes the profile ID and resolved launch values into every run step. Later profile edits affect only future admissions. Missing or invalid profiles make future starts fail explicitly; they cannot change an active or historical run.
 
+A capable client previews a start through the same daemon preflight used by admission. The preview
+returns the accepted Workspace facts, sanitized resolved launches, frozen security postures, and a
+fingerprint over the complete accepted Workspace and launch configuration. Start sends that
+fingerprint; the daemon repeats preflight and rejects the request if profile, provider, or Workspace
+facts changed. Provider-native options participate in the fingerprint but never enter the preview
+DTO. Older clients may omit the fingerprint for protocol compatibility. Clients connected to an
+older daemon keep the established start path but must label the unavailable preview.
+
 Raw provider-native options remain in daemon-owned run persistence and launch requests. Team Run DTOs do not expose them. New runs also freeze a provider-authored security posture beside each resolved launch. The posture contains bounded, redacted facts for filesystem writes, network access, and tool or shell policy. It reports `enforced` only when the frozen launch proves a fail-closed provider restriction; inherited settings, unsupported controls, and custom providers remain `unavailable` or `policy_only`.
 
 The posture records facts derived from the frozen launch configuration. It does not add enforcement, and it never derives claims about credentials, secrets, repository isolation, production access, or host containment. Instructions and Artifact content are policy context, not technical controls. Runs created before posture snapshots remain without one; never reconstruct history from a current Agent Profile.

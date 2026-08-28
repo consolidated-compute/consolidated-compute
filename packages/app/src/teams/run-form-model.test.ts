@@ -2,16 +2,25 @@ import { describe, expect, it } from "vitest";
 import type { AgentFeature, ProviderSnapshotEntry } from "@getpaseo/protocol/agent-types";
 import type { AssignmentDto } from "@getpaseo/protocol/assignment/types";
 import type { AgentProfile } from "@getpaseo/protocol/messages";
-import type { TeamDefinitionDto } from "@getpaseo/protocol/team/types";
+import type { TeamDefinitionDto, TeamRunPreviewDto } from "@getpaseo/protocol/team/types";
 import { TEAM_OBJECTIVE_MAX_CHARS } from "@getpaseo/protocol/team/types";
 import type { WorkspaceDescriptor } from "@/stores/session-store";
 import {
   buildTeamRunFeatureProbes,
   buildTeamRunFeatureRequest,
   buildTeamRunWorkspaceOptions,
-  openTeamRunForm,
+  openTeamRunForm as openTeamRunFormModel,
   type TeamRunWorkspaceOption,
 } from "./run-form-model";
+
+function openTeamRunForm(
+  snapshot: Parameters<typeof openTeamRunFormModel>[0],
+  options?: Parameters<typeof openTeamRunFormModel>[1],
+) {
+  const model = openTeamRunFormModel(snapshot, options);
+  model.applySecurityPreviewCapability(false);
+  return model;
+}
 
 function team(): TeamDefinitionDto {
   return {
@@ -77,6 +86,38 @@ const webFeature: AgentFeature = {
   value: false,
 };
 
+function securityPreview(fingerprint = "a".repeat(64)): TeamRunPreviewDto {
+  return {
+    workspace: {
+      workspaceId: workspace.workspaceId,
+      projectId: "project-1",
+      cwd: workspace.cwd,
+      displayName: workspace.display.label,
+    },
+    roles: [
+      {
+        roleId: "planner",
+        roleName: "Planner",
+        resolvedLaunch: {
+          profileId: "architect",
+          provider: "codex",
+          model: "gpt-5.6",
+          modeId: "plan",
+          thinkingOptionId: "high",
+          featureValues: { web: true },
+          securityPosture: {
+            source: { provider: "codex" },
+            filesystemWrite: { status: "enforced", summary: "Filesystem evidence" },
+            networkAccess: { status: "policy_only", summary: "Network evidence" },
+            toolShell: { status: "unavailable", summary: "Tool evidence" },
+          },
+        },
+      },
+    ],
+    fingerprint,
+  };
+}
+
 describe("Team Run form model", () => {
   it("offers only active Workspaces in stable display order", () => {
     const descriptor = (input: {
@@ -140,6 +181,7 @@ describe("Team Run form model", () => {
         modeId: "plan",
         thinkingOptionId: "high",
         featureValues: { web: true },
+        securityPosture: null,
         status: "ready",
       },
     ]);
@@ -390,7 +432,7 @@ describe("Team Run form model", () => {
     expect(model.getState().roleResolutions[0]?.status).toBe("ready");
   });
 
-  it("requires a fresh feature result after the provider catalog refreshes", () => {
+  it("requires a fresh feature result after the provider catalog changes", () => {
     const model = openTeamRunForm({
       serverId: "host-a",
       team: team(),
@@ -398,7 +440,9 @@ describe("Team Run form model", () => {
       profiles: [profile()],
     });
     model.setObjective("Plan");
-    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [
+      provider({ modes: [{ id: "plan", label: "Planning" }] }),
+    ]);
     const originalRequest = buildTeamRunFeatureRequest(
       model.getState().roleResolutions[0]!,
       workspace.cwd,
@@ -422,6 +466,95 @@ describe("Team Run form model", () => {
     expect(model.getState().roleResolutions[0]?.status).toBe("ready");
   });
 
+  it("does not invalidate preview or feature results for equivalent catalog snapshots", () => {
+    const model = openTeamRunFormModel({
+      serverId: "host-a",
+      team: team(),
+      workspaces: [workspace],
+      profiles: [profile()],
+    });
+    model.applySecurityPreviewCapability(true);
+    model.setObjective("Plan safely");
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    const featureRequest = buildTeamRunFeatureRequest(
+      model.getState().roleResolutions[0]!,
+      workspace.cwd,
+      model.getState().catalogGeneration,
+    )!;
+    model.applyFeatureCatalog("planner", featureRequest.requestKey, [webFeature]);
+    const previewRequest = model.getState().securityPreviewRequest!;
+    model.applySecurityPreview(previewRequest.requestKey, securityPreview());
+    let notifications = 0;
+    const unsubscribe = model.subscribe(() => {
+      notifications += 1;
+    });
+
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    model.applyFeatureCatalog("planner", featureRequest.requestKey, [{ ...webFeature }]);
+
+    expect(notifications).toBe(0);
+    expect(model.getState()).toMatchObject({
+      catalogGeneration: 0,
+      securityPreviewStatus: "ready",
+      securityPreviewRequest: previewRequest,
+      canSubmit: true,
+    });
+    unsubscribe();
+  });
+
+  it("keeps an in-flight preview stable across its provider refresh", () => {
+    const model = openTeamRunFormModel({
+      serverId: "host-a",
+      team: team(),
+      workspaces: [workspace],
+      profiles: [profile({ featureValues: {} })],
+    });
+    model.applySecurityPreviewCapability(true);
+    model.setObjective("Plan safely");
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    const request = model.getState().securityPreviewRequest!;
+
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [
+      provider({ status: "loading", models: undefined, modes: undefined }),
+    ]);
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+
+    expect(model.getState().securityPreviewRequest).toEqual(request);
+    expect(model.getState().catalogGeneration).toBe(0);
+
+    model.applySecurityPreview(request.requestKey, securityPreview());
+    expect(model.getState()).toMatchObject({
+      securityPreviewStatus: "ready",
+      canSubmit: true,
+    });
+  });
+
+  it("invalidates a settled preview when the selected Workspace display changes", () => {
+    const model = openTeamRunFormModel({
+      serverId: "host-a",
+      team: team(),
+      workspaces: [workspace],
+      profiles: [profile({ featureValues: {} })],
+    });
+    model.applySecurityPreviewCapability(true);
+    model.setObjective("Plan safely");
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    const request = model.getState().securityPreviewRequest!;
+    model.applySecurityPreview(request.requestKey, securityPreview());
+    expect(model.getState().canSubmit).toBe(true);
+
+    model.applyWorkspaces([
+      { ...workspace, display: { ...workspace.display, label: "Renamed Workspace" } },
+    ]);
+
+    expect(model.getState().securityPreviewRequest?.requestKey).not.toBe(request.requestKey);
+    expect(model.getState()).toMatchObject({
+      securityPreviewStatus: "pending",
+      validationIssue: "security_preview_loading",
+      canSubmit: false,
+    });
+  });
+
   it("deduplicates identical feature probes across roles", () => {
     const resolution = {
       roleId: "planner",
@@ -433,6 +566,7 @@ describe("Team Run form model", () => {
       modeId: "plan",
       thinkingOptionId: "high",
       featureValues: { web: true },
+      securityPosture: null,
       status: "ready",
     } as const;
     const planner = buildTeamRunFeatureRequest(resolution, workspace.cwd, 4)!;
@@ -573,6 +707,131 @@ describe("Team Run form model", () => {
     expect(model.getState().validationIssue).toBe("objective_too_long");
   });
 
+  it("freezes the authoritative security preview fingerprint into submission", () => {
+    const model = openTeamRunFormModel(
+      { serverId: "host-a", team: team(), workspaces: [workspace], profiles: [profile()] },
+      { generateIdempotencyKey: () => "preview-key" },
+    );
+    model.applySecurityPreviewCapability(true);
+    model.setObjective("Plan safely");
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    const featureRequest = buildTeamRunFeatureRequest(
+      model.getState().roleResolutions[0]!,
+      workspace.cwd,
+      model.getState().catalogGeneration,
+    )!;
+    model.applyFeatureCatalog("planner", featureRequest.requestKey, [webFeature]);
+
+    const request = model.getState().securityPreviewRequest!;
+    expect(model.getState()).toMatchObject({
+      securityPreviewStatus: "pending",
+      validationIssue: "security_preview_loading",
+      canSubmit: false,
+    });
+
+    const preview = securityPreview();
+    model.applySecurityPreview(request.requestKey, preview);
+
+    expect(model.getState()).toMatchObject({
+      securityPreviewStatus: "ready",
+      validationIssue: null,
+      canSubmit: true,
+      submission: { expectedPreviewFingerprint: preview.fingerprint },
+    });
+    expect(model.getState().roleResolutions[0]?.securityPosture).toEqual(
+      preview.roles[0]?.resolvedLaunch.securityPosture,
+    );
+  });
+
+  it("ignores a preview after profile churn and requires a fresh fingerprint", () => {
+    const model = openTeamRunFormModel({
+      serverId: "host-a",
+      team: team(),
+      workspaces: [workspace],
+      profiles: [profile({ featureValues: {} })],
+    });
+    model.applySecurityPreviewCapability(true);
+    model.setObjective("Plan safely");
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    const firstRequest = model.getState().securityPreviewRequest!;
+    model.applySecurityPreview(firstRequest.requestKey, securityPreview());
+    expect(model.getState().canSubmit).toBe(true);
+
+    model.applyProfiles([
+      profile({ featureValues: {}, providerOptions: { sandbox_mode: "read-only" } }),
+    ]);
+    const secondRequest = model.getState().securityPreviewRequest!;
+    expect(secondRequest.requestKey).not.toBe(firstRequest.requestKey);
+    expect(model.getState()).toMatchObject({
+      securityPreviewStatus: "pending",
+      canSubmit: false,
+      submission: null,
+    });
+
+    model.applySecurityPreview(firstRequest.requestKey, securityPreview("b".repeat(64)));
+    expect(model.getState().securityPreviewStatus).toBe("pending");
+  });
+
+  it("surfaces authoritative preview failures without falling back to local posture", () => {
+    const model = openTeamRunFormModel({
+      serverId: "host-a",
+      team: team(),
+      workspaces: [workspace],
+      profiles: [profile({ featureValues: {} })],
+    });
+    model.applySecurityPreviewCapability(true);
+    model.setObjective("Plan safely");
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    const request = model.getState().securityPreviewRequest!;
+
+    model.applySecurityPreviewError(request.requestKey, "Profile controls are invalid");
+
+    expect(model.getState()).toMatchObject({
+      securityPreviewStatus: "error",
+      securityPreviewError: "Profile controls are invalid",
+      validationIssue: "security_preview_failed",
+      canSubmit: false,
+      submission: null,
+    });
+    expect(model.getState().roleResolutions[0]?.securityPosture).toBeNull();
+
+    model.applySecurityPreviewPending(request.requestKey);
+
+    expect(model.getState()).toMatchObject({
+      securityPreviewStatus: "pending",
+      securityPreviewError: null,
+      validationIssue: "security_preview_loading",
+      canSubmit: false,
+      submission: null,
+    });
+  });
+
+  it("does not republish identical security adapter results", () => {
+    const model = openTeamRunFormModel({
+      serverId: "host-a",
+      team: team(),
+      workspaces: [workspace],
+      profiles: [profile({ featureValues: {} })],
+    });
+    model.applySecurityPreviewCapability(true);
+    model.setObjective("Plan safely");
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    const request = model.getState().securityPreviewRequest!;
+    let notifications = 0;
+    const unsubscribe = model.subscribe(() => {
+      notifications += 1;
+    });
+
+    model.applySecurityPreviewError(request.requestKey, "Preview failed");
+    model.applySecurityPreviewError(request.requestKey, "Preview failed");
+    model.applySecurityPreviewCapability(true);
+    model.applySecurityPreviewPending(request.requestKey);
+    model.applySecurityPreviewPending(request.requestKey);
+
+    expect(notifications).toBe(2);
+    unsubscribe();
+  });
+
   it("rejects every late adapter input after close", () => {
     const model = openTeamRunForm({
       serverId: "host-a",
@@ -587,6 +846,10 @@ describe("Team Run form model", () => {
     model.applyProfiles([]);
     model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
     model.applyFeatureCatalog("planner", "late", []);
+    model.applySecurityPreviewCapability(true);
+    model.applySecurityPreviewPending("late");
+    model.applySecurityPreview("late", securityPreview());
+    model.applySecurityPreviewError("late", "late");
     expect(model.getState()).toBe(stateAtClose);
   });
 });

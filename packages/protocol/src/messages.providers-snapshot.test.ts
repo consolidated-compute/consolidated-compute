@@ -50,6 +50,53 @@ describe("provider snapshot message schemas", () => {
     expect(parsed.source).toBe("custom");
   });
 
+  test("preserves bounded Agent Profile security presets", () => {
+    const parsed = ProviderSnapshotEntrySchema.parse({
+      provider: "codex",
+      status: "ready",
+      enabled: true,
+      agentProfileSecurityPresets: [
+        {
+          id: "fail-closed-read-only",
+          label: "Fail-closed read only",
+          description: "Deny writes and approval escapes.",
+          providerOptions: {
+            approval_policy: "never",
+            sandbox_mode: "read-only",
+          },
+        },
+      ],
+    });
+
+    expect(parsed.agentProfileSecurityPresets).toEqual([
+      {
+        id: "fail-closed-read-only",
+        label: "Fail-closed read only",
+        description: "Deny writes and approval escapes.",
+        providerOptions: {
+          approval_policy: "never",
+          sandbox_mode: "read-only",
+        },
+      },
+    ]);
+  });
+
+  test("rejects oversized Agent Profile security preset catalogs", () => {
+    const presets = Array.from({ length: 13 }, (_, index) => ({
+      id: `preset-${index}`,
+      label: `Preset ${index}`,
+      providerOptions: {},
+    }));
+
+    expect(() =>
+      ProviderSnapshotEntrySchema.parse({
+        provider: "codex",
+        status: "ready",
+        agentProfileSecurityPresets: presets,
+      }),
+    ).toThrow();
+  });
+
   test("defaults missing enabled state in providers snapshot response entries", () => {
     const parsed = GetProvidersSnapshotResponseMessageSchema.parse({
       type: "get_providers_snapshot_response",

@@ -2569,6 +2569,26 @@ export const fr: TranslationResources = {
         noModes: "Ce fournisseur n'a aucun mode à choisir",
         thinkingLabel: "Pensée",
         noThinkingOptions: "Ce modèle n'a aucun niveau de pensée",
+        securityBoundaryLabel: "Limite de sécurité",
+        securityBoundaryPlaceholder: "Sélectionner une limite de sécurité du fournisseur",
+        noSecurityBoundaries: "Ce fournisseur ne propose aucune limite de sécurité prise en charge",
+        customSecurityBoundary: "Réglages natifs personnalisés",
+        securityStates: {
+          idle: "Sélectionnez un fournisseur pour voir ses limites de sécurité prises en charge.",
+          pending: "Vérification des limites de sécurité prises en charge par le fournisseur…",
+          available: "Cette limite est fournie et validée par le fournisseur.",
+          unrecognized:
+            "Ce profil contient des réglages natifs personnalisés. Ils seront conservés jusqu’à la sélection d’une limite prise en charge.",
+          stale:
+            "Les contrôles de sécurité du fournisseur ont changé. Resélectionnez la limite avant d’enregistrer.",
+          read_only:
+            "Les réglages de sécurité natifs existants seront conservés, mais ils ne peuvent pas être modifiés ici.",
+          unavailable:
+            "Les limites de sécurité n’ont pas pu être chargées. Réessayez l’instantané du fournisseur.",
+          unsupported: "Ce fournisseur n’annonce aucune limite de sécurité modifiable.",
+          update_required:
+            "Mettez cet hôte à jour avant de modifier un profil contenant des réglages de sécurité natifs.",
+        },
         featuresLabel: "Caractéristiques",
         featureCount: "{{count}} caractéristiques",
         featureCountOne: "{{count}} caractéristique",

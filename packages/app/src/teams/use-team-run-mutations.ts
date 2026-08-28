@@ -46,6 +46,9 @@ export function useTeamRunMutations() {
         expectedRevision: input.expectedRevision,
         idempotencyKey: input.idempotencyKey,
         workspaceId: input.workspaceId,
+        ...(input.expectedPreviewFingerprint
+          ? { expectedPreviewFingerprint: input.expectedPreviewFingerprint }
+          : {}),
       };
       if (input.assignmentId !== undefined) {
         return client.startAssignmentTeamRun({
