@@ -551,6 +551,8 @@ describe("file explorer service", () => {
       await expect(
         renameExplorerEntry({ root, relativePath: "source.txt", name: "existing.txt" }),
       ).resolves.toEqual({ status: "error", error: '"existing.txt" already exists' });
+      await expect(readFile(path.join(root, "source.txt"), "utf8")).resolves.toBe("source");
+      await expect(readFile(path.join(root, "existing.txt"), "utf8")).resolves.toBe("existing");
       await expect(
         renameExplorerEntry({ root, relativePath: "source.txt", name: "../outside.txt" }),
       ).resolves.toEqual({ status: "error", error: "Name cannot contain path separators" });

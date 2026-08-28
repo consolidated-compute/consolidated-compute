@@ -5,14 +5,17 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MATRIX_SURFACE="${PASEO_MOBILE_E2E_MATRIX_SURFACE:-operations}"
 PLATFORM="${PASEO_MOBILE_E2E_PLATFORM:-ios}"
 DEVICE="${PASEO_MOBILE_E2E_DEVICE:-}"
+SERIAL="${PASEO_MOBILE_E2E_SERIAL:-}"
 APP_ID="${PASEO_MOBILE_E2E_APP_ID:-sh.paseo.debug}"
 OPERATIONS_FIXTURE="${PASEO_MOBILE_E2E_OPERATIONS_FIXTURE:-1}"
 SUITE_PATH="${PASEO_MOBILE_E2E_SUITE:-${REPO_ROOT}/packages/app/e2e/mobile/agent-device}"
+DEV_CLIENT_FLOW="${REPO_ROOT}/packages/app/e2e/mobile/native-matrix-dev-client.yaml"
 AGENT_DEVICE_BIN="${REPO_ROOT}/node_modules/.bin/agent-device"
 METRO_PID=0
 METRO_LOG_PATH=""
 FIXTURE_PID=0
 RESET_DEVICE_SETTINGS=0
+CAPTURE_AGENT_DEVICE_SESSIONS=0
 
 case "${MATRIX_SURFACE}" in
   operations)
@@ -38,11 +41,15 @@ esac
 
 if [[ "${MATRIX_SURFACE}" == "visual" ]]; then
   export EXPO_PUBLIC_PASEO_E2E_VISUAL_MOTION_PROBE=1
-  if [[ "${PLATFORM}" == "ios" ]]; then
-    # Agent Device has no iOS command for the system Reduce Motion setting.
-    # Exercise the same presentation path without changing production bundles.
-    export EXPO_PUBLIC_PASEO_E2E_FORCE_VISUAL_REDUCED_MOTION=1
-  fi
+  # The hosted devices expose different system animation controls. Exercise the
+  # same presentation path on both without changing production bundles.
+  export EXPO_PUBLIC_PASEO_E2E_FORCE_VISUAL_REDUCED_MOTION=1
+fi
+
+if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
+  # Push registration is outside these surface contracts, and its native
+  # permission prompt is not deterministic across simulator runtimes.
+  export EXPO_PUBLIC_PASEO_E2E_DISABLE_PUSH_NOTIFICATIONS=1
 fi
 
 STATE_DIR="${PASEO_MOBILE_E2E_STATE_DIR:-${DEFAULT_STATE_DIR}}"
@@ -82,6 +89,11 @@ cleanup() {
   fi
   if [[ -n "${METRO_LOG_PATH}" && -f "${METRO_LOG_PATH}" ]]; then
     cp "${METRO_LOG_PATH}" "${ARTIFACTS_DIR}/metro.log" >/dev/null 2>&1 || true
+  fi
+  if [[ "${CAPTURE_AGENT_DEVICE_SESSIONS}" -eq 1 && -d "${STATE_DIR}/sessions" ]]; then
+    mkdir -p "${ARTIFACTS_DIR}/agent-device-sessions"
+    cp -R "${STATE_DIR}/sessions/." "${ARTIFACTS_DIR}/agent-device-sessions/" \
+      >/dev/null 2>&1 || true
   fi
   AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" daemon stop --clean >/dev/null 2>&1 || true
   if [[ "${METRO_PID}" -gt 0 ]]; then
@@ -222,15 +234,18 @@ curl --fail --show-error --silent --retry 2 --retry-all-errors --max-time 300 \
   --output /dev/null \
   "${METRO_PREWARM_URL}"
 
-BOOT_ARGS=(--platform "${PLATFORM}")
+TARGET_ARGS=(--platform "${PLATFORM}")
 if [[ -n "${DEVICE}" ]]; then
   if [[ "${PLATFORM}" == "ios" ]]; then
-    BOOT_ARGS+=(--udid "${DEVICE}")
+    TARGET_ARGS+=(--udid "${DEVICE}")
   else
-    BOOT_ARGS+=(--device "${DEVICE}")
+    TARGET_ARGS+=(--device "${DEVICE}")
   fi
 fi
-AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" boot "${BOOT_ARGS[@]}"
+if [[ "${PLATFORM}" == "android" && -n "${SERIAL}" ]]; then
+  TARGET_ARGS+=(--serial "${SERIAL}")
+fi
+AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" boot "${TARGET_ARGS[@]}"
 
 if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
   RESET_DEVICE_SETTINGS=1
@@ -247,9 +262,40 @@ fi
 
 if [[ "${PLATFORM}" == "ios" ]]; then
   AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" prepare ios-runner \
-    --platform ios \
-    --timeout 240000
+    "${TARGET_ARGS[@]}" \
+    --timeout 360000
 fi
+
+# Expo's development-client shell has platform- and runtime-dependent prompts.
+# Clear and deep-link the app explicitly so Android never routes launch through
+# Quickstep. Maestro owns only the conditional development-client prompts before
+# the strict Agent Device replay starts asserting product state.
+DEV_CLIENT_LAUNCH_SESSION="${MATRIX_SURFACE}-dev-client-launch-${PLATFORM}"
+DEV_CLIENT_REPLAY_LOG="${ARTIFACTS_DIR}/dev-client-replay.log"
+CAPTURE_AGENT_DEVICE_SESSIONS=1
+if [[ "${PLATFORM}" == "android" ]]; then
+  adb shell am force-stop com.android.launcher3 >/dev/null 2>&1 || true
+fi
+AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" settings clear-app-state \
+  "${APP_ID}" \
+  "${TARGET_ARGS[@]}"
+AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" open \
+  "${APP_ID}" \
+  "${AD_VAR_DEV_CLIENT_URL}" \
+  --session "${DEV_CLIENT_LAUNCH_SESSION}" \
+  "${TARGET_ARGS[@]}" \
+  --metro-host "${DEVICE_HOST}" \
+  --metro-port "${METRO_PORT}"
+AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" replay \
+  "${DEV_CLIENT_FLOW}" \
+  --maestro \
+  --session "${DEV_CLIENT_LAUNCH_SESSION}" \
+  "${TARGET_ARGS[@]}" \
+  --metro-host "${DEVICE_HOST}" \
+  --metro-port "${METRO_PORT}" \
+  --timeout 180000 | tee "${DEV_CLIENT_REPLAY_LOG}"
+AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" close \
+  --session "${DEV_CLIENT_LAUNCH_SESSION}"
 
 REPORTER_ARGS=(--reporter default)
 if [[ -n "${PASEO_MOBILE_E2E_JUNIT_PATH:-}" ]]; then
@@ -259,7 +305,7 @@ fi
 
 AGENT_DEVICE_STATE_DIR="${STATE_DIR}" "${AGENT_DEVICE_BIN}" test \
   "${SUITE_PATH}" \
-  --platform "${PLATFORM}" \
+  "${TARGET_ARGS[@]}" \
   --metro-port "${METRO_PORT}" \
   --timeout 600000 \
   --fail-fast \
