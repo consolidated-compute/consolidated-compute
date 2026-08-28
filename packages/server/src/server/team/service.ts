@@ -190,6 +190,10 @@ export class TeamRunService {
     this.acceptingStarts = true;
   }
 
+  supportsAssignmentRepository(repository: AssignmentRepository): boolean {
+    return this.assignmentRepository?.persistenceBoundaryKey === repository.persistenceBoundaryKey;
+  }
+
   async startRun(input: StartTeamRunInput): Promise<PersistedTeamRunRecord> {
     const identity = {
       kind: "objective" as const,

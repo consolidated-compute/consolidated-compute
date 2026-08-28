@@ -121,6 +121,14 @@ function resolveTeamServices(
   return { repository: repository ?? null, runService: runService ?? null };
 }
 
+function resolveAssignmentRepository(
+  repository: AssignmentRepository | undefined,
+  runService: TeamRunService | null,
+): AssignmentRepository | null {
+  if (!repository || !runService?.supportsAssignmentRepository(repository)) return null;
+  return repository;
+}
+
 export interface ExternalSocketMetadata {
   transport: "relay";
   externalSessionKey?: string;
@@ -687,7 +695,10 @@ export class VoiceAssistantWebSocketServer {
     const teamServices = resolveTeamServices(teamRepository, teamRunService);
     this.teamRepository = teamServices.repository;
     this.teamRunService = teamServices.runService;
-    this.assignmentRepository = assignmentRepository ?? null;
+    this.assignmentRepository = resolveAssignmentRepository(
+      assignmentRepository,
+      teamServices.runService,
+    );
     this.agentManager = agentManager;
     this.agentStorage = agentStorage;
     this.projectRegistry = projectRegistry ?? createNoopProjectRegistry();

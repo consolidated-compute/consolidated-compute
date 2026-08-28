@@ -98,6 +98,8 @@ import { z } from "zod";
 import { VoiceAssistantWebSocketServer } from "./websocket-server";
 import { parseServerInfoStatusPayload } from "./messages.js";
 import type { SpeechReadinessSnapshot } from "./speech/speech-runtime.js";
+import type { AssignmentRepository } from "./assignment/repository.js";
+import type { TeamRunService } from "./team/service.js";
 
 interface WebSocketServerInternals {
   attachSocket(ws: unknown, req: unknown): Promise<void>;
@@ -221,6 +223,8 @@ function createServer(options?: {
   speechReadiness?: SpeechReadinessSnapshot | null;
   logger?: ReturnType<typeof createLogger>;
   startPaused?: boolean;
+  assignmentRepository?: AssignmentRepository;
+  teamRunService?: TeamRunService;
 }) {
   const speechReadiness = options?.speechReadiness ?? null;
   const daemonConfigStore = {
@@ -295,6 +299,17 @@ function createServer(options?: {
     undefined,
     undefined,
     createProviderSnapshotManagerStub().manager,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    options?.teamRunService,
+    options?.assignmentRepository,
   );
 }
 
@@ -984,6 +999,37 @@ describe("relay external socket reconnect behavior", () => {
     expect(serverInfo.features?.["terminal-size-ownership"]).toBe(true);
     expect(serverInfo.features?.agentTurnIdentity).toBeUndefined();
     await server.close();
+  });
+
+  test("advertises Assignments only when the run service accepts the repository boundary", async () => {
+    const assignmentRepository = createStub<AssignmentRepository>({
+      persistenceBoundaryKey: "/tmp/paseo-test",
+    });
+    const unboundRunService = createStub<TeamRunService>({
+      supportsAssignmentRepository: () => false,
+    });
+    const unboundServer = createServer({ assignmentRepository, teamRunService: unboundRunService });
+    const unboundInfo = await attachRelayAndHello({
+      server: unboundServer,
+      socket: new MockSocket(),
+      clientId: "cid-assignments-unbound",
+    });
+    expect(unboundInfo.features?.assignments).toBeUndefined();
+    expect(sessionMock.instances.at(-1)?.args.assignmentRepository).toBeUndefined();
+    await unboundServer.close();
+
+    const boundRunService = createStub<TeamRunService>({
+      supportsAssignmentRepository: () => true,
+    });
+    const boundServer = createServer({ assignmentRepository, teamRunService: boundRunService });
+    const boundInfo = await attachRelayAndHello({
+      server: boundServer,
+      socket: new MockSocket(),
+      clientId: "cid-assignments-bound",
+    });
+    expect(boundInfo.features?.assignments).toBe(true);
+    expect(sessionMock.instances.at(-1)?.args.assignmentRepository).toBe(assignmentRepository);
+    await boundServer.close();
   });
 
   test("includes voice capabilities in initial server_info when speech readiness exists", async () => {

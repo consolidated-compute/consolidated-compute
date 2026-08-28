@@ -649,7 +649,7 @@ function resolveAssignmentSession(
   runService: TeamRunService | undefined,
   emit: (message: SessionOutboundMessage) => void,
 ): AssignmentSession | null {
-  if (!repository || !runService) return null;
+  if (!repository || !runService?.supportsAssignmentRepository(repository)) return null;
   return new AssignmentSession({ repository, runService, emit });
 }
 

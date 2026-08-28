@@ -471,6 +471,28 @@ describe("TeamRunService", () => {
     });
   }
 
+  test("accepts Assignment repositories only from its configured persistence boundary", async () => {
+    const harness = await createHarness();
+    const peer = new AssignmentRepository({
+      paseoHome,
+      activeRunStore: harness.repository,
+    });
+    expect(harness.service.supportsAssignmentRepository(harness.assignments)).toBe(true);
+    expect(harness.service.supportsAssignmentRepository(peer)).toBe(true);
+
+    const otherPaseoHome = await mkdtemp(join(tmpdir(), "team-run-service-other-boundary-"));
+    try {
+      const otherTeamRepository = new TeamRepository({ paseoHome: otherPaseoHome });
+      const otherAssignmentRepository = new AssignmentRepository({
+        paseoHome: otherPaseoHome,
+        activeRunStore: otherTeamRepository,
+      });
+      expect(harness.service.supportsAssignmentRepository(otherAssignmentRepository)).toBe(false);
+    } finally {
+      await rm(otherPaseoHome, { recursive: true, force: true });
+    }
+  });
+
   async function startAssignmentRun(
     harness: Harness,
     assignment: { id: string; revision: number },
