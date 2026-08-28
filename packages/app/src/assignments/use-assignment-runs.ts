@@ -5,6 +5,7 @@ import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-
 import {
   assignmentRunListQueryKey,
   flattenAssignmentRunPages,
+  loadNextAssignmentRunPage,
   type AssignmentRunPage,
 } from "./run-data";
 
@@ -31,14 +32,17 @@ export function useAssignmentRuns(serverId: string, assignmentId: string) {
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     queryFn: async ({ pageParam }) => {
       if (!client) throw new Error("Host is offline");
-      const payload = await client.listTeamRuns({
-        limit: ASSIGNMENT_RUN_PAGE_LIMIT,
-        ...(pageParam ? { cursor: pageParam } : {}),
+      return loadNextAssignmentRunPage({
+        assignmentId,
+        cursor: pageParam,
+        loadPage: async (cursor) => {
+          const payload = await client.listTeamRuns({
+            limit: ASSIGNMENT_RUN_PAGE_LIMIT,
+            ...(cursor ? { cursor } : {}),
+          });
+          return { runs: payload.runs, nextCursor: payload.nextCursor };
+        },
       });
-      return {
-        runs: payload.runs.filter((run) => run.assignmentId === assignmentId),
-        nextCursor: payload.nextCursor,
-      };
     },
   });
   const runs = useMemo(

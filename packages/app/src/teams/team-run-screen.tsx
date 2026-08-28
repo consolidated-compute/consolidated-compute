@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { StatusBadge, type StatusBadgeVariant } from "@/components/ui/status-badge";
 import { AssignmentArtifactCard } from "@/assignments/artifact-card";
-import { artifactsForRun } from "@/assignments/artifact-data";
 import { useAssignmentArtifacts } from "@/assignments/use-assignment-artifacts";
 import { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { confirmDialog } from "@/utils/confirm-dialog";
@@ -231,11 +230,8 @@ function TeamRunArtifacts({
   runId: string;
 }): ReactElement {
   const { t } = useTranslation();
-  const query = useAssignmentArtifacts(serverId, assignmentId);
-  const artifacts = useMemo(
-    () => artifactsForRun(query.artifacts, runId),
-    [query.artifacts, runId],
-  );
+  const query = useAssignmentArtifacts(serverId, assignmentId, { teamRunId: runId });
+  const artifacts = query.artifacts;
   const { refetch, fetchNextPage } = query;
   const retry = useCallback(() => void refetch(), [refetch]);
   const loadMore = useCallback(() => void fetchNextPage(), [fetchNextPage]);

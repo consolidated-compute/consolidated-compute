@@ -3,7 +3,9 @@ import type { AssignmentArtifactDto } from "@getpaseo/protocol/assignment/types"
 import {
   artifactsForRun,
   assignmentArtifactIssues,
+  assignmentArtifactListQueryKey,
   flattenAssignmentArtifactPages,
+  loadNextTeamRunArtifactPage,
 } from "./artifact-data";
 
 const artifact = (id: string, teamRunId: string): AssignmentArtifactDto => ({
@@ -29,6 +31,17 @@ const artifact = (id: string, teamRunId: string): AssignmentArtifactDto => ({
 });
 
 describe("Assignment Artifact data", () => {
+  it("qualifies run-scoped Artifact caches by host, Assignment, and Team Run", () => {
+    expect(assignmentArtifactListQueryKey("host-1", "assignment-1", "run-1")).toEqual([
+      "assignmentArtifacts",
+      "host-1",
+      "assignment-1",
+      "run",
+      "run-1",
+      "list",
+    ]);
+  });
+
   it("deduplicates paginated Artifacts and filters exact run provenance", () => {
     const pages = [
       { artifacts: [artifact("a", "run-1")], nextCursor: "next", issues: [] },
@@ -56,5 +69,51 @@ describe("Assignment Artifact data", () => {
         { artifacts: [], nextCursor: null, issues: [issue] },
       ]),
     ).toEqual([issue]);
+  });
+
+  it("skips unrelated Artifact pages before returning the target run", async () => {
+    const issue = {
+      collection: "artifacts" as const,
+      fileName: "bad.json",
+      kind: "invalid_record" as const,
+      message: "bad",
+    };
+    const cursors: Array<string | null> = [];
+
+    const page = await loadNextTeamRunArtifactPage({
+      teamRunId: "run-1",
+      cursor: null,
+      loadPage: async (cursor) => {
+        cursors.push(cursor);
+        return cursor === null
+          ? { artifacts: [artifact("other", "run-2")], nextCursor: "page-2", issues: [issue] }
+          : { artifacts: [artifact("target", "run-1")], nextCursor: "page-3", issues: [] };
+      },
+    });
+
+    expect(cursors).toEqual([null, "page-2"]);
+    expect(page).toEqual({
+      artifacts: [artifact("target", "run-1")],
+      nextCursor: "page-3",
+      issues: [issue],
+    });
+  });
+
+  it("exhausts unrelated Artifact pages before returning an empty result", async () => {
+    const cursors: Array<string | null> = [];
+
+    const page = await loadNextTeamRunArtifactPage({
+      teamRunId: "run-1",
+      cursor: null,
+      loadPage: async (cursor) => {
+        cursors.push(cursor);
+        return cursor === null
+          ? { artifacts: [artifact("other-1", "run-2")], nextCursor: "page-2", issues: [] }
+          : { artifacts: [artifact("other-2", "run-3")], nextCursor: null, issues: [] };
+      },
+    });
+
+    expect(cursors).toEqual([null, "page-2"]);
+    expect(page).toEqual({ artifacts: [], nextCursor: null, issues: [] });
   });
 });

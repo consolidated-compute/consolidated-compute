@@ -7,6 +7,15 @@ export interface AssignmentRunPage {
   nextCursor: string | null;
 }
 
+interface AssignmentRunReference {
+  assignmentId?: string;
+}
+
+interface AssignmentRunScanPage<TRun extends AssignmentRunReference> {
+  runs: TRun[];
+  nextCursor: string | null;
+}
+
 export function assignmentRunListQueryKey(serverId: string, assignmentId: string) {
   return [...assignmentRunsQueryBaseKey, serverId, assignmentId, "list"] as const;
 }
@@ -20,4 +29,20 @@ export function flattenAssignmentRunPages(pages: readonly AssignmentRunPage[]): 
       return true;
     }),
   );
+}
+
+export async function loadNextAssignmentRunPage<TRun extends AssignmentRunReference>(input: {
+  assignmentId: string;
+  cursor: string | null;
+  loadPage: (cursor: string | null) => Promise<AssignmentRunScanPage<TRun>>;
+}): Promise<AssignmentRunScanPage<TRun>> {
+  let cursor = input.cursor;
+  while (true) {
+    const page = await input.loadPage(cursor);
+    const runs = page.runs.filter((run) => run.assignmentId === input.assignmentId);
+    if (runs.length > 0 || page.nextCursor === null) {
+      return { runs, nextCursor: page.nextCursor };
+    }
+    cursor = page.nextCursor;
+  }
 }

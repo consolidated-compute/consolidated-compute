@@ -6,13 +6,18 @@ import {
   assignmentArtifactIssues,
   assignmentArtifactListQueryKey,
   flattenAssignmentArtifactPages,
+  loadNextTeamRunArtifactPage,
   type AssignmentArtifactPage,
 } from "./artifact-data";
 
 const ASSIGNMENT_ARTIFACT_PAGE_LIMIT = 50;
 const ASSIGNMENT_ARTIFACT_REFRESH_INTERVAL_MS = 5_000;
 
-export function useAssignmentArtifacts(serverId: string, assignmentId: string) {
+export function useAssignmentArtifacts(
+  serverId: string,
+  assignmentId: string,
+  options: { teamRunId?: string } = {},
+) {
   const client = useHostRuntimeClient(serverId);
   const connected = useHostRuntimeIsConnected(serverId);
   const enabled = Boolean(client && connected && assignmentId);
@@ -23,7 +28,7 @@ export function useAssignmentArtifacts(serverId: string, assignmentId: string) {
     ReturnType<typeof assignmentArtifactListQueryKey>,
     string | null
   >({
-    queryKey: assignmentArtifactListQueryKey(serverId, assignmentId),
+    queryKey: assignmentArtifactListQueryKey(serverId, assignmentId, options.teamRunId),
     dataShape: "list",
     enabled,
     initialPageParam: null,
@@ -32,16 +37,21 @@ export function useAssignmentArtifacts(serverId: string, assignmentId: string) {
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     queryFn: async ({ pageParam }) => {
       if (!client) throw new Error("Host is offline");
-      const payload = await client.listAssignmentArtifacts({
-        assignmentId,
-        limit: ASSIGNMENT_ARTIFACT_PAGE_LIMIT,
-        ...(pageParam ? { cursor: pageParam } : {}),
-      });
-      return {
-        artifacts: payload.artifacts,
-        nextCursor: payload.nextCursor,
-        issues: payload.issues ?? [],
+      const loadPage = async (cursor: string | null): Promise<AssignmentArtifactPage> => {
+        const payload = await client.listAssignmentArtifacts({
+          assignmentId,
+          limit: ASSIGNMENT_ARTIFACT_PAGE_LIMIT,
+          ...(cursor ? { cursor } : {}),
+        });
+        return {
+          artifacts: payload.artifacts,
+          nextCursor: payload.nextCursor,
+          issues: payload.issues ?? [],
+        };
       };
+      return options.teamRunId
+        ? loadNextTeamRunArtifactPage({ teamRunId: options.teamRunId, cursor: pageParam, loadPage })
+        : loadPage(pageParam);
     },
   });
   const artifacts = useMemo(
