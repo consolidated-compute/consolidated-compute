@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { AggregatedAssignment } from "./data";
-import type { AggregatedTeam } from "@/teams/data";
-import { resolveActiveAssignmentKey, teamsForAssignment } from "./screen-state";
+import type { AggregatedAssignment, AssignmentHostState } from "./data";
+import type { AggregatedTeam, TeamHostState } from "@/teams/data";
+import {
+  isAssignmentRunEnabled,
+  resolveActiveAssignmentKey,
+  teamsForAssignment,
+} from "./screen-state";
 
 describe("Assignment screen state", () => {
   it("keeps routed identity host-qualified", () => {
@@ -17,5 +21,26 @@ describe("Assignment screen state", () => {
       { serverId: "host-a", id: "team-a" },
     ] as AggregatedTeam[];
     expect(teamsForAssignment(assignment, teams).map((team) => team.id)).toEqual(["team-a"]);
+  });
+
+  it("keeps Run disabled until the Assignment host's Teams are ready", () => {
+    const assignment = {
+      serverId: "host-a",
+      state: { status: "open" },
+    } as AggregatedAssignment;
+    const assignmentHost = {
+      serverId: "host-a",
+      status: "ready",
+      canAuthor: true,
+    } as AssignmentHostState;
+    const loadingHost = {
+      serverId: "host-a",
+      status: "loading",
+      canAuthor: false,
+    } as TeamHostState;
+    const readyHost = { ...loadingHost, status: "ready", canAuthor: true } as TeamHostState;
+
+    expect(isAssignmentRunEnabled(assignment, assignmentHost, [loadingHost])).toBe(false);
+    expect(isAssignmentRunEnabled(assignment, assignmentHost, [readyHost])).toBe(true);
   });
 });

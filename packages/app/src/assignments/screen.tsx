@@ -46,6 +46,8 @@ import { AssignmentFormSheet } from "./assignment-form-sheet";
 import { AssignmentTeamPickerSheet } from "./assignment-team-picker-sheet";
 import { type AggregatedAssignment, type AssignmentHostState } from "./data";
 import {
+  isAssignmentRunEnabled,
+  isAssignmentTeamPickerReady,
   resolveActiveAssignmentKey,
   teamsForAssignment,
   type AssignmentsView,
@@ -64,7 +66,7 @@ type FormState =
 
 type RunState =
   | { kind: "closed" }
-  | { kind: "choose-team"; assignment: AggregatedAssignment; teams: AggregatedTeam[] }
+  | { kind: "choose-team"; assignment: AggregatedAssignment }
   | { kind: "preflight"; assignment: AggregatedAssignment; team: AggregatedTeam };
 
 function rpcErrorCode(error: unknown): string | null {
@@ -168,14 +170,10 @@ function AssignmentsScreenContent({ view }: { view: AssignmentsView }): ReactEle
   const closeRun = useCallback(() => setRun({ kind: "closed" }), []);
   const openRun = useCallback(
     (assignment: AggregatedAssignment) => {
-      const teamHost = teamsData.hosts.find((host) => host.serverId === assignment.serverId);
-      const teams =
-        teamHost?.status === "ready" && teamHost.canAuthor
-          ? teamsForAssignment(assignment, teamsData.teams)
-          : [];
-      setRun({ kind: "choose-team", assignment, teams });
+      if (!isAssignmentTeamPickerReady(assignment.serverId, teamsData.hosts)) return;
+      setRun({ kind: "choose-team", assignment });
     },
-    [teamsData.hosts, teamsData.teams],
+    [teamsData.hosts],
   );
   const chooseTeam = useCallback((team: AggregatedTeam) => {
     setRun((current) =>
@@ -204,12 +202,20 @@ function AssignmentsScreenContent({ view }: { view: AssignmentsView }): ReactEle
       onRetry={data.refetchHost}
     />
   );
+  const runEnabled = isAssignmentRunEnabled(
+    selectedAssignment,
+    selection.detailHost,
+    teamsData.hosts,
+  );
+  const pickerTeams =
+    run.kind === "choose-team" ? teamsForAssignment(run.assignment, teamsData.teams) : [];
   const detail = (
     <AssignmentDetail
       assignment={selectedAssignment}
       host={selection.detailHost}
       loading={selection.detailLoading}
       requested={view.kind === "detail"}
+      runEnabled={runEnabled}
       onEdit={openEdit}
       onRun={openRun}
     />
@@ -274,7 +280,7 @@ function AssignmentsScreenContent({ view }: { view: AssignmentsView }): ReactEle
         />
       ) : null}
       {run.kind === "choose-team" ? (
-        <AssignmentTeamPickerSheet teams={run.teams} onClose={closeRun} onSelect={chooseTeam} />
+        <AssignmentTeamPickerSheet teams={pickerTeams} onClose={closeRun} onSelect={chooseTeam} />
       ) : null}
       {run.kind === "preflight" ? (
         <TeamRunFormSheet
@@ -460,6 +466,7 @@ function AssignmentDetail({
   host,
   loading,
   requested,
+  runEnabled,
   onEdit,
   onRun,
 }: {
@@ -467,6 +474,7 @@ function AssignmentDetail({
   host: AssignmentHostState | null;
   loading: boolean;
   requested: boolean;
+  runEnabled: boolean;
   onEdit: (assignment: AggregatedAssignment) => void;
   onRun: (assignment: AggregatedAssignment) => void;
 }): ReactElement {
@@ -556,7 +564,7 @@ function AssignmentDetail({
             size="sm"
             leftIcon={Play}
             onPress={run}
-            disabled={!editable}
+            disabled={!runEnabled}
             testID={`assignment-run-open-${testIdentity}`}
           >
             {t("assignments.actions.run")}

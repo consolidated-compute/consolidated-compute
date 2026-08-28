@@ -10,7 +10,6 @@ import {
 } from "./run-data";
 
 const ASSIGNMENT_RUN_PAGE_LIMIT = 50;
-const ASSIGNMENT_RUN_REFRESH_INTERVAL_MS = 5_000;
 
 export function useAssignmentRuns(serverId: string, assignmentId: string) {
   const client = useHostRuntimeClient(serverId);
@@ -28,7 +27,6 @@ export function useAssignmentRuns(serverId: string, assignmentId: string) {
     enabled,
     initialPageParam: null,
     staleTimeMs: 0,
-    refetchInterval: ASSIGNMENT_RUN_REFRESH_INTERVAL_MS,
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     queryFn: async ({ pageParam }) => {
       if (!client) throw new Error("Host is offline");
