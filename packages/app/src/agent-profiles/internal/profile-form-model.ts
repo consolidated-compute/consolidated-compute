@@ -336,7 +336,11 @@ export function buildFeatureRequestKey(request: AgentProfileFeatureRequest | nul
   ].join("|");
 }
 
-function buildSubmitValue(state: AgentProfileFormState): AgentProfileValue | null {
+function buildSubmitValue(
+  state: AgentProfileFormState,
+  preservedProvider: string | undefined,
+  preservedProviderOptions: AgentProfile["providerOptions"] | undefined,
+): AgentProfileValue | null {
   const name = state.name.trim();
   const notes = state.notes.trim();
   if (!name || !state.provider) {
@@ -352,6 +356,9 @@ function buildSubmitValue(state: AgentProfileFormState): AgentProfileValue | nul
     ...(state.thinkingOptionId ? { thinkingOptionId: state.thinkingOptionId } : {}),
     ...(Object.keys(state.featureValues).length > 0 ? { featureValues: state.featureValues } : {}),
     ...(notes ? { notes } : {}),
+    ...(state.provider === preservedProvider && preservedProviderOptions !== undefined
+      ? { providerOptions: preservedProviderOptions }
+      : {}),
   };
 }
 
@@ -420,6 +427,13 @@ function buildInitialState(snapshot: AgentProfileFormSnapshot): AgentProfileForm
 }
 
 export function openAgentProfileForm(snapshot: AgentProfileFormSnapshot): AgentProfileFormModel {
+  // Provider options are provider-native security configuration. Until this
+  // form has a dedicated authoring surface, edit mode carries the stored value
+  // through opaquely while the provider stays unchanged. A provider transition
+  // omits the native options so the daemon can require an explicit repair.
+  const preservedProvider = snapshot.mode === "edit" ? snapshot.profile?.provider : undefined;
+  const preservedProviderOptions =
+    snapshot.mode === "edit" ? snapshot.profile?.providerOptions : undefined;
   let entries: readonly ProviderSnapshotEntry[] = [];
   let catalogResolution: AgentProfileResolutionStatus = "idle";
   let resolvedFeatureKey: string | null = null;
@@ -499,7 +513,12 @@ export function openAgentProfileForm(snapshot: AgentProfileFormSnapshot): AgentP
       withOptions.provider.length > 0 &&
       !withOptions.isSubmitting;
     const resolved: AgentProfileFormState = { ...withOptions, disclosure, canSubmit };
-    return { ...resolved, submitValue: canSubmit ? buildSubmitValue(resolved) : null };
+    return {
+      ...resolved,
+      submitValue: canSubmit
+        ? buildSubmitValue(resolved, preservedProvider, preservedProviderOptions)
+        : null,
+    };
   }
 
   let state: AgentProfileFormState = derive(buildInitialState(snapshot));

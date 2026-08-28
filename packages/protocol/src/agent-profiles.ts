@@ -1,3 +1,4 @@
+import type { ProviderOptions } from "./agent-types.js";
 import type { AgentProfile } from "./messages.js";
 
 /**
@@ -11,6 +12,7 @@ export interface MaterializedAgentProfile {
   modeId: string;
   thinkingOptionId: string;
   featureValues: Record<string, unknown>;
+  providerOptions: ProviderOptions;
 }
 
 function trimmed(value: string | undefined): string {
@@ -39,5 +41,6 @@ export function materializeAgentProfile(profile: AgentProfile): MaterializedAgen
     modeId: trimmed(profile.modeId),
     thinkingOptionId: trimmed(profile.thinkingOptionId),
     featureValues: profile.featureValues ?? {},
+    providerOptions: profile.providerOptions ?? {},
   });
 }

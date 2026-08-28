@@ -27,11 +27,15 @@ interface SupportedMutableConfigPatch {
   enableTerminalAgentHooks?: boolean;
   appendSystemPrompt?: string;
   terminalProfiles?: MutableDaemonConfig["terminalProfiles"];
-  agentProfiles?: MutableDaemonConfig["agentProfiles"];
+  agentProfiles?: MutableDaemonConfigPatch["agentProfiles"];
   skills?: MutableDaemonConfig["skills"];
   pluginsEnabled?: boolean;
   plugins?: MutableDaemonConfig["plugins"];
 }
+
+type NormalizedSupportedMutableConfigPatch = Omit<SupportedMutableConfigPatch, "agentProfiles"> & {
+  agentProfiles?: MutableDaemonConfig["agentProfiles"];
+};
 
 interface LoggerLike {
   child(bindings: Record<string, unknown>): LoggerLike;
@@ -279,6 +283,73 @@ function pickSupportedPatchFields(patch: MutableDaemonConfigPatch): SupportedMut
   };
 }
 
+type AgentProfile = NonNullable<MutableDaemonConfig["agentProfiles"]>[number];
+type AgentProfilePatch = NonNullable<MutableDaemonConfigPatch["agentProfiles"]>[number];
+
+function countAgentProfileIds(
+  profiles: readonly (AgentProfile | AgentProfilePatch)[] | undefined,
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const profile of profiles ?? []) {
+    counts.set(profile.id, (counts.get(profile.id) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function normalizeAgentProfilePatch(
+  currentProfiles: readonly AgentProfile[] | undefined,
+  patchProfiles: readonly AgentProfilePatch[],
+): AgentProfile[] {
+  const currentIdCounts = countAgentProfileIds(currentProfiles);
+  const patchIdCounts = countAgentProfileIds(patchProfiles);
+  const currentById = new Map<string, AgentProfile>();
+  const currentIdsWithProviderOptions = new Set<string>();
+  for (const profile of currentProfiles ?? []) {
+    if (profile.providerOptions !== undefined) {
+      currentIdsWithProviderOptions.add(profile.id);
+    }
+    if (currentIdCounts.get(profile.id) === 1) {
+      currentById.set(profile.id, profile);
+    }
+  }
+
+  return patchProfiles.map((profile) => {
+    const { providerOptions, ...profileWithoutProviderOptions } = profile;
+    if (providerOptions === null) {
+      return profileWithoutProviderOptions;
+    }
+    if (providerOptions !== undefined) {
+      return { ...profileWithoutProviderOptions, providerOptions };
+    }
+
+    if (!currentIdsWithProviderOptions.has(profile.id)) {
+      return profileWithoutProviderOptions;
+    }
+    if (currentIdCounts.get(profile.id) !== 1 || patchIdCounts.get(profile.id) !== 1) {
+      throw new Error(
+        `Cannot preserve provider options for duplicate Agent Profile ID '${profile.id}'. Send providerOptions explicitly for every duplicate entry or remove the duplicate IDs.`,
+      );
+    }
+
+    const currentProfile = currentById.get(profile.id);
+    if (currentProfile?.providerOptions === undefined) {
+      return profileWithoutProviderOptions;
+    }
+    if (currentProfile.provider !== profile.provider) {
+      throw new Error(
+        `Cannot preserve provider options when Agent Profile '${profile.id}' changes provider from '${currentProfile.provider}' to '${profile.provider}'. Send providerOptions explicitly or clear them first.`,
+      );
+    }
+
+    // COMPAT(agentProfileProviderOptions): added in v0.6.2, remove after 2027-02-28
+    // once the supported app floor always includes providerOptions in full-list profile writes.
+    return {
+      ...profileWithoutProviderOptions,
+      providerOptions: currentProfile.providerOptions,
+    };
+  });
+}
+
 export function applyMutableProviderConfigToOverrides(
   baseOverrides: Record<string, ProviderOverride> | undefined,
   mutableProviders: MutableDaemonConfig["providers"] | undefined,
@@ -351,7 +422,15 @@ export class DaemonConfigStore {
         "Relay is controlled by a daemon launch override. Remove PASEO_RELAY_ENABLED or the relay CLI flag before changing it here.",
       );
     }
-    const { removeProviders = [], ...configPatch } = parsedPatch;
+    const { removeProviders = [], agentProfiles, ...configPatchWithoutAgentProfiles } = parsedPatch;
+    const configPatch: Omit<NormalizedSupportedMutableConfigPatch, "removeProviders"> = {
+      ...configPatchWithoutAgentProfiles,
+      ...(agentProfiles !== undefined
+        ? {
+            agentProfiles: normalizeAgentProfilePatch(this.current.agentProfiles, agentProfiles),
+          }
+        : {}),
+    };
     const removedProviders = Array.from(new Set(removeProviders));
     const merged = deepMerge(this.current, configPatch);
     if (parsedPatch.skills?.selection !== undefined) {
@@ -547,7 +626,7 @@ export class DaemonConfigStore {
   }
 
   private persistConfig(
-    patch: Omit<SupportedMutableConfigPatch, "removeProviders">,
+    patch: Omit<NormalizedSupportedMutableConfigPatch, "removeProviders">,
     removeProviders: readonly string[],
   ): { previous: PersistedConfig; knownNext: PersistedConfig } {
     const persisted = loadPersistedConfig(this.paseoHome, this.logger);
@@ -567,7 +646,7 @@ export class DaemonConfigStore {
 
 function mergeMutablePatchIntoPersistedConfig(params: {
   persisted: PersistedConfig;
-  patch: Omit<SupportedMutableConfigPatch, "removeProviders">;
+  patch: Omit<NormalizedSupportedMutableConfigPatch, "removeProviders">;
   removeProviders: readonly string[];
   persistRelayEnabled: boolean;
 }): PersistedConfig {
@@ -585,7 +664,7 @@ function mergeMutablePatchIntoPersistedConfig(params: {
 
 function mergeMutableAgentPatch(
   persistedAgents: PersistedConfig["agents"],
-  patch: Omit<SupportedMutableConfigPatch, "removeProviders">,
+  patch: Omit<NormalizedSupportedMutableConfigPatch, "removeProviders">,
   removeProviders: readonly string[],
 ): PersistedConfig["agents"] {
   if (
@@ -629,7 +708,7 @@ function mergeMutableAgentPatch(
 
 function mergeMutableDaemonPatch(
   persistedDaemon: PersistedConfig["daemon"],
-  patch: Omit<SupportedMutableConfigPatch, "removeProviders">,
+  patch: Omit<NormalizedSupportedMutableConfigPatch, "removeProviders">,
   persistRelayEnabled: boolean,
 ): PersistedConfig["daemon"] {
   const next = { ...persistedDaemon } as NonNullable<PersistedConfig["daemon"]>;
