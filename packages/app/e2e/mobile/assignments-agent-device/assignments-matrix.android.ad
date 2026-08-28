@@ -64,11 +64,13 @@ scroll down 0.8
 scroll down 0.8
 scroll down 0.8
 wait "text" "Planner output" 30000
+wait "text" "Synthetic plan approval resolved" 30000
 screenshot "${AD_ARTIFACTS}/assignment-run-artifact.png" --scale 1
 
 back
 wait "id=\"assignment-detail-${PRIMARY_SERVER_ID}-${PRIMARY_ASSIGNMENT_ID}\"" 30000
 scroll bottom
 wait "text" "Planner output" 30000
+wait "text" "Synthetic plan approval resolved" 30000
 screenshot "${AD_ARTIFACTS}/assignment-history-artifact.png" --scale 1
 close

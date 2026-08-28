@@ -288,6 +288,7 @@ test("mobile Assignments replays keep one cross-platform Artifact contract", () 
   assert.match(iosReplay, /team-run-status-waiting_for_permission/);
   assert.match(iosReplay, /permission-request-accept/);
   assert.match(iosReplay, /team-run-status-succeeded/);
+  assert.equal(iosReplay.match(/wait "text" "Synthetic plan approval resolved" 30000/g)?.length, 2);
   assert.match(iosReplay, /assignment-history-artifact\.png/);
 });
 
