@@ -8,6 +8,19 @@ export const TEAM_AGENT_PROFILE_ID_MAX_CHARS = 512;
 export const TEAM_MAX_ROLES = 12;
 export const TEAM_MAX_WORKFLOW_STEPS = 24;
 export const TEAM_OBJECTIVE_MAX_CHARS = 32_000;
+export const TEAM_SECURITY_SUMMARY_MAX_CHARS = 240;
+
+export const TeamSecurityFactDtoSchema = z.object({
+  status: z.enum(["enforced", "policy_only", "unavailable"]),
+  summary: z.string().min(1).max(TEAM_SECURITY_SUMMARY_MAX_CHARS),
+});
+
+export const TeamSecurityPostureDtoSchema = z.object({
+  source: z.object({ provider: z.string().min(1).max(128) }),
+  filesystemWrite: TeamSecurityFactDtoSchema,
+  networkAccess: TeamSecurityFactDtoSchema,
+  toolShell: TeamSecurityFactDtoSchema,
+});
 
 export const TeamResolvedLaunchDtoSchema = z.object({
   profileId: z.string(),
@@ -16,6 +29,7 @@ export const TeamResolvedLaunchDtoSchema = z.object({
   modeId: z.string().nullable(),
   thinkingOptionId: z.string().nullable(),
   featureValues: z.record(z.string(), z.unknown()),
+  securityPosture: TeamSecurityPostureDtoSchema.optional(),
 });
 
 export const TeamRoleDtoSchema = z.object({
@@ -238,6 +252,8 @@ export const TeamRunDtoSchema = z.object({
 });
 
 export type TeamResolvedLaunchDto = z.infer<typeof TeamResolvedLaunchDtoSchema>;
+export type TeamSecurityFactDto = z.infer<typeof TeamSecurityFactDtoSchema>;
+export type TeamSecurityPostureDto = z.infer<typeof TeamSecurityPostureDtoSchema>;
 export type TeamRoleDto = z.infer<typeof TeamRoleDtoSchema>;
 export type TeamWorkflowStepDto = z.infer<typeof TeamWorkflowStepDtoSchema>;
 export type TeamDefinitionInputDto = z.infer<typeof TeamDefinitionInputDtoSchema>;

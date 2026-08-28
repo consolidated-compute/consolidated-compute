@@ -8,6 +8,7 @@ import {
 } from "./messages.js";
 import {
   TeamDefinitionDtoSchema,
+  TeamResolvedLaunchDtoSchema,
   TeamRunDtoSchema,
   TeamRunStepDtoSchema,
   TeamRunStepSnapshotDtoSchema,
@@ -62,6 +63,25 @@ const run = {
           providerOptions: {
             sandbox_mode: "workspace-write",
             approval_policy: "on-request",
+            writable_root: "/private/path-sentinel",
+            proxy_url: "https://proxy-sentinel.invalid",
+            socket_path: "/private/socket-sentinel",
+            tls_key_path: "/private/tls-key-sentinel",
+          },
+          securityPosture: {
+            source: { provider: "codex" },
+            filesystemWrite: {
+              status: "policy_only" as const,
+              summary: "Codex applies a filesystem sandbox, but broader access may be approved.",
+            },
+            networkAccess: {
+              status: "unavailable" as const,
+              summary: "Codex network enforcement is not proved by the frozen launch.",
+            },
+            toolShell: {
+              status: "policy_only" as const,
+              summary: "Codex applies provider approval policy to tool and shell use.",
+            },
           },
         },
       },
@@ -111,9 +131,11 @@ describe("Team wire contracts", () => {
   });
 
   test("keeps raw frozen provider options server-side", () => {
-    expect(TeamRunDtoSchema.parse(run)).toEqual(publicRun);
-    expect(TeamRunDtoSchema.parse(run).steps[0]?.snapshot.resolvedLaunch).not.toHaveProperty(
-      "providerOptions",
+    const parsed = TeamRunDtoSchema.parse(run);
+    expect(parsed).toEqual(publicRun);
+    expect(parsed.steps[0]?.snapshot.resolvedLaunch).not.toHaveProperty("providerOptions");
+    expect(JSON.stringify(parsed)).not.toMatch(
+      /path-sentinel|proxy-sentinel|socket-sentinel|tls-key-sentinel/u,
     );
   });
 
@@ -164,17 +186,49 @@ describe("Team wire contracts", () => {
     };
     expect(TeamRunDtoSchema.parse(assignmentRun)).toEqual(publicAssignmentRun);
 
+    const LegacyResolvedLaunchSchema = TeamResolvedLaunchDtoSchema.omit({
+      securityPosture: true,
+    });
     const LegacyStepSnapshotSchema = TeamRunStepSnapshotDtoSchema.omit({
       inputArtifactIds: true,
       outputArtifact: true,
-    });
+    }).extend({ resolvedLaunch: LegacyResolvedLaunchSchema });
     const LegacyStepSchema = TeamRunStepDtoSchema.extend({ snapshot: LegacyStepSnapshotSchema });
     const LegacyRunSchema = TeamRunDtoSchema.omit({
       assignmentId: true,
       assignmentRevision: true,
       assignmentSnapshot: true,
     }).extend({ steps: z.array(LegacyStepSchema) });
-    expect(LegacyRunSchema.parse(assignmentRun)).toEqual(publicRun);
+    expect(LegacyRunSchema.parse(assignmentRun)).toEqual({
+      ...publicRun,
+      steps: [
+        {
+          ...publicRun.steps[0],
+          snapshot: {
+            ...publicRun.steps[0].snapshot,
+            resolvedLaunch: LegacyResolvedLaunchSchema.parse(publicResolvedLaunch),
+          },
+        },
+      ],
+    });
+  });
+
+  test("keeps security posture optional for historical Team Runs", () => {
+    const { securityPosture: _securityPosture, ...legacyResolvedLaunch } = publicResolvedLaunch;
+    const legacyRun = {
+      ...publicRun,
+      steps: [
+        {
+          ...publicRun.steps[0],
+          snapshot: {
+            ...publicRun.steps[0].snapshot,
+            resolvedLaunch: legacyResolvedLaunch,
+          },
+        },
+      ],
+    };
+
+    expect(TeamRunDtoSchema.parse(legacyRun)).toEqual(legacyRun);
   });
 
   test("requires Team updates to include at least one authored field", () => {
@@ -235,9 +289,9 @@ describe("Team wire contracts", () => {
       ServerInfoStatusPayloadSchema.parse({
         status: "server_info",
         serverId: "server_1",
-        features: { agentProfiles: true, teams: true },
+        features: { agentProfiles: true, teams: true, teamSecurity: true },
       }).features,
-    ).toEqual({ agentProfiles: true, teams: true });
+    ).toEqual({ agentProfiles: true, teams: true, teamSecurity: true });
   });
 
   test("lets a legacy server-info schema ignore the new Team capability", () => {
@@ -251,7 +305,7 @@ describe("Team wire contracts", () => {
       LegacyServerInfoSchema.parse({
         status: "server_info",
         serverId: "server_1",
-        features: { agentProfiles: true, teams: true },
+        features: { agentProfiles: true, teams: true, teamSecurity: true },
       }),
     ).toEqual({
       status: "server_info",

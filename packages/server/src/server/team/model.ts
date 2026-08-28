@@ -17,6 +17,7 @@ import {
   PersistedAssignmentIdSchema,
   PersistedAssignmentRecordSchema,
 } from "../assignment/model.js";
+import { ProviderSecurityPostureSchema } from "../agent/provider-security-posture.js";
 
 export {
   TEAM_AGENT_PROFILE_ID_MAX_CHARS,
@@ -63,8 +64,18 @@ export const PersistedTeamResolvedLaunchSchema = z
     thinkingOptionId: nonBlankStringSchema(TEAM_THINKING_OPTION_ID_MAX_CHARS).nullable(),
     featureValues: z.record(z.string(), z.json()),
     providerOptions: z.record(z.string(), z.json()).optional(),
+    securityPosture: ProviderSecurityPostureSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((launch, context) => {
+    if (launch.securityPosture && launch.securityPosture.source.provider !== launch.provider) {
+      context.addIssue({
+        code: "custom",
+        path: ["securityPosture", "source", "provider"],
+        message: "Security posture source must match the resolved launch provider",
+      });
+    }
+  });
 
 export const PersistedTeamRoleSchema = z
   .object({

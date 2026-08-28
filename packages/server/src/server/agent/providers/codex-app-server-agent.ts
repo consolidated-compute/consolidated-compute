@@ -109,6 +109,7 @@ import {
   CodexProviderOptionsSchema,
   type CodexProviderOptions,
 } from "./codex/options.js";
+import { CODEX_MODE_PRESETS, DEFAULT_CODEX_MODE_ID, type CodexModePreset } from "./codex/modes.js";
 
 function assertChildWithPipes(
   child: ChildProcess,
@@ -241,8 +242,6 @@ const CODEX_MODES: AgentMode[] = [
   },
 ];
 
-const DEFAULT_CODEX_MODE_ID = "auto";
-
 interface CodexAppServerClientLike {
   request(method: string, params?: unknown): Promise<unknown>;
   forkThread?(params: CodexThreadForkParams): Promise<CodexThreadForkResponse>;
@@ -268,32 +267,6 @@ interface CodexAppServerAgentDeps {
     prompt: AgentPromptInput,
   ) => Promise<{ commandName: string; args?: string } | null>;
 }
-
-interface CodexModePreset {
-  approvalPolicy: string;
-  sandbox: string;
-  approvalsReviewer?: "auto_review";
-}
-
-const MODE_PRESETS: Record<string, CodexModePreset> = {
-  "read-only": {
-    approvalPolicy: "on-request",
-    sandbox: "read-only",
-  },
-  auto: {
-    approvalPolicy: "on-request",
-    sandbox: "workspace-write",
-  },
-  "auto-review": {
-    approvalPolicy: "on-request",
-    sandbox: "workspace-write",
-    approvalsReviewer: "auto_review",
-  },
-  "full-access": {
-    approvalPolicy: "never",
-    sandbox: "danger-full-access",
-  },
-};
 
 function isAutoReviewReviewer(value: string | undefined): boolean {
   return value === "auto_review" || value === "guardian_subagent";
@@ -321,8 +294,8 @@ function shouldPromoteThreadResponseToAutoReview(params: {
 }
 
 function validateCodexMode(modeId: string): void {
-  if (!(modeId in MODE_PRESETS)) {
-    const validModes = Object.keys(MODE_PRESETS).join(", ");
+  if (!(modeId in CODEX_MODE_PRESETS)) {
+    const validModes = Object.keys(CODEX_MODE_PRESETS).join(", ");
     throw new Error(`Invalid Codex mode "${modeId}". Valid modes are: ${validModes}`);
   }
 }
@@ -3929,7 +3902,8 @@ export class CodexAppServerAgentSession implements AgentSession {
     hasCodexConfig: boolean;
   }> {
     const input = await this.buildUserInput(prompt);
-    const preset = MODE_PRESETS[this.currentMode] ?? MODE_PRESETS[DEFAULT_CODEX_MODE_ID];
+    const preset =
+      CODEX_MODE_PRESETS[this.currentMode] ?? CODEX_MODE_PRESETS[DEFAULT_CODEX_MODE_ID];
     const params: Record<string, unknown> = {
       threadId: this.currentThreadId,
       input,
@@ -4983,7 +4957,8 @@ export class CodexAppServerAgentSession implements AgentSession {
     approvalPolicy?: string;
     sandbox?: string;
   } {
-    const preset = MODE_PRESETS[this.currentMode] ?? MODE_PRESETS[DEFAULT_CODEX_MODE_ID];
+    const preset =
+      CODEX_MODE_PRESETS[this.currentMode] ?? CODEX_MODE_PRESETS[DEFAULT_CODEX_MODE_ID];
     const approvalPolicy = this.hasWorkflowModeOverride ? preset.approvalPolicy : undefined;
     const sandbox = this.hasWorkflowModeOverride ? preset.sandbox : undefined;
     const innerConfig = this.buildCodexInnerConfig();

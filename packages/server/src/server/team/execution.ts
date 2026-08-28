@@ -106,6 +106,7 @@ export type TeamProviderCatalog = Pick<
   | "listModels"
   | "resolveCreateConfig"
   | "validateAndNormalizeAgentConfiguration"
+  | "projectSecurityPosture"
 >;
 
 export interface TeamFeatureCatalog {
@@ -401,6 +402,12 @@ async function resolveRoleLaunch(input: {
     return null;
   }
 
+  const securityPosture = input.providerCatalog.projectSecurityPosture({
+    provider: input.materialized.provider,
+    modeId: resolvedModeId,
+    providerOptions,
+  });
+
   const parsed = PersistedTeamResolvedLaunchSchema.safeParse({
     profileId: input.role.profileId,
     provider: input.materialized.provider,
@@ -409,6 +416,7 @@ async function resolveRoleLaunch(input: {
     thinkingOptionId,
     featureValues: resolvedFeatureValues,
     providerOptions,
+    securityPosture,
   });
   if (!parsed.success) {
     input.issues.push({

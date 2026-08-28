@@ -49,8 +49,15 @@ import { TraeACPAgentClient } from "./providers/trae-acp-agent.js";
 import { MockLoadTestAgentClient } from "./providers/mock-load-test-agent.js";
 import { MockSlowProviderClient } from "./providers/mock-slow-provider.js";
 import { ClaudeProviderOptionsSchema } from "./providers/claude/options.js";
+import { projectClaudeSecurityPosture } from "./providers/claude/security-posture.js";
 import { CodexProviderOptionsSchema } from "./providers/codex/options.js";
+import { projectCodexSecurityPosture } from "./providers/codex/security-posture.js";
 import { OpenCodeProviderOptionsSchema } from "./providers/opencode/options.js";
+import {
+  projectUnavailableProviderSecurityPosture,
+  type ProviderSecurityPosture,
+  type ProviderSecurityPostureInput,
+} from "./provider-security-posture.js";
 import { ToolPolicyUnsupportedError, validateProviderOptions } from "./provider-options.js";
 import {
   AGENT_PROVIDER_DEFINITIONS,
@@ -87,6 +94,7 @@ export interface ProviderDefinition extends AgentProviderDefinition {
     config: AgentSessionConfig,
     toolPolicy: ToolPolicy | undefined,
   ) => AgentSessionConfig;
+  projectSecurityPosture: (input: ProviderSecurityPostureInput) => ProviderSecurityPosture;
   createClient: (logger: Logger) => AgentClient;
   resolveCreateConfig: (input: ResolveAgentCreateConfigInput) => ResolveAgentCreateConfigResult;
   isCreateConfigUnattended: (input: AgentCreateConfigUnattendedInput) => boolean;
@@ -602,6 +610,12 @@ function createRegistryEntry(
     });
 
   const hasStaticModes = resolved.definition.modes.length > 0;
+  let projectSecurityPosture = projectUnavailableProviderSecurityPosture;
+  if (resolved.derivedFromProviderId === null && provider === "codex") {
+    projectSecurityPosture = projectCodexSecurityPosture;
+  } else if (resolved.derivedFromProviderId === null && provider === "claude") {
+    projectSecurityPosture = projectClaudeSecurityPosture;
+  }
 
   return {
     ...resolved.definition,
@@ -623,6 +637,7 @@ function createRegistryEntry(
           : undefined,
       };
     },
+    projectSecurityPosture,
     createClient: (providerLogger: Logger) =>
       createResolvedProviderClient(providerLogger, provider, resolved),
     resolveCreateConfig: modelClient.resolveCreateConfig ?? resolveDefaultAgentCreateConfig,

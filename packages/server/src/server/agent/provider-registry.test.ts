@@ -651,6 +651,35 @@ test("new provider extending claude appears in registry", () => {
   expect(registry.zai.createClient(logger).provider).toBe("zai");
 });
 
+test("derived providers do not inherit built-in security posture claims", () => {
+  const registry = buildProviderRegistry(logger, {
+    providerOverrides: {
+      zai: {
+        extends: "claude",
+        label: "ZAI",
+      },
+      "codex-custom": {
+        extends: "codex",
+        label: "Custom Codex",
+      },
+    },
+  });
+
+  for (const provider of ["zai", "codex-custom"]) {
+    const posture = registry[provider].projectSecurityPosture({
+      provider,
+      modeId: "auto",
+      providerOptions: {},
+    });
+    expect(posture.source.provider).toBe(provider);
+    expect([
+      posture.filesystemWrite.status,
+      posture.networkAccess.status,
+      posture.toolShell.status,
+    ]).toEqual(["unavailable", "unavailable", "unavailable"]);
+  }
+});
+
 test("built-in OMP override keeps the real OMP adapter enabled and launchable", async () => {
   const omp = new FakeOmp(["custom-omp"]);
   const registry = buildProviderRegistry(logger, {

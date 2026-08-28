@@ -45,6 +45,10 @@ import {
   type NormalizedAgentConfigurationValidation,
   validateAndNormalizeAgentConfigurationAgainstProvider,
 } from "./agent-configuration-validator.js";
+import type {
+  ProviderSecurityPosture,
+  ProviderSecurityPostureInput,
+} from "./provider-security-posture.js";
 
 const DEFAULT_REFRESH_TIMEOUT_MS = 120_000;
 const MAX_REFRESH_TIMEOUT_MS = 2_147_483_647;
@@ -408,6 +412,10 @@ export class ProviderSnapshotManager {
       provider,
       validateOptions: definition.validateOptions,
     });
+  }
+
+  projectSecurityPosture(input: ProviderSecurityPostureInput): ProviderSecurityPosture {
+    return this.requireProvider(input.provider).projectSecurityPosture(input);
   }
 
   async listModels(input: ProviderSnapshotProviderOptions): Promise<AgentModelDefinition[]> {
