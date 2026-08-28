@@ -328,6 +328,13 @@ describe("Team Run contract", () => {
     expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
   });
 
+  test("keeps legacy resolved launches without provider options readable", () => {
+    const run = createRun();
+    for (const step of run.steps) delete step.snapshot.resolvedLaunch.providerOptions;
+
+    expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
+  });
+
   test("allows cancellation while a planned agent is still being created", () => {
     const run = createRun();
     run.steps[0]!.state = {

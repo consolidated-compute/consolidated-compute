@@ -102,7 +102,10 @@ export interface TeamWorkspaceStore {
 
 export type TeamProviderCatalog = Pick<
   ProviderSnapshotManager,
-  "refreshSnapshotForCwd" | "listModels" | "resolveCreateConfig" | "validateAgentConfiguration"
+  | "refreshSnapshotForCwd"
+  | "listModels"
+  | "resolveCreateConfig"
+  | "validateAndNormalizeAgentConfiguration"
 >;
 
 export interface TeamFeatureCatalog {
@@ -361,21 +364,21 @@ async function resolveRoleLaunch(input: {
 
   const resolvedModeId = resolvedCreateConfig.modeId ?? null;
   const resolvedFeatureValues = resolvedCreateConfig.featureValues ?? {};
-  if (
-    !(await validateLaunchConfiguration({
-      providerCatalog: input.providerCatalog,
-      cwd: input.cwd,
-      provider: input.materialized.provider,
-      model: model.model,
-      modeId: resolvedModeId,
-      thinkingOptionId,
-      providerOptions: input.materialized.providerOptions,
-      issueInput: input,
-      issues: input.issues,
-    }))
-  ) {
+  const launchValidation = await validateLaunchConfiguration({
+    providerCatalog: input.providerCatalog,
+    cwd: input.cwd,
+    provider: input.materialized.provider,
+    model: model.model,
+    modeId: resolvedModeId,
+    thinkingOptionId,
+    providerOptions: input.materialized.providerOptions,
+    issueInput: input,
+    issues: input.issues,
+  });
+  if (launchValidation.status === "invalid") {
     return null;
   }
+  const providerOptions = launchValidation.providerOptions;
   if (
     !(await validateFeatureValues({
       featureCatalog: input.featureCatalog,
@@ -388,9 +391,7 @@ async function resolveRoleLaunch(input: {
         ...(Object.keys(resolvedFeatureValues).length > 0
           ? { featureValues: resolvedFeatureValues }
           : {}),
-        ...(Object.keys(input.materialized.providerOptions).length > 0
-          ? { providerOptions: input.materialized.providerOptions }
-          : {}),
+        ...(nonEmptyProviderOptions(providerOptions) ? { providerOptions } : {}),
       },
       issueInput: input,
       model: model.model,
@@ -407,7 +408,7 @@ async function resolveRoleLaunch(input: {
     modeId: resolvedModeId,
     thinkingOptionId,
     featureValues: resolvedFeatureValues,
-    providerOptions: input.materialized.providerOptions,
+    providerOptions,
   });
   if (!parsed.success) {
     input.issues.push({
@@ -451,6 +452,10 @@ function nonEmptyProviderOptions(
   return providerOptions && Object.keys(providerOptions).length > 0 ? providerOptions : undefined;
 }
 
+type LaunchConfigurationValidation =
+  | { status: "valid"; providerOptions: AgentSessionConfig["providerOptions"] }
+  | { status: "invalid" };
+
 async function validateLaunchConfiguration(input: {
   providerCatalog: TeamProviderCatalog;
   cwd: string;
@@ -464,19 +469,17 @@ async function validateLaunchConfiguration(input: {
     materialized: { provider: string };
   };
   issues: TeamExecutionPreflightIssue[];
-}): Promise<boolean> {
+}): Promise<LaunchConfigurationValidation> {
   try {
-    const validationIssues = await input.providerCatalog.validateAgentConfiguration({
+    const validation = await input.providerCatalog.validateAndNormalizeAgentConfiguration({
       cwd: input.cwd,
       provider: input.provider,
       ...(input.model ? { model: input.model } : {}),
       ...(input.modeId ? { modeId: input.modeId } : {}),
       ...(input.thinkingOptionId ? { thinkingOptionId: input.thinkingOptionId } : {}),
-      ...(nonEmptyProviderOptions(input.providerOptions)
-        ? { providerOptions: input.providerOptions }
-        : {}),
+      ...(input.providerOptions === undefined ? {} : { providerOptions: input.providerOptions }),
     });
-    for (const issue of validationIssues) {
+    for (const issue of validation.issues) {
       const path = issue.path.join(".");
       input.issues.push(
         launchIssue(
@@ -486,10 +489,12 @@ async function validateLaunchConfiguration(input: {
         ),
       );
     }
-    return validationIssues.length === 0;
+    return validation.issues.length === 0
+      ? { status: "valid", providerOptions: validation.providerOptions }
+      : { status: "invalid" };
   } catch (error) {
     input.issues.push(launchIssue(input.issueInput, input.model, errorMessage(error)));
-    return false;
+    return { status: "invalid" };
   }
 }
 
@@ -797,19 +802,28 @@ async function validateResolvedLaunch(
     return;
   }
 
-  if (
-    !(await validateLaunchConfiguration({
-      providerCatalog,
-      cwd,
-      provider,
-      model,
-      modeId: launch.modeId,
-      thinkingOptionId: launch.thinkingOptionId,
-      providerOptions: launch.providerOptions,
-      issueInput,
-      issues,
-    }))
-  ) {
+  const launchValidation = await validateLaunchConfiguration({
+    providerCatalog,
+    cwd,
+    provider,
+    model,
+    modeId: launch.modeId,
+    thinkingOptionId: launch.thinkingOptionId,
+    providerOptions: launch.providerOptions,
+    issueInput,
+    issues,
+  });
+  if (launchValidation.status === "invalid") {
+    return;
+  }
+  if (!equal(launchValidation.providerOptions, launch.providerOptions)) {
+    issues.push(
+      launchIssue(
+        issueInput,
+        model,
+        `Provider '${provider}' now normalizes the frozen provider options differently`,
+      ),
+    );
     return;
   }
 

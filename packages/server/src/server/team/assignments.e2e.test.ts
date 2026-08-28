@@ -172,7 +172,6 @@ test("freezes a three-role Assignment run and hands forward only declared Artifa
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: {},
-        providerOptions: {},
       },
       {
         profileId: "codex-builder",
@@ -181,7 +180,6 @@ test("freezes a three-role Assignment run and hands forward only declared Artifa
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: { test_feature: true },
-        providerOptions: {},
       },
       {
         profileId: "security-review",
@@ -190,8 +188,13 @@ test("freezes a three-role Assignment run and hands forward only declared Artifa
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: {},
-        providerOptions: {},
       },
+    ]);
+    const persisted = await daemon.daemon.teamRepository.getRun(started.id);
+    expect(persisted?.steps.map((step) => step.snapshot.resolvedLaunch.providerOptions)).toEqual([
+      {},
+      {},
+      {},
     ]);
 
     const artifactsByStep = new Map(
