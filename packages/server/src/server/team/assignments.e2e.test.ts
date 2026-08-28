@@ -123,7 +123,7 @@ test("freezes a three-role Assignment run and hands forward only declared Artifa
       ],
     });
     const originalObjective = "Prove exact Plan to Implement to Review Artifact handoffs.";
-    const workItemBodySentinel = "UNTRUSTED_WORK_ITEM_BODY_MUST_NOT_APPEAR";
+    const workItemDisplaySentinel = "UNTRUSTED_WORK_ITEM_DISPLAY_MUST_NOT_APPEAR";
     const { assignment } = await client.createAssignment({
       title: "Three-role Artifact contract",
       objective: originalObjective,
@@ -133,7 +133,7 @@ test("freezes a three-role Assignment run and hands forward only declared Artifa
         resourceType: "issue",
         resourceId: "consolidated-compute#72",
         identifier: "#72",
-        title: "Assignments: prove the three-role Artifact contract",
+        title: workItemDisplaySentinel,
         url: "https://github.com/consolidated-compute/consolidated-compute/issues/72",
       },
     });
@@ -163,6 +163,7 @@ test("freezes a three-role Assignment run and hands forward only declared Artifa
       assignmentRevision: assignment.revision,
       assignmentSnapshot: assignment,
     });
+    expect(completed.assignmentSnapshot?.workItem?.title).toBe(workItemDisplaySentinel);
     expect(completed.steps.map((step) => step.snapshot.resolvedLaunch)).toEqual([
       {
         profileId: "architect",
@@ -246,7 +247,7 @@ test("freezes a three-role Assignment run and hands forward only declared Artifa
     for (const prompt of [planPrompt, implementPrompt, reviewPrompt]) {
       expect(prompt).toContain(`## Objective\n${originalObjective}`);
       expect(prompt).not.toContain("Previous step final response");
-      expect(prompt).not.toContain(workItemBodySentinel);
+      expect(prompt).not.toContain(workItemDisplaySentinel);
     }
     expect(planPrompt).not.toContain("## Input Artifacts");
     expect(implementPrompt).toContain(`ID: ${planArtifact.id}`);
