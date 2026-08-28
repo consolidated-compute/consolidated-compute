@@ -62,6 +62,13 @@ export const AssignmentArtifactDtoSchema = z.object({
   createdAt: z.string(),
 });
 
+export const AssignmentCollectionIssueDtoSchema = z.object({
+  collection: z.enum(["records", "artifacts"]),
+  fileName: z.string(),
+  kind: z.enum(["unknown_file", "invalid_record"]),
+  message: z.string(),
+});
+
 export type AssignmentWorkItemReferenceDto = z.infer<typeof AssignmentWorkItemReferenceDtoSchema>;
 export type AssignmentStateDto = z.infer<typeof AssignmentStateDtoSchema>;
 export type AssignmentInputDto = z.infer<typeof AssignmentInputDtoSchema>;
@@ -69,3 +76,4 @@ export type AssignmentPatchDto = z.infer<typeof AssignmentPatchDtoSchema>;
 export type AssignmentDto = z.infer<typeof AssignmentDtoSchema>;
 export type AssignmentArtifactProducerDto = z.infer<typeof AssignmentArtifactProducerDtoSchema>;
 export type AssignmentArtifactDto = z.infer<typeof AssignmentArtifactDtoSchema>;
+export type AssignmentCollectionIssueDto = z.infer<typeof AssignmentCollectionIssueDtoSchema>;

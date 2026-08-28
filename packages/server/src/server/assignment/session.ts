@@ -10,11 +10,14 @@ import { toTeamRunDto } from "../team/wire.js";
 import type {
   AssignmentPatch,
   AssignmentRepository,
-  AssignmentRepositoryFileIssue,
   ListAssignmentArtifactsInput,
 } from "./repository.js";
-import { AssignmentNotFoundError, AssignmentStorageCorruptError } from "./repository.js";
-import { toAssignmentArtifactDto, toAssignmentDto } from "./wire.js";
+import { AssignmentNotFoundError } from "./repository.js";
+import {
+  toAssignmentArtifactDto,
+  toAssignmentCollectionIssueDto,
+  toAssignmentDto,
+} from "./wire.js";
 
 export interface AssignmentSessionRepository {
   createAssignment(
@@ -91,12 +94,12 @@ export class AssignmentSession {
       case "assignment.list.request":
         return this.respond(message, async () => {
           const result = await this.repository.listAssignments();
-          requireHealthyAssignmentCollection(result.issues);
           return {
             type: "assignment.list.response",
             payload: {
               requestId: message.requestId,
               assignments: result.assignments.map(toAssignmentDto),
+              issues: result.issues.map(toAssignmentCollectionIssueDto),
             },
           };
         });
@@ -165,13 +168,13 @@ export class AssignmentSession {
             ...(message.cursor !== undefined ? { cursor: message.cursor } : {}),
             ...(message.limit !== undefined ? { limit: message.limit } : {}),
           });
-          requireHealthyAssignmentCollection(result.issues);
           return {
             type: "assignment.artifact.list.response",
             payload: {
               requestId: message.requestId,
               artifacts: result.artifacts.map(toAssignmentArtifactDto),
               nextCursor: result.nextCursor,
+              issues: result.issues.map(toAssignmentCollectionIssueDto),
             },
           };
         });
@@ -216,11 +219,6 @@ export class AssignmentSession {
       });
     }
   }
-}
-
-function requireHealthyAssignmentCollection(issues: AssignmentRepositoryFileIssue[]): void {
-  const invalidRecords = issues.filter((issue) => issue.kind === "invalid_record");
-  if (invalidRecords.length > 0) throw new AssignmentStorageCorruptError(invalidRecords);
 }
 
 function toAssignmentRpcError(error: unknown): AssignmentRpcError {

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   AssignmentArtifactDtoSchema,
+  AssignmentCollectionIssueDtoSchema,
   AssignmentDtoSchema,
   AssignmentInputDtoSchema,
   AssignmentPatchDtoSchema,
@@ -107,7 +108,11 @@ export const AssignmentCancelResponseSchema = assignmentPayload("assignment.canc
 
 export const AssignmentListResponseSchema = z.object({
   type: z.literal("assignment.list.response"),
-  payload: z.object({ requestId: z.string(), assignments: z.array(AssignmentDtoSchema) }),
+  payload: z.object({
+    requestId: z.string(),
+    assignments: z.array(AssignmentDtoSchema),
+    issues: z.array(AssignmentCollectionIssueDtoSchema).optional(),
+  }),
 });
 
 export const AssignmentArtifactGetResponseSchema = z.object({
@@ -121,6 +126,7 @@ export const AssignmentArtifactListResponseSchema = z.object({
     requestId: z.string(),
     artifacts: z.array(AssignmentArtifactDtoSchema),
     nextCursor: z.string().nullable(),
+    issues: z.array(AssignmentCollectionIssueDtoSchema).optional(),
   }),
 });
 

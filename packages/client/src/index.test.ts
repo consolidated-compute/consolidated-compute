@@ -377,11 +377,20 @@ test("Assignment SDK exposes durable intent, artifacts, and Assignment-backed ru
         requestId: artifactsRequest.requestId,
         artifacts: [assignmentArtifact],
         nextCursor: null,
+        issues: [
+          {
+            collection: "artifacts",
+            fileName: "broken.json",
+            kind: "invalid_record",
+            message: "Invalid record",
+          },
+        ],
       },
     }),
   );
   await expect(artifactsPromise).resolves.toMatchObject({
     artifacts: [{ id: assignmentArtifact.id, content: assignmentArtifact.content }],
+    issues: [{ fileName: "broken.json", kind: "invalid_record" }],
   });
 
   const startPromise = client.assignments.runs.start({

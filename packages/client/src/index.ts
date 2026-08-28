@@ -44,7 +44,11 @@ import type {
   TeamDefinitionInputDto,
   TeamRunDto,
 } from "@getpaseo/protocol/team/types";
-import type { AssignmentArtifactDto, AssignmentDto } from "@getpaseo/protocol/assignment/types";
+import type {
+  AssignmentArtifactDto,
+  AssignmentCollectionIssueDto,
+  AssignmentDto,
+} from "@getpaseo/protocol/assignment/types";
 
 /**
  * Coding turns routinely run for minutes, so the handle waits far longer than
@@ -399,6 +403,7 @@ export interface PaseoTeamActions {
 
 export type PaseoAssignment = AssignmentDto;
 export type PaseoAssignmentArtifact = AssignmentArtifactDto;
+export type PaseoAssignmentCollectionIssue = AssignmentCollectionIssueDto;
 export type PaseoAssignmentCreateOptions = CreateAssignmentInput;
 export type PaseoAssignmentPatchOptions = PatchAssignmentInput;
 export type PaseoAssignmentTransitionOptions = TransitionAssignmentInput;
@@ -409,7 +414,11 @@ export interface PaseoAssignmentActions {
   create(
     options: PaseoAssignmentCreateOptions,
   ): Promise<{ requestId: string; assignment: PaseoAssignment }>;
-  list(requestId?: string): Promise<{ requestId: string; assignments: PaseoAssignment[] }>;
+  list(requestId?: string): Promise<{
+    requestId: string;
+    assignments: PaseoAssignment[];
+    issues?: PaseoAssignmentCollectionIssue[];
+  }>;
   get(
     assignmentId: string,
     requestId?: string,
@@ -432,6 +441,7 @@ export interface PaseoAssignmentActions {
       requestId: string;
       artifacts: PaseoAssignmentArtifact[];
       nextCursor: string | null;
+      issues?: PaseoAssignmentCollectionIssue[];
     }>;
   };
   readonly runs: {

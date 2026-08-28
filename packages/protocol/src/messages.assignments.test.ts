@@ -111,9 +111,25 @@ describe("Assignment wire contracts", () => {
     expect(
       SessionOutboundMessageSchema.parse({
         type: "assignment.list.response",
-        payload: { requestId: "request_list", assignments: [assignment] },
+        payload: {
+          requestId: "request_list",
+          assignments: [assignment],
+          issues: [
+            {
+              collection: "records",
+              fileName: "broken.json",
+              kind: "invalid_record",
+              message: "Invalid record",
+            },
+          ],
+        },
       }),
-    ).toMatchObject({ payload: { assignments: [{ id: assignment.id }] } });
+    ).toMatchObject({
+      payload: {
+        assignments: [{ id: assignment.id }],
+        issues: [{ fileName: "broken.json", kind: "invalid_record" }],
+      },
+    });
     expect(
       SessionOutboundMessageSchema.parse({
         type: "assignment.artifact.list.response",

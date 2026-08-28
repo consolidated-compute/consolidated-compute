@@ -200,7 +200,22 @@ describe("AssignmentSession", () => {
   });
 
   test("lists and gets immutable Artifact projections", async () => {
-    const harness = createHarness();
+    const harness = createHarness({
+      repository: createRepository({
+        listArtifacts: vi.fn(async () => ({
+          artifacts: [createArtifact()],
+          nextCursor: null,
+          issues: [
+            {
+              collection: "artifacts",
+              fileName: "broken.json",
+              kind: "invalid_record",
+              message: "Invalid record",
+            },
+          ],
+        })),
+      }),
+    });
     await harness.session.dispatch(
       SessionInboundMessageSchema.parse({
         type: "assignment.artifact.get.request",
@@ -225,7 +240,11 @@ describe("AssignmentSession", () => {
       { type: "assignment.artifact.get.response", payload: { artifact: { content: "Done" } } },
       {
         type: "assignment.artifact.list.response",
-        payload: { artifacts: [{ id: "aart_0123456789abcdef" }], nextCursor: null },
+        payload: {
+          artifacts: [{ id: "aart_0123456789abcdef" }],
+          nextCursor: null,
+          issues: [{ fileName: "broken.json", kind: "invalid_record" }],
+        },
       },
     ]);
   });
@@ -258,7 +277,7 @@ describe("AssignmentSession", () => {
     ]);
   });
 
-  test("maps lifecycle and corrupt-list failures to stable RPC errors", async () => {
+  test("maps lifecycle failures and preserves healthy records beside corrupt siblings", async () => {
     const invalidIssue: AssignmentRepositoryFileIssue = {
       collection: "records",
       fileName: "broken.json",
@@ -270,7 +289,10 @@ describe("AssignmentSession", () => {
         patchAssignment: vi.fn(async () => {
           throw new AssignmentRevisionConflictError("asgn_0123456789abcdef", 1, 2);
         }),
-        listAssignments: vi.fn(async () => ({ assignments: [], issues: [invalidIssue] })),
+        listAssignments: vi.fn(async () => ({
+          assignments: [createAssignment()],
+          issues: [invalidIssue],
+        })),
       }),
     });
 
@@ -292,7 +314,13 @@ describe("AssignmentSession", () => {
 
     expect(harness.messages).toMatchObject([
       { type: "rpc_error", payload: { code: "assignment_revision_conflict" } },
-      { type: "rpc_error", payload: { code: "assignment_storage_corrupt" } },
+      {
+        type: "assignment.list.response",
+        payload: {
+          assignments: [{ id: "asgn_0123456789abcdef" }],
+          issues: [{ fileName: "broken.json", kind: "invalid_record" }],
+        },
+      },
     ]);
   });
 });
