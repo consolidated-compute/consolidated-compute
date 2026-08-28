@@ -16,6 +16,8 @@ export const TEAM_RPC_ERROR_CODES = [
   "team_revision_conflict",
   "team_has_active_run",
   "team_workspace_has_active_run",
+  "team_assignment_has_active_run",
+  "team_run_idempotency_conflict",
   "invalid_team_run_page",
   "invalid_team_repository_id",
   "team_storage_corrupt",

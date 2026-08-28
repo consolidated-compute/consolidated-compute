@@ -1179,6 +1179,72 @@ test("keeps Team run admission pending beyond the default session RPC deadline",
   await expect(responsePromise).rejects.toThrow("Admission response received");
 });
 
+test("keeps Assignment-backed Team run admission pending beyond the default deadline", async () => {
+  useHeartbeatClock();
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_assignment_run_admission_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen({ features: { assignments: true } });
+  await connectPromise;
+
+  const responsePromise = client.startAssignmentTeamRun({
+    teamId: "team-1",
+    expectedRevision: 1,
+    idempotencyKey: "retry-assignment-1",
+    assignmentId: "asgn_0123456789abcdef",
+    expectedAssignmentRevision: 2,
+    workspaceId: "workspace-1",
+    requestId: "req-assignment-run-1",
+  });
+  let settled = false;
+  void responsePromise.then(
+    () => {
+      settled = true;
+      return undefined;
+    },
+    () => {
+      settled = true;
+      return undefined;
+    },
+  );
+
+  expect(parseSentFrame(mock.sent[0])).toEqual({
+    type: "assignment.team_run.start.request",
+    teamId: "team-1",
+    expectedRevision: 1,
+    idempotencyKey: "retry-assignment-1",
+    assignmentId: "asgn_0123456789abcdef",
+    expectedAssignmentRevision: 2,
+    workspaceId: "workspace-1",
+    requestId: "req-assignment-run-1",
+  });
+
+  await vi.advanceTimersByTimeAsync(5 * 60_000);
+  expect(settled).toBe(false);
+
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "rpc_error",
+      payload: {
+        requestId: "req-assignment-run-1",
+        requestType: "assignment.team_run.start.request",
+        error: "Admission response received",
+      },
+    }),
+  );
+  await expect(responsePromise).rejects.toThrow("Admission response received");
+});
+
 test("honors explicit fetchAgent timeout below the session RPC default", async () => {
   useHeartbeatClock();
   const logger = createMockLogger();

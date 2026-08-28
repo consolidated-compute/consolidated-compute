@@ -78,6 +78,26 @@ import {
   TeamUpdateRequestSchema,
   TeamUpdateResponseSchema,
 } from "./team/rpc-schemas.js";
+import {
+  AssignmentArtifactGetRequestSchema,
+  AssignmentArtifactGetResponseSchema,
+  AssignmentArtifactListRequestSchema,
+  AssignmentArtifactListResponseSchema,
+  AssignmentCancelRequestSchema,
+  AssignmentCancelResponseSchema,
+  AssignmentCompleteRequestSchema,
+  AssignmentCompleteResponseSchema,
+  AssignmentCreateRequestSchema,
+  AssignmentCreateResponseSchema,
+  AssignmentGetRequestSchema,
+  AssignmentGetResponseSchema,
+  AssignmentListRequestSchema,
+  AssignmentListResponseSchema,
+  AssignmentPatchRequestSchema,
+  AssignmentPatchResponseSchema,
+  AssignmentTeamRunStartRequestSchema,
+  AssignmentTeamRunStartResponseSchema,
+} from "./assignment/rpc-schemas.js";
 import { BrowserAutomationHostCapabilitySchema } from "./browser-automation/capabilities.js";
 import {
   PaseoConfigRawSchema,
@@ -3002,6 +3022,15 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   TeamRunListRequestSchema,
   TeamRunGetRequestSchema,
   TeamRunCancelRequestSchema,
+  AssignmentCreateRequestSchema,
+  AssignmentListRequestSchema,
+  AssignmentGetRequestSchema,
+  AssignmentPatchRequestSchema,
+  AssignmentCompleteRequestSchema,
+  AssignmentCancelRequestSchema,
+  AssignmentArtifactGetRequestSchema,
+  AssignmentArtifactListRequestSchema,
+  AssignmentTeamRunStartRequestSchema,
   SetVoiceModeMessageSchema,
   SendAgentMessageRequestSchema,
   WaitForFinishRequestSchema,
@@ -3459,6 +3488,8 @@ export const ServerInfoStatusPayloadSchema = z
         agentProfiles: z.boolean().optional(),
         // COMPAT(teams): added in v0.6.0, remove gate after 2027-02-26.
         teams: z.boolean().optional(),
+        // COMPAT(assignments): added in v0.6.x, remove gate after 2027-02-27.
+        assignments: z.boolean().optional(),
         // COMPAT(agentConfigApply): added in v0.3.2, remove gate after 2027-02-11.
         agentConfigApply: z.boolean().optional(),
       })
@@ -6320,6 +6351,15 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   TeamRunListResponseSchema,
   TeamRunGetResponseSchema,
   TeamRunCancelResponseSchema,
+  AssignmentCreateResponseSchema,
+  AssignmentListResponseSchema,
+  AssignmentGetResponseSchema,
+  AssignmentPatchResponseSchema,
+  AssignmentCompleteResponseSchema,
+  AssignmentCancelResponseSchema,
+  AssignmentArtifactGetResponseSchema,
+  AssignmentArtifactListResponseSchema,
+  AssignmentTeamRunStartResponseSchema,
   WaitForFinishResponseMessageSchema,
   AgentPermissionRequestMessageSchema,
   AgentPermissionResolvedMessageSchema,

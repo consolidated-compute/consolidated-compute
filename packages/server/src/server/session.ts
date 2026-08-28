@@ -79,6 +79,8 @@ import {
 import type { TeamRepository } from "./team/repository.js";
 import type { TeamRunService } from "./team/service.js";
 import { TeamSession } from "./team/session.js";
+import type { AssignmentRepository } from "./assignment/repository.js";
+import { AssignmentSession } from "./assignment/session.js";
 
 import { AgentManager, AgentRunCancellationError } from "./agent/agent-manager.js";
 import { buildTimelinePromptIndex } from "./agent/timeline-prompt-index.js";
@@ -460,6 +462,7 @@ export interface SessionOptions {
   workspaceLabelService?: WorkspaceLabelService;
   teamRepository?: TeamRepository;
   teamRunService?: TeamRunService;
+  assignmentRepository?: AssignmentRepository;
   filesystem?: SessionFileSystem;
   scheduleService: ScheduleService;
   checkoutDiffManager: CheckoutDiffManager;
@@ -641,6 +644,15 @@ function resolveTeamSession(
   return new TeamSession({ repository, runService, emit });
 }
 
+function resolveAssignmentSession(
+  repository: AssignmentRepository | undefined,
+  runService: TeamRunService | undefined,
+  emit: (message: SessionOutboundMessage) => void,
+): AssignmentSession | null {
+  if (!repository || !runService) return null;
+  return new AssignmentSession({ repository, runService, emit });
+}
+
 function workspaceLabelErrorCode(error: unknown): string {
   if (
     error instanceof WorkspaceLabelError ||
@@ -709,6 +721,7 @@ export class Session {
   private workspaceUpdatesSubscription: WorkspaceUpdatesSubscriptionState | null = null;
   private readonly workspaceLabelService: WorkspaceLabelService | null;
   private readonly teamSession: TeamSession | null;
+  private readonly assignmentSession: AssignmentSession | null;
   private workspaceLabelSubscription: {
     owner: object;
     id: string;
@@ -778,6 +791,7 @@ export class Session {
       workspaceLabelService,
       teamRepository,
       teamRunService,
+      assignmentRepository,
       filesystem,
       scheduleService,
       checkoutDiffManager,
@@ -853,6 +867,11 @@ export class Session {
     this.workspaceLabelService = resolveWorkspaceLabelService(workspaceLabelService);
     this.teamSession = resolveTeamSession(teamRepository, teamRunService, (message) =>
       this.emit(message),
+    );
+    this.assignmentSession = resolveAssignmentSession(
+      assignmentRepository,
+      teamRunService,
+      (message) => this.emit(message),
     );
     this.filesystem = filesystem ?? nodeSessionFileSystem;
     this.github = github ?? createGitHubService();
@@ -1950,9 +1969,29 @@ export class Session {
   private dispatchWorkspaceSupportMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     return (
       this.dispatchWorkspaceRecoveryMessage(msg) ??
+      this.dispatchAssignmentMessage(msg) ??
       this.dispatchTeamMessage(msg) ??
       this.dispatchWorkspaceLabelMessage(msg)
     );
+  }
+
+  private dispatchAssignmentMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    if (!msg.type.startsWith("assignment.")) return undefined;
+    const dispatched = this.assignmentSession?.dispatch(msg);
+    if (dispatched) return dispatched;
+    const requestId = sessionRequestId(msg);
+    if (requestId) {
+      this.emit({
+        type: "rpc_error",
+        payload: {
+          requestId,
+          requestType: msg.type,
+          error: "Update the host to use Assignments.",
+          code: "assignments_unsupported",
+        },
+      });
+    }
+    return Promise.resolve();
   }
 
   private dispatchTeamMessage(msg: SessionInboundMessage): Promise<void> | undefined {

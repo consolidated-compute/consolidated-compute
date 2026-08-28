@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AssignmentDtoSchema } from "../assignment/types.js";
 
 export const TEAM_NAME_MAX_CHARS = 120;
 export const TEAM_ROLE_NAME_MAX_CHARS = 80;
@@ -71,6 +72,15 @@ export const TeamRunStepSnapshotDtoSchema = z.object({
   roleInstructions: z.string(),
   stepInstructions: z.string().nullable(),
   resolvedLaunch: TeamResolvedLaunchDtoSchema,
+  inputArtifactIds: z.array(z.string()).optional(),
+  outputArtifact: z
+    .object({
+      id: z.string(),
+      kind: z.literal("team_step_output"),
+      title: z.string(),
+      mediaType: z.literal("text/markdown"),
+    })
+    .optional(),
 });
 
 const PendingStepStateDtoSchema = z.object({ status: z.literal("pending") });
@@ -217,6 +227,9 @@ export const TeamRunDtoSchema = z.object({
   idempotencyKey: z.string(),
   teamSnapshot: TeamDefinitionDtoSchema,
   objective: z.string(),
+  assignmentId: z.string().optional(),
+  assignmentRevision: z.number().int().optional(),
+  assignmentSnapshot: AssignmentDtoSchema.optional(),
   workspace: TeamRunWorkspaceDtoSchema,
   steps: z.array(TeamRunStepDtoSchema),
   state: TeamRunStateDtoSchema,
