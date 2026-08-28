@@ -10,6 +10,10 @@ describe("workspace-draft-agent-config", () => {
         modeId: "auto",
         model: "gpt-5.4",
         thinkingOptionId: "high",
+        providerOptions: {
+          sandbox: { mode: "workspace-write" },
+          approvalPolicy: "on-request",
+        },
       }),
     ).toEqual({
       provider: "codex",
@@ -17,6 +21,10 @@ describe("workspace-draft-agent-config", () => {
       modeId: "auto",
       model: "gpt-5.4",
       thinkingOptionId: "high",
+      providerOptions: {
+        sandbox: { mode: "workspace-write" },
+        approvalPolicy: "on-request",
+      },
     });
   });
 });

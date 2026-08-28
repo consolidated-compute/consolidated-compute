@@ -95,6 +95,7 @@ function makeState(
       modeId: "",
       model: "",
       thinkingOptionId: "",
+      providerOptions: {},
       workingDir: "",
       ...overrides,
     },
@@ -979,6 +980,36 @@ describe("resolveAgentForm", () => {
   });
 
   describe("SET_PROVIDER_AND_MODEL_FROM_USER", () => {
+    it("clears profile-native options when switching providers", () => {
+      const state = makeState({
+        provider: "codex",
+        providerOptions: { sandbox: { mode: "workspace-write" } },
+      });
+      const next = resolveAgentForm(state, {
+        type: "SET_PROVIDER_AND_MODEL_FROM_USER",
+        provider: "claude",
+        modelId: "",
+        providerDef: TEST_CLAUDE_DEFINITION,
+        providerModels: null,
+      });
+
+      expect(next.form.providerOptions).toEqual({});
+    });
+
+    it("retains profile-native options when changing models within the same provider", () => {
+      const providerOptions = { sandbox: { mode: "workspace-write" } };
+      const state = makeState({ provider: "codex", providerOptions });
+      const next = resolveAgentForm(state, {
+        type: "SET_PROVIDER_AND_MODEL_FROM_USER",
+        provider: "codex",
+        modelId: "gpt-5.3-codex",
+        providerDef: TEST_CODEX_DEFINITION,
+        providerModels: CODEX_MODELS,
+      });
+
+      expect(next.form.providerOptions).toBe(providerOptions);
+    });
+
     it("sets provider, model, and default mode; marks both modified", () => {
       const state = makeState();
       const next = resolveAgentForm(state, {
@@ -1050,6 +1081,25 @@ describe("resolveAgentForm", () => {
   });
 
   describe("APPLY_PROFILE_FROM_USER", () => {
+    it("retains provider options from the selected profile", () => {
+      const providerOptions = {
+        sandbox: { mode: "workspace-write" },
+        approvalPolicy: "on-request",
+      };
+      const next = resolveAgentForm(makeState(), {
+        type: "APPLY_PROFILE_FROM_USER",
+        provider: "codex",
+        modelId: "gpt-5.3-codex",
+        modeId: "full-access",
+        thinkingOptionId: "xhigh",
+        providerOptions,
+        providerDef: TEST_CODEX_DEFINITION,
+        providerModels: CODEX_MODELS,
+      });
+
+      expect(next.form.providerOptions).toEqual(providerOptions);
+    });
+
     it("drops a stale saved mode for a modeless profile provider", () => {
       const next = resolveAgentForm(makeState({ provider: "codex", modeId: "full-access" }), {
         type: "APPLY_PROFILE_FROM_USER",
@@ -1057,6 +1107,7 @@ describe("resolveAgentForm", () => {
         modelId: "anthropic/sonnet",
         modeId: "",
         thinkingOptionId: "",
+        providerOptions: {},
         providerDef: TEST_PI_DEFINITION,
         providerModels: [{ provider: "pi", id: "anthropic/sonnet", label: "Sonnet" }],
         providerPrefs: { mode: "full-access" },
@@ -1076,6 +1127,7 @@ describe("resolveAgentForm", () => {
         modelId: "gpt-5.3-codex",
         modeId: "full-access",
         thinkingOptionId: "",
+        providerOptions: {},
         providerDef: TEST_CODEX_DEFINITION,
         providerModels: CODEX_MODELS,
         providerPrefs: { thinkingByModel: { "gpt-5.3-codex": "low" } },

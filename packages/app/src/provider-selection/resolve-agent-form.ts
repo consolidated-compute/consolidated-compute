@@ -2,6 +2,7 @@ import type { AgentProviderDefinition } from "@getpaseo/protocol/provider-manife
 import type {
   AgentModelDefinition,
   AgentProvider,
+  ProviderOptions,
   ProviderSnapshotEntry,
 } from "@getpaseo/protocol/agent-types";
 import {
@@ -26,6 +27,7 @@ export interface FormState {
   modeId: string;
   model: string;
   thinkingOptionId: string;
+  providerOptions: ProviderOptions;
   workingDir: string;
 }
 
@@ -93,6 +95,7 @@ export type AgentFormAction =
       modelId: string;
       modeId: string;
       thinkingOptionId: string;
+      providerOptions: ProviderOptions;
       providerDef: AgentProviderDefinition | undefined;
       providerModels: AgentModelDefinition[] | null;
       providerPrefs?: ProviderPrefs | undefined;
@@ -245,6 +248,7 @@ export function hasFormStateChanged(prev: FormState, next: FormState): boolean {
     prev.modeId !== next.modeId ||
     prev.model !== next.model ||
     prev.thinkingOptionId !== next.thinkingOptionId ||
+    prev.providerOptions !== next.providerOptions ||
     prev.workingDir !== next.workingDir
   );
 }
@@ -397,6 +401,7 @@ export function resolveFormState(
   allowedProviderMap: Map<AgentProvider, AgentProviderDefinition>,
 ): FormState {
   const result = { ...currentState };
+  const previousProvider = result.provider;
 
   result.provider = resolveProvider({
     currentProvider: result.provider,
@@ -405,6 +410,9 @@ export function resolveFormState(
     preferences,
     allowedProviderMap,
   });
+  if (result.provider !== previousProvider) {
+    result.providerOptions = {};
+  }
 
   const providerDef = result.provider ? allowedProviderMap.get(result.provider) : undefined;
   const providerPrefs = result.provider
@@ -604,6 +612,7 @@ function applyProfile(state: AgentFormReducerState, action: ApplyProfileAction) 
       model: nextModelId,
       modeId: nextModeId,
       thinkingOptionId: nextThinkingOptionId,
+      providerOptions: action.providerOptions,
     },
     userModified: {
       ...state.userModified,
@@ -666,6 +675,8 @@ export function resolveAgentForm(
           model: nextModelId,
           modeId: nextModeId,
           thinkingOptionId: nextThinkingOptionId,
+          providerOptions:
+            state.form.provider === action.provider ? state.form.providerOptions : {},
         },
         userModified: { ...state.userModified, provider: true, model: true },
       };
@@ -713,6 +724,7 @@ export function resolveAgentForm(
           model: "",
           modeId: "",
           thinkingOptionId: "",
+          providerOptions: {},
         },
         userModified: {
           ...state.userModified,

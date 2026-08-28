@@ -4,6 +4,7 @@ import type {
   AgentMode,
   AgentModelDefinition,
   AgentProvider,
+  ProviderOptions,
   ProviderSnapshotEntry,
 } from "@getpaseo/protocol/agent-types";
 import { useHosts } from "@/runtime/host-runtime";
@@ -56,6 +57,7 @@ export interface UseAgentFormStateResult {
   setSelectedServerId: (value: string | null) => void;
   setSelectedServerIdFromUser: (value: string | null) => void;
   selectedProvider: AgentProvider | null;
+  selectedProviderOptions: ProviderOptions;
   selectedMode: string;
   setModeFromUser: (modeId: string) => void;
   selectedModel: string;
@@ -249,6 +251,7 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
         modeId: "",
         model: "",
         thinkingOptionId: "",
+        providerOptions: {},
         workingDir: "",
       },
       userModified: INITIAL_USER_MODIFIED,
@@ -473,6 +476,7 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
         modelId: profile.modelId,
         modeId: profile.modeId,
         thinkingOptionId: profile.thinkingOptionId,
+        providerOptions: profile.providerOptions,
         providerDef,
         providerModels,
         providerPrefs,
@@ -634,6 +638,7 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
       setSelectedServerId,
       setSelectedServerIdFromUser,
       selectedProvider: formState.provider,
+      selectedProviderOptions: formState.providerOptions,
       selectedMode: formState.modeId,
       setModeFromUser,
       selectedModel: formState.model,
@@ -667,6 +672,7 @@ export function useAgentFormState(options: UseAgentFormStateOptions = {}): UseAg
     [
       formState.serverId,
       formState.provider,
+      formState.providerOptions,
       formState.modeId,
       formState.model,
       formState.thinkingOptionId,
