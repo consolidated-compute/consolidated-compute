@@ -1,4 +1,4 @@
-name: Mobile Operations, Visual, and Teams
+name: Mobile Operations, Visual, Teams, and Assignments
 
 on:
   workflow_dispatch:
@@ -17,20 +17,25 @@ on:
       - "packages/app/native-release-version.js"
       - "packages/app/plugins/**"
       - "packages/app/e2e/mobile/operations-agent-device/operations-matrix.*.ad"
+      - "packages/app/e2e/mobile/assignments-agent-device/assignments-matrix.*.ad"
       - "packages/app/e2e/mobile/teams-agent-device/teams-matrix.*.ad"
       - "packages/app/e2e/mobile/visual-agent-device/visual-matrix.*.ad"
       - "packages/app/e2e/support/helpers/agent-profiles.ts"
+      - "packages/app/e2e/support/helpers/assignments.ts"
       - "packages/app/e2e/support/helpers/operations-*.ts"
       - "packages/app/e2e/support/helpers/teams.ts"
       - "packages/app/src/components/headers/menu-header.tsx"
       - "packages/app/src/components/left-sidebar.tsx"
+      - "packages/app/src/assignments/**"
       - "packages/app/src/operations/**"
       - "packages/app/src/runtime/host-runtime.ts"
       - "packages/app/src/teams/**"
       - "packages/expo-two-way-audio/**"
       - "packages/protocol/src/team/**"
+      - "packages/protocol/src/assignment/**"
       - "packages/server/src/server/agent/providers/mock-load-test-agent.ts"
       - "packages/server/src/server/team/**"
+      - "packages/server/src/server/assignment/**"
       - "patches/**"
 
 concurrency:
@@ -45,7 +50,7 @@ env:
 
 jobs:
   validate:
-    name: validate mobile Operations, Visual, and Teams
+    name: validate mobile Operations, Visual, Teams, and Assignments
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -57,7 +62,7 @@ jobs:
           node --test scripts/ci-workflow.test.mjs
 
   ios:
-    name: operations + visual + teams (iOS)
+    name: operations + visual + teams + assignments (iOS)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: validate
     runs-on: macos-15
@@ -132,11 +137,11 @@ jobs:
           path: .dev/mobile-build-cache/ios/ConsolidatedComputeDebug.app
           key: ${{ steps.ios-app-cache.outputs.cache-primary-key }}
 
-      - name: Run the iOS Operations, Visual, and Teams matrices
+      - name: Run the iOS Operations, Visual, Teams, and Assignments matrices
         env:
           PASEO_MOBILE_E2E_PLATFORM: ios
           PASEO_MOBILE_E2E_DEVICE: ${{ env.IOS_UDID }}
-          EVIDENCE_ROOT: ${{ runner.temp }}/mobile-operations-visual-teams-ios
+          EVIDENCE_ROOT: ${{ runner.temp }}/mobile-operations-visual-teams-assignments-ios
         run: |
           set +e
           PASEO_MOBILE_E2E_ARTIFACTS_DIR="$EVIDENCE_ROOT/operations" \
@@ -151,9 +156,13 @@ jobs:
             PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/teams/junit.xml" \
             npm run test:e2e:mobile:teams
           teams_status=$?
+          PASEO_MOBILE_E2E_ARTIFACTS_DIR="$EVIDENCE_ROOT/assignments" \
+            PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/assignments/junit.xml" \
+            npm run test:e2e:mobile:assignments
+          assignments_status=$?
           set -e
-          if [[ "$operations_status" -ne 0 || "$visual_status" -ne 0 || "$teams_status" -ne 0 ]]; then
-            echo "Native matrix failed: operations=$operations_status visual=$visual_status teams=$teams_status" >&2
+          if [[ "$operations_status" -ne 0 || "$visual_status" -ne 0 || "$teams_status" -ne 0 || "$assignments_status" -ne 0 ]]; then
+            echo "Native matrix failed: operations=$operations_status visual=$visual_status teams=$teams_status assignments=$assignments_status" >&2
             exit 1
           fi
 
@@ -161,13 +170,13 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: mobile-operations-visual-teams-ios
-          path: ${{ runner.temp }}/mobile-operations-visual-teams-ios
+          name: mobile-operations-visual-teams-assignments-ios
+          path: ${{ runner.temp }}/mobile-operations-visual-teams-assignments-ios
           if-no-files-found: warn
           retention-days: 14
 
   android:
-    name: operations + visual + teams (Android)
+    name: operations + visual + teams + assignments (Android)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: validate
     runs-on: ubuntu-latest
@@ -220,11 +229,11 @@ jobs:
           path: .dev/mobile-build-cache/android/app-debug.apk
           key: ${{ steps.android-app-cache.outputs.cache-primary-key }}
 
-      - name: Run the Android Operations, Visual, and Teams matrices
+      - name: Run the Android Operations, Visual, Teams, and Assignments matrices
         uses: reactivecircus/android-emulator-runner@4c44018e59b437e86cdfc41da381398f93ed8808 # v2.34.0
         env:
           PASEO_MOBILE_E2E_PLATFORM: android
-          EVIDENCE_ROOT: ${{ runner.temp }}/mobile-operations-visual-teams-android
+          EVIDENCE_ROOT: ${{ runner.temp }}/mobile-operations-visual-teams-assignments-android
         with:
           api-level: 35
           arch: x86_64
@@ -250,9 +259,14 @@ jobs:
               PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/teams/junit.xml" \
               npm run test:e2e:mobile:teams
             teams_status=$?
+            NODE_OPTIONS=--max-old-space-size=2048 \
+              PASEO_MOBILE_E2E_ARTIFACTS_DIR="$EVIDENCE_ROOT/assignments" \
+              PASEO_MOBILE_E2E_JUNIT_PATH="$EVIDENCE_ROOT/assignments/junit.xml" \
+              npm run test:e2e:mobile:assignments
+            assignments_status=$?
             set -e
-            if [[ "$operations_status" -ne 0 || "$visual_status" -ne 0 || "$teams_status" -ne 0 ]]; then
-              echo "Native matrix failed: operations=$operations_status visual=$visual_status teams=$teams_status" >&2
+            if [[ "$operations_status" -ne 0 || "$visual_status" -ne 0 || "$teams_status" -ne 0 || "$assignments_status" -ne 0 ]]; then
+              echo "Native matrix failed: operations=$operations_status visual=$visual_status teams=$teams_status assignments=$assignments_status" >&2
               exit 1
             fi
 
@@ -260,7 +274,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: mobile-operations-visual-teams-android
-          path: ${{ runner.temp }}/mobile-operations-visual-teams-android
+          name: mobile-operations-visual-teams-assignments-android
+          path: ${{ runner.temp }}/mobile-operations-visual-teams-assignments-android
           if-no-files-found: warn
           retention-days: 14

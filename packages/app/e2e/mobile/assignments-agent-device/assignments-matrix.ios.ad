@@ -1,0 +1,76 @@
+context platform=ios timeout=600000 retries=1
+env APP_ID=sh.paseo.debug
+
+open "${APP_ID}"
+settings clear-app-state "${APP_ID}"
+settings permission reset notifications
+open "${APP_ID}" --relaunch --metro-host "${METRO_HOST}" --metro-port "${METRO_PORT}" --launch-url "${DEV_CLIENT_URL}"
+alert wait 45000
+alert dismiss
+settings appearance light
+wait "id=\"menu-button\"" 45000
+
+press "id=\"menu-button\""
+wait "id=\"sidebar-assignments\"" 10000
+press "id=\"sidebar-assignments\""
+wait "id=\"assignments-list\"" 30000
+wait "id=\"assignments-host-${PRIMARY_SERVER_ID}\"" 30000
+wait "id=\"assignment-row-${PRIMARY_SERVER_ID}-${PRIMARY_ASSIGNMENT_ID}\"" 30000
+screenshot "${AD_ARTIFACTS}/assignments-list-light.png" --scale 1
+
+press "id=\"assignment-row-${PRIMARY_SERVER_ID}-${PRIMARY_ASSIGNMENT_ID}\""
+wait "id=\"assignment-detail-${PRIMARY_SERVER_ID}-${PRIMARY_ASSIGNMENT_ID}\"" 30000
+wait "id=\"assignment-status-${PRIMARY_SERVER_ID}-${PRIMARY_ASSIGNMENT_ID}-open\"" 30000
+scroll down 0.5
+wait "id=\"assignment-work-item-${PRIMARY_SERVER_ID}-${PRIMARY_ASSIGNMENT_ID}\"" 10000
+screenshot "${AD_ARTIFACTS}/assignment-detail-large-text.png" --scale 1
+
+orientation landscape-left
+wait "id=\"assignment-detail-${PRIMARY_SERVER_ID}-${PRIMARY_ASSIGNMENT_ID}\"" 10000
+screenshot "${AD_ARTIFACTS}/assignment-detail-landscape.png" --scale 1
+orientation portrait
+wait "id=\"assignment-detail-${PRIMARY_SERVER_ID}-${PRIMARY_ASSIGNMENT_ID}\"" 10000
+
+home
+open "${APP_ID}"
+wait "id=\"assignment-detail-${PRIMARY_SERVER_ID}-${PRIMARY_ASSIGNMENT_ID}\"" 30000
+scroll top
+press "id=\"assignment-run-open-${PRIMARY_SERVER_ID}-${PRIMARY_ASSIGNMENT_ID}\""
+wait "id=\"assignment-team-picker\"" 30000
+press "id=\"assignment-team-${PRIMARY_SERVER_ID}-${PRIMARY_TEAM_ID}\""
+wait "id=\"team-run-form-sheet\"" 30000
+wait "id=\"team-run-assignment\"" 10000
+press "id=\"team-run-workspace-field\""
+wait "id=\"team-run-workspace-${PRIMARY_WORKSPACE_ID}\"" 30000
+press "id=\"team-run-workspace-${PRIMARY_WORKSPACE_ID}\""
+scroll down 0.6
+wait "id=\"team-run-role-status-${PRIMARY_TEAM_ROLE_ID}-ready\"" 30000
+press "id=\"team-run-start\""
+wait "id=\"team-run-frozen-assignment-${PRIMARY_SERVER_ID}-${PRIMARY_ASSIGNMENT_ID}\"" 30000
+wait "id=\"team-run-status-waiting_for_permission\"" 30000
+screenshot "${AD_ARTIFACTS}/assignment-run-waiting.png" --scale 1
+scroll down 0.8
+scroll down 0.8
+wait "id=\"team-run-step-status-${PRIMARY_TEAM_STEP_ID}-waiting_for_permission\"" 10000
+
+press "id=\"team-run-step-agent-${PRIMARY_TEAM_STEP_ID}\""
+wait "id=\"permission-request-question\"" 30000
+screenshot "${AD_ARTIFACTS}/assignment-run-permission.png" --scale 1
+press "id=\"permission-request-accept\""
+back
+scroll top
+wait "id=\"team-run-status-succeeded\"" 30000
+scroll down 0.8
+scroll down 0.8
+scroll down 0.8
+wait "text" "Planner output" 30000
+wait "text" "Synthetic plan approval resolved" 30000
+screenshot "${AD_ARTIFACTS}/assignment-run-artifact.png" --scale 1
+
+back
+wait "id=\"assignment-detail-${PRIMARY_SERVER_ID}-${PRIMARY_ASSIGNMENT_ID}\"" 30000
+scroll bottom
+wait "text" "Planner output" 30000
+wait "text" "Synthetic plan approval resolved" 30000
+screenshot "${AD_ARTIFACTS}/assignment-history-artifact.png" --scale 1
+close

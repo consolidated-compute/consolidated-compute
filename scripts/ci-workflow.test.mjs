@@ -29,6 +29,14 @@ const androidTeamsReplayPath = new URL(
   "packages/app/e2e/mobile/teams-agent-device/teams-matrix.android.ad",
   repoRoot,
 );
+const iosAssignmentsReplayPath = new URL(
+  "packages/app/e2e/mobile/assignments-agent-device/assignments-matrix.ios.ad",
+  repoRoot,
+);
+const androidAssignmentsReplayPath = new URL(
+  "packages/app/e2e/mobile/assignments-agent-device/assignments-matrix.android.ad",
+  repoRoot,
+);
 const iosVisualReplayPath = new URL(
   "packages/app/e2e/mobile/visual-agent-device/visual-matrix.ios.ad",
   repoRoot,
@@ -42,6 +50,7 @@ const upstreamReleaseMonitorPath = new URL(
   repoRoot,
 );
 const filtersPath = new URL(".github/ci-paths.yml", repoRoot);
+const serverPackagePath = new URL("packages/server/package.json", repoRoot);
 const serverTsconfigPath = new URL("packages/server/tsconfig.server.json", repoRoot);
 const desktopPackagePath = new URL("packages/desktop/package.json", repoRoot);
 
@@ -158,7 +167,7 @@ test("change gating allows superseded workflow runs to cancel", () => {
   }
 });
 
-test("mobile Operations, Visual, and Teams keep native device jobs off pull requests", () => {
+test("mobile Operations, Visual, Teams, and Assignments keep native device jobs off pull requests", () => {
   const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
   const jobs = jobBlocks(source);
   const validation = jobs.get("validate")?.join("\n") ?? "";
@@ -178,7 +187,7 @@ test("mobile Operations, Visual, and Teams keep native device jobs off pull requ
   }
 });
 
-test("mobile Operations, Visual, and Teams stay isolated from the upstream runner", () => {
+test("mobile Operations, Visual, Teams, and Assignments stay isolated from the upstream runner", () => {
   const genericRunner = readFileSync(genericMobileRunnerPath, "utf8");
   const operationsRunner = readFileSync(operationsMobileRunnerPath, "utf8");
 
@@ -199,6 +208,9 @@ test("mobile Operations, Visual, and Teams stay isolated from the upstream runne
   assert.match(operationsRunner, /\.dev\/teams-agent-device-e2e/);
   assert.match(operationsRunner, /\.dev\/teams-agent-device-artifacts/);
   assert.match(operationsRunner, /DEFAULT_METRO_PORT=8084/);
+  assert.match(operationsRunner, /\.dev\/assignments-agent-device-e2e/);
+  assert.match(operationsRunner, /\.dev\/assignments-agent-device-artifacts/);
+  assert.match(operationsRunner, /DEFAULT_METRO_PORT=8085/);
   assert.match(operationsRunner, /EXPO_PUBLIC_PASEO_E2E_VISUAL_MOTION_PROBE=1/);
   assert.match(
     operationsRunner,
@@ -261,7 +273,26 @@ test("mobile Teams replays keep one cross-platform run contract", () => {
   assert.match(iosReplay, /team-run-status-succeeded/);
 });
 
-test("mobile Operations, Visual, and Teams reuse native development apps", () => {
+test("mobile Assignments replays keep one cross-platform Artifact contract", () => {
+  const iosReplay = readFileSync(iosAssignmentsReplayPath, "utf8");
+  const androidReplay = readFileSync(androidAssignmentsReplayPath, "utf8");
+  const normalizePlatform = (source) =>
+    source.replace(/^context platform=(ios|android)/, "context platform=native");
+
+  assert.equal(normalizePlatform(iosReplay), normalizePlatform(androidReplay));
+  assert.match(iosReplay, /assignment-detail-\$\{PRIMARY_SERVER_ID\}-\$\{PRIMARY_ASSIGNMENT_ID\}/);
+  assert.match(iosReplay, /orientation landscape-left/);
+  assert.match(iosReplay, /home\nopen "\$\{APP_ID\}"/);
+  assert.match(iosReplay, /assignment-team-\$\{PRIMARY_SERVER_ID\}-\$\{PRIMARY_TEAM_ID\}/);
+  assert.match(iosReplay, /team-run-assignment/);
+  assert.match(iosReplay, /team-run-status-waiting_for_permission/);
+  assert.match(iosReplay, /permission-request-accept/);
+  assert.match(iosReplay, /team-run-status-succeeded/);
+  assert.equal(iosReplay.match(/wait "text" "Synthetic plan approval resolved" 30000/g)?.length, 2);
+  assert.match(iosReplay, /assignment-history-artifact\.png/);
+});
+
+test("mobile Operations, Visual, Teams, and Assignments reuse native development apps", () => {
   const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
 
   assert.match(source, /actions\/cache\/restore@[a-f0-9]{40}/);
@@ -276,18 +307,20 @@ test("mobile Operations, Visual, and Teams reuse native development apps", () =>
   assert.match(source, /npm run test:e2e:mobile:operations/);
   assert.match(source, /npm run test:e2e:mobile:visual/);
   assert.match(source, /npm run test:e2e:mobile:teams/);
+  assert.match(source, /npm run test:e2e:mobile:assignments/);
   assert.match(source, /EVIDENCE_ROOT\/operations/);
   assert.match(source, /EVIDENCE_ROOT\/visual/);
   assert.match(source, /EVIDENCE_ROOT\/teams/);
+  assert.match(source, /EVIDENCE_ROOT\/assignments/);
   assert.doesNotMatch(source, /hashFiles\('\.github\/workflows\/mobile-operations\.yml'/);
 });
 
-test("mobile Operations, Visual, and Teams bound Android replay resources", () => {
+test("mobile Operations, Visual, Teams, and Assignments bound Android replay resources", () => {
   const source = readFileSync(mobileOperationsWorkflowPath, "utf8");
 
   assert.match(source, /ram-size: 2048M/);
   assert.match(source, /heap-size: 512M/);
-  assert.equal(source.match(/NODE_OPTIONS=--max-old-space-size=2048/g)?.length, 3);
+  assert.equal(source.match(/NODE_OPTIONS=--max-old-space-size=2048/g)?.length, 4);
 });
 
 test("fork delivery and write-back jobs stay quarantined", () => {
@@ -339,6 +372,7 @@ test("focused contracts stay inside existing required checks", () => {
   const jobs = jobBlocks(readFileSync(ciWorkflowPath, "utf8"));
   const changes = jobs.get("changes")?.join("\n") ?? "";
   const server = jobs.get("server-tests-ubuntu")?.join("\n") ?? "";
+  const serverPackage = JSON.parse(readFileSync(serverPackagePath, "utf8"));
   const desktop = jobs.get("desktop-tests-ubuntu")?.join("\n") ?? "";
 
   assert.match(changes, /scripts\/daemon-launch-contract\.test\.mjs/);
@@ -346,6 +380,10 @@ test("focused contracts stay inside existing required checks", () => {
 
   assert.match(server, /test:hub-cli-contract/);
   assert.match(server, /npm run test --workspace=@getpaseo\/server/);
+  assert.match(
+    serverPackage.scripts["test:integration"],
+    /src\/server\/team\/assignments\.e2e\.test\.ts/,
+  );
   assert.ok(!jobs.has("hub-cli-contract"));
 
   assert.match(desktop, /test:e2e:renderer/);

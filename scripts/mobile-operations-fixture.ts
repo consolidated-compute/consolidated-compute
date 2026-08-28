@@ -17,6 +17,10 @@ import {
   type SeededWorkspace,
 } from "../packages/app/e2e/support/helpers/seed-client.js";
 import {
+  connectAssignmentsClient,
+  type AssignmentsDaemonClient,
+} from "../packages/app/e2e/support/helpers/assignments.js";
+import {
   connectTeamsClient,
   type TeamsDaemonClient,
 } from "../packages/app/e2e/support/helpers/teams.js";
@@ -40,6 +44,7 @@ async function main(): Promise<void> {
   let secondary: SeededWorkspace | null = null;
   let profilesClient: AgentProfilesDaemonClient | null = null;
   let teamsClient: TeamsDaemonClient | null = null;
+  let assignmentsClient: AssignmentsDaemonClient | null = null;
 
   try {
     secondaryDaemon = await startIsolatedHostDaemon(SECONDARY_SERVER_ID);
@@ -87,6 +92,20 @@ async function main(): Promise<void> {
           instructions: null,
         },
       ],
+    });
+    assignmentsClient = await connectAssignmentsClient({ port: primaryDaemon.port });
+    const mobileAssignment = await assignmentsClient.createAssignment({
+      title: "Mobile Artifact contract",
+      objective: "Persist the exact output from the selected Team.",
+      workItem: {
+        sourceId: "github",
+        sourceLabel: "GitHub",
+        resourceType: "issue",
+        resourceId: "consolidated-compute/consolidated-compute:issue:72",
+        identifier: "#72",
+        title: "Assignments: prove the three-role Artifact contract",
+        url: "https://github.com/consolidated-compute/consolidated-compute/issues/72",
+      },
     });
     const primaryParent = await primary.client.createAgent({
       provider: "mock",
@@ -177,6 +196,7 @@ async function main(): Promise<void> {
           teamId: mobileTeam.team.id,
           teamRoleId: PRIMARY_TEAM_ROLE_ID,
           teamStepId: PRIMARY_TEAM_STEP_ID,
+          assignmentId: mobileAssignment.assignment.id,
         },
         secondary: {
           serverId: SECONDARY_SERVER_ID,
@@ -190,6 +210,7 @@ async function main(): Promise<void> {
     await Promise.race([once(process, "SIGINT"), once(process, "SIGTERM")]);
   } finally {
     await Promise.allSettled([
+      assignmentsClient?.close() ?? Promise.resolve(),
       teamsClient?.close() ?? Promise.resolve(),
       profilesClient?.close() ?? Promise.resolve(),
     ]);
