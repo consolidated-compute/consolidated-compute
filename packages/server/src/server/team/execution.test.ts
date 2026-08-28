@@ -152,6 +152,7 @@ class MemoryProviderCatalog implements TeamProviderCatalog {
     string,
     Array<{ path: Array<string | number>; message: string }>
   >();
+  readonly normalizedProviderOptions = new Map<string, AgentSessionConfig["providerOptions"]>();
 
   constructor() {
     this.models.set("codex", [
@@ -200,7 +201,7 @@ class MemoryProviderCatalog implements TeamProviderCatalog {
     return { modeId: input.requestedMode, featureValues: input.featureValues };
   }
 
-  async validateAgentConfiguration(input: {
+  async validateAndNormalizeAgentConfiguration(input: {
     cwd?: string;
     provider: string;
     model?: string;
@@ -209,7 +210,14 @@ class MemoryProviderCatalog implements TeamProviderCatalog {
     providerOptions?: AgentSessionConfig["providerOptions"];
   }) {
     this.configurationReads.push(input);
-    return this.configurationIssues.get(input.provider) ?? [];
+    const issues = this.configurationIssues.get(input.provider) ?? [];
+    return {
+      issues,
+      providerOptions:
+        issues.length === 0
+          ? (this.normalizedProviderOptions.get(input.provider) ?? input.providerOptions)
+          : undefined,
+    };
   }
 }
 
@@ -480,6 +488,24 @@ describe("Team Run preflight", () => {
       ],
     });
     expect(harness.creations).toEqual([]);
+  });
+
+  test("freezes the provider registry's normalized provider options", async () => {
+    const harness = createHarness();
+    harness.providerCatalog.normalizedProviderOptions.set("codex", {
+      sandbox_mode: "read-only",
+      approval_policy: "never",
+    });
+
+    const accepted = await preflightTeamRun(harness.preflightDependencies, {
+      definition: createDefinition(),
+      workspaceId: "wks_team_test",
+    });
+
+    expect(accepted.steps[0]?.snapshot.resolvedLaunch.providerOptions).toEqual({
+      sandbox_mode: "read-only",
+      approval_policy: "never",
+    });
   });
 
   test("resolves every Team role even when the workflow does not use it", async () => {
@@ -754,6 +780,63 @@ describe("Team step execution", () => {
       ],
     });
     expect(harness.creations).toEqual([]);
+  });
+
+  test("fails closed when the provider normalizes a frozen option differently", async () => {
+    const harness = createHarness();
+    const definition = createDefinition();
+    const accepted = await preflightTeamRun(harness.preflightDependencies, {
+      definition,
+      workspaceId: "wks_team_test",
+    });
+    const run = createRun(definition, accepted);
+    harness.providerCatalog.normalizedProviderOptions.set("codex", {
+      sandbox_mode: "read-only",
+      approval_policy: "never",
+    });
+
+    await expect(
+      collectEvents(
+        executeTeamStep(harness.executionDependencies, {
+          run,
+          stepId: "step_build",
+          plannedAgentId,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      issues: [
+        {
+          kind: "launch_unavailable",
+          roleId: "role_builder",
+          profileId: "profile_builder",
+          message: "Provider 'codex' now normalizes the frozen provider options differently",
+        },
+      ],
+    });
+    expect(harness.creations).toEqual([]);
+  });
+
+  test("executes a legacy frozen launch without provider options", async () => {
+    const harness = createHarness();
+    const definition = createDefinition();
+    const accepted = await preflightTeamRun(harness.preflightDependencies, {
+      definition,
+      workspaceId: "wks_team_test",
+    });
+    const run = createRun(definition, accepted);
+    delete run.steps[0]?.snapshot.resolvedLaunch.providerOptions;
+    harness.agentStream.events = [{ type: "turn_canceled", provider: "codex" }];
+
+    await collectEvents(
+      executeTeamStep(harness.executionDependencies, {
+        run,
+        stepId: "step_build",
+        plannedAgentId,
+      }),
+    );
+
+    expect(harness.creations).toHaveLength(1);
+    expect(harness.creations[0]).not.toHaveProperty("config");
   });
 
   test("owns one stream and launches the frozen profile after that profile is deleted", async () => {

@@ -144,6 +144,29 @@ describe("ProviderSnapshotManager public surface", () => {
       ).resolves.toEqual([]);
 
       await expect(
+        manager.validateAndNormalizeAgentConfiguration({
+          provider: "codex",
+          model: "gpt-latest",
+          modeId: "auto-review",
+          thinkingOptionId: "xhigh",
+          providerOptions: {
+            sandbox_workspace_write: {
+              writable_roots: ["/var/cache/npm"],
+              network_access: false,
+            },
+          },
+        }),
+      ).resolves.toEqual({
+        issues: [],
+        providerOptions: {
+          sandbox_workspace_write: {
+            writable_roots: ["/var/cache/npm"],
+            network_access: false,
+          },
+        },
+      });
+
+      await expect(
         manager.validateAgentConfiguration({
           provider: "codex",
           model: "missing",
@@ -165,6 +188,23 @@ describe("ProviderSnapshotManager public surface", () => {
           message: "Invalid input: expected boolean, received string",
         },
       ]);
+
+      await expect(
+        manager.validateAndNormalizeAgentConfiguration({
+          provider: "codex",
+          providerOptions: {
+            sandbox_workspace_write: { network_access: "sometimes" },
+          },
+        }),
+      ).resolves.toEqual({
+        issues: [
+          {
+            path: ["providerOptions", "sandbox_workspace_write", "network_access"],
+            message: "Invalid input: expected boolean, received string",
+          },
+        ],
+        providerOptions: undefined,
+      });
     } finally {
       manager.destroy();
     }

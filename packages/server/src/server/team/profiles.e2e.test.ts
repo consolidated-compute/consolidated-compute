@@ -121,7 +121,6 @@ test("runs Plan, Implement, and Review through existing Paseo Agent Profiles", a
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: {},
-        providerOptions: {},
       },
       {
         profileId: "codex-builder",
@@ -130,10 +129,6 @@ test("runs Plan, Implement, and Review through existing Paseo Agent Profiles", a
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: { test_feature: true },
-        providerOptions: {
-          sandbox_mode: "workspace-write",
-          approval_policy: "never",
-        },
       },
       {
         profileId: "security-review",
@@ -142,8 +137,13 @@ test("runs Plan, Implement, and Review through existing Paseo Agent Profiles", a
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: {},
-        providerOptions: {},
       },
+    ]);
+    const persisted = await daemon.daemon.teamRepository.getRun(started.id);
+    expect(persisted?.steps.map((step) => step.snapshot.resolvedLaunch.providerOptions)).toEqual([
+      {},
+      { sandbox_mode: "workspace-write", approval_policy: "never" },
+      {},
     ]);
     expect(prompts).toHaveLength(3);
     expect(prompts.every((prompt) => typeof prompt === "string")).toBe(true);

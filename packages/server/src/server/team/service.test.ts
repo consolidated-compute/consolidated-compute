@@ -256,8 +256,10 @@ class MemoryProviderCatalog implements TeamProviderCatalog {
     return { modeId: input.requestedMode, featureValues: input.featureValues };
   }
 
-  async validateAgentConfiguration() {
-    return [];
+  async validateAndNormalizeAgentConfiguration(input: {
+    providerOptions?: AgentSessionConfig["providerOptions"];
+  }) {
+    return { issues: [], providerOptions: input.providerOptions };
   }
 }
 

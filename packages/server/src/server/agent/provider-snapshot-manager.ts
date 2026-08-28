@@ -42,7 +42,8 @@ import type { MutableDaemonConfig } from "../daemon-config-store.js";
 import type { HubExecutionAgentValidationIssue } from "@getpaseo/protocol/messages";
 import {
   type AgentConfigurationValidationInput,
-  validateAgentConfigurationAgainstProvider,
+  type NormalizedAgentConfigurationValidation,
+  validateAndNormalizeAgentConfigurationAgainstProvider,
 } from "./agent-configuration-validator.js";
 
 const DEFAULT_REFRESH_TIMEOUT_MS = 120_000;
@@ -357,13 +358,22 @@ export class ProviderSnapshotManager {
   async validateAgentConfiguration(
     input: AgentConfigurationValidationInput,
   ): Promise<HubExecutionAgentValidationIssue[]> {
+    return (await this.validateAndNormalizeAgentConfiguration(input)).issues;
+  }
+
+  async validateAndNormalizeAgentConfiguration(
+    input: AgentConfigurationValidationInput,
+  ): Promise<NormalizedAgentConfigurationValidation> {
     if (!this.hasProvider(input.provider)) {
-      return [
-        {
-          path: ["provider"],
-          message: `Provider '${input.provider}' is not configured`,
-        },
-      ];
+      return {
+        issues: [
+          {
+            path: ["provider"],
+            message: `Provider '${input.provider}' is not configured`,
+          },
+        ],
+        providerOptions: undefined,
+      };
     }
 
     const provider = await this.getProvider({
@@ -372,22 +382,28 @@ export class ProviderSnapshotManager {
       wait: true,
     });
     if (!provider.enabled) {
-      return [{ path: ["provider"], message: `Provider '${input.provider}' is disabled` }];
+      return {
+        issues: [{ path: ["provider"], message: `Provider '${input.provider}' is disabled` }],
+        providerOptions: undefined,
+      };
     }
     if (provider.status !== "ready") {
-      return [
-        {
-          path: ["provider"],
-          message:
-            provider.status === "error" && provider.error
-              ? provider.error
-              : `Provider '${input.provider}' is not available`,
-        },
-      ];
+      return {
+        issues: [
+          {
+            path: ["provider"],
+            message:
+              provider.status === "error" && provider.error
+                ? provider.error
+                : `Provider '${input.provider}' is not available`,
+          },
+        ],
+        providerOptions: undefined,
+      };
     }
 
     const definition = this.requireProvider(input.provider);
-    return validateAgentConfigurationAgainstProvider({
+    return validateAndNormalizeAgentConfigurationAgainstProvider({
       input,
       provider,
       validateOptions: definition.validateOptions,

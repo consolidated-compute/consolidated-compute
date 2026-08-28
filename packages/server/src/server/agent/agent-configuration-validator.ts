@@ -20,11 +20,16 @@ interface AgentConfigurationValidationContext {
   validateOptions(options: ProviderOptions | undefined): ProviderOptions | undefined;
 }
 
-export function validateAgentConfigurationAgainstProvider({
+export interface NormalizedAgentConfigurationValidation {
+  issues: HubExecutionAgentValidationIssue[];
+  providerOptions: ProviderOptions | undefined;
+}
+
+export function validateAndNormalizeAgentConfigurationAgainstProvider({
   input,
   provider,
   validateOptions,
-}: AgentConfigurationValidationContext): HubExecutionAgentValidationIssue[] {
+}: AgentConfigurationValidationContext): NormalizedAgentConfigurationValidation {
   const issues: HubExecutionAgentValidationIssue[] = [];
   const models = filterSelectableAgentModels(provider.models);
   const requestedModel = input.model;
@@ -54,8 +59,9 @@ export function validateAgentConfigurationAgainstProvider({
     });
   }
 
+  let providerOptions: ProviderOptions | undefined;
   try {
-    validateOptions(input.providerOptions);
+    providerOptions = validateOptions(input.providerOptions);
   } catch (error) {
     if (!(error instanceof ProviderOptionsValidationError)) throw error;
     issues.push(
@@ -66,5 +72,10 @@ export function validateAgentConfigurationAgainstProvider({
     );
   }
 
-  return issues;
+  return {
+    issues,
+    providerOptions: issues.some((issue) => issue.path[0] === "providerOptions")
+      ? undefined
+      : providerOptions,
+  };
 }
