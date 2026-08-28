@@ -234,7 +234,7 @@ describe("openAgentProfileForm", () => {
     expect(model.getState().submitValue).not.toHaveProperty("providerOptions");
   });
 
-  it("does not carry provider-native options across a provider change", () => {
+  it("clears provider-native options across a provider change", () => {
     const model = openAgentProfileForm({
       mode: "edit",
       profile: {
@@ -248,7 +248,10 @@ describe("openAgentProfileForm", () => {
 
     model.setProvider("claude", { label: "Claude" });
 
-    expect(model.getState().submitValue).not.toHaveProperty("providerOptions");
+    expect(model.getState().submitValue).toMatchObject({
+      provider: "claude",
+      providerOptions: null,
+    });
   });
 
   it("upgrades seeded displays to catalog labels without touching selections", () => {

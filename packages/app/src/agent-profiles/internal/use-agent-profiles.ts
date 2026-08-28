@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import type { AgentProfile } from "@getpaseo/protocol/messages";
+import type { AgentProfile, AgentProfilePatch } from "@getpaseo/protocol/messages";
 import { useDaemonConfig } from "@/hooks/use-daemon-config";
 import { useSessionStore } from "@/stores/session-store";
 import { supportsAgentProfiles } from "./capabilities";
@@ -10,7 +10,7 @@ export interface UseAgentProfilesResult {
   /** False on daemons that predate agent profiles, or while disconnected. */
   isSupported: boolean;
   /** Writes the whole list; there is no per-profile RPC. */
-  saveProfiles: (next: AgentProfile[]) => Promise<void>;
+  saveProfiles: (next: AgentProfilePatch[]) => Promise<void>;
 }
 
 export function useAgentProfiles(serverId: string | null): UseAgentProfilesResult {
@@ -20,7 +20,7 @@ export function useAgentProfiles(serverId: string | null): UseAgentProfilesResul
   });
 
   const saveProfiles = useCallback(
-    async (next: AgentProfile[]) => {
+    async (next: AgentProfilePatch[]) => {
       await patchConfig({ agentProfiles: next });
     },
     [patchConfig],
