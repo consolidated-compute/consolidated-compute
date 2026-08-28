@@ -1,11 +1,27 @@
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import {
+  AgentProfileSchema,
   AgentSnapshotPayloadSchema,
   AgentTimelineItemPayloadSchema,
   ServerInfoStatusPayloadSchema,
   WSHelloMessageSchema,
 } from "./messages.js";
+
+const LegacyAgentProfileSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    icon: z.string().optional(),
+    color: z.string().optional(),
+    provider: z.string(),
+    model: z.string().optional(),
+    modeId: z.string().optional(),
+    thinkingOptionId: z.string().optional(),
+    featureValues: z.record(z.string(), z.unknown()).optional(),
+    notes: z.string().optional(),
+  })
+  .passthrough();
 
 const LegacySubAgentToolCallSchema = z.object({
   type: z.literal("tool_call"),
@@ -43,6 +59,30 @@ const LegacyAgentSnapshotPayloadSchema = AgentSnapshotPayloadSchema.extend({
 });
 
 describe("wire schema compatibility", () => {
+  test("new clients accept old Agent Profiles without provider options", () => {
+    const legacyProfile = {
+      id: "reviewer",
+      name: "Reviewer",
+      provider: "codex",
+    };
+
+    expect(AgentProfileSchema.parse(legacyProfile)).toEqual(legacyProfile);
+  });
+
+  test("old clients accept new Agent Profiles with provider options", () => {
+    const currentProfile = {
+      id: "reviewer",
+      name: "Reviewer",
+      provider: "codex",
+      providerOptions: {
+        approvalPolicy: "on-request",
+        sandbox: { networkAccess: false },
+      },
+    };
+
+    expect(LegacyAgentProfileSchema.parse(currentProfile)).toEqual(currentProfile);
+  });
+
   test("hello parses with and without the project update capability", () => {
     const legacy = WSHelloMessageSchema.parse({
       type: "hello",
@@ -92,6 +132,25 @@ describe("wire schema compatibility", () => {
       version: null,
       features: { agentTurnIdentity: true },
     });
+  });
+
+  test("provider-option-aware Agent Profiles are capability-gated", () => {
+    const legacy = ServerInfoStatusPayloadSchema.parse({
+      status: "server_info",
+      serverId: "legacy-server",
+      features: { agentProfiles: true },
+    });
+    const capable = ServerInfoStatusPayloadSchema.parse({
+      status: "server_info",
+      serverId: "capable-server",
+      features: {
+        agentProfiles: true,
+        agentProfileProviderOptions: true,
+      },
+    });
+
+    expect(legacy.features?.agentProfileProviderOptions).toBeUndefined();
+    expect(capable.features?.agentProfileProviderOptions).toBe(true);
   });
 
   test("assistant timeline message ids are optional on the wire", () => {

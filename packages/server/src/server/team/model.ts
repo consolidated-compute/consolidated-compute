@@ -62,6 +62,7 @@ export const PersistedTeamResolvedLaunchSchema = z
     modeId: nonBlankStringSchema(TEAM_MODE_ID_MAX_CHARS).nullable(),
     thinkingOptionId: nonBlankStringSchema(TEAM_THINKING_OPTION_ID_MAX_CHARS).nullable(),
     featureValues: z.record(z.string(), z.json()),
+    providerOptions: z.record(z.string(), z.json()).optional(),
   })
   .strict();
 

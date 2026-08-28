@@ -31,6 +31,10 @@ test("runs Plan, Implement, and Review through existing Paseo Agent Profiles", a
         model: "gpt-5.4-mini",
         modeId: "full-access",
         featureValues: { test_feature: true },
+        providerOptions: {
+          sandbox_mode: "workspace-write",
+          approval_policy: "never",
+        },
       },
       {
         id: "security-review",
@@ -117,6 +121,7 @@ test("runs Plan, Implement, and Review through existing Paseo Agent Profiles", a
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: {},
+        providerOptions: {},
       },
       {
         profileId: "codex-builder",
@@ -125,6 +130,10 @@ test("runs Plan, Implement, and Review through existing Paseo Agent Profiles", a
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: { test_feature: true },
+        providerOptions: {
+          sandbox_mode: "workspace-write",
+          approval_policy: "never",
+        },
       },
       {
         profileId: "security-review",
@@ -133,6 +142,7 @@ test("runs Plan, Implement, and Review through existing Paseo Agent Profiles", a
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: {},
+        providerOptions: {},
       },
     ]);
     expect(prompts).toHaveLength(3);
@@ -158,6 +168,15 @@ test("runs Plan, Implement, and Review through existing Paseo Agent Profiles", a
       "gpt-5.4-mini",
       "gpt-5.4-mini",
       "sonnet",
+    ]);
+    expect(
+      agentIds.map(
+        (agentId) => daemon.daemon.agentManager.getAgent(agentId)?.config.providerOptions,
+      ),
+    ).toEqual([
+      undefined,
+      { sandbox_mode: "workspace-write", approval_policy: "never" },
+      undefined,
     ]);
     expect(agents.map((entry) => entry?.agent.currentModeId)).toEqual([
       "full-access",

@@ -190,6 +190,234 @@ describe("DaemonConfigStore", () => {
     expect(loadPersistedConfig(paseoHome).daemon?.agentProfiles).toHaveLength(1);
   });
 
+  test("legacy full-list profile writes preserve provider options by unique ID", () => {
+    const paseoHome = mkdtempSync(path.join(tmpdir(), "paseo-daemon-config-store-"));
+    tempDirs.push(paseoHome);
+    const store = new DaemonConfigStore(paseoHome, {
+      relay: { enabled: false },
+      mcp: { injectIntoAgents: false },
+      browserTools: { enabled: false },
+      providers: {},
+      metadataGeneration: { providers: [] },
+      autoArchiveAfterMerge: false,
+      enableTerminalAgentHooks: false,
+      appendSystemPrompt: "",
+      agentProfiles: [
+        {
+          id: "secure",
+          name: "Secure",
+          provider: "codex",
+          providerOptions: {
+            sandbox_mode: "workspace-write",
+            sandbox_workspace_write: { network_access: false },
+          },
+        },
+        {
+          id: "deleted",
+          name: "Delete me",
+          provider: "claude",
+          providerOptions: { permissionMode: "plan" },
+        },
+      ],
+    });
+
+    store.patch({
+      agentProfiles: [
+        { id: "new", name: "New", provider: "pi" },
+        {
+          id: "secure",
+          name: "Secure renamed",
+          provider: "codex",
+          model: "gpt-5.6-codex",
+        },
+      ],
+    });
+
+    const expectedProfiles = [
+      { id: "new", name: "New", provider: "pi" },
+      {
+        id: "secure",
+        name: "Secure renamed",
+        provider: "codex",
+        model: "gpt-5.6-codex",
+        providerOptions: {
+          sandbox_mode: "workspace-write",
+          sandbox_workspace_write: { network_access: false },
+        },
+      },
+    ];
+    expect(store.get().agentProfiles).toEqual(expectedProfiles);
+    expect(loadPersistedConfig(paseoHome).daemon?.agentProfiles).toEqual(expectedProfiles);
+  });
+
+  test("explicit null clears provider options without persisting the sentinel", () => {
+    const paseoHome = mkdtempSync(path.join(tmpdir(), "paseo-daemon-config-store-"));
+    tempDirs.push(paseoHome);
+    const store = new DaemonConfigStore(paseoHome, {
+      relay: { enabled: false },
+      mcp: { injectIntoAgents: false },
+      browserTools: { enabled: false },
+      providers: {},
+      metadataGeneration: { providers: [] },
+      autoArchiveAfterMerge: false,
+      enableTerminalAgentHooks: false,
+      appendSystemPrompt: "",
+      agentProfiles: [
+        {
+          id: "secure",
+          name: "Secure",
+          provider: "codex",
+          providerOptions: { sandbox_mode: "read-only" },
+        },
+      ],
+    });
+
+    store.patch({
+      agentProfiles: [
+        {
+          id: "secure",
+          name: "Secure",
+          provider: "codex",
+          providerOptions: null,
+        },
+      ],
+    });
+
+    const expectedProfiles = [{ id: "secure", name: "Secure", provider: "codex" }];
+    expect(store.get().agentProfiles).toEqual(expectedProfiles);
+    expect(loadPersistedConfig(paseoHome).daemon?.agentProfiles).toEqual(expectedProfiles);
+  });
+
+  test("requires an explicit provider-options decision when a profile changes provider", () => {
+    const paseoHome = mkdtempSync(path.join(tmpdir(), "paseo-daemon-config-store-"));
+    tempDirs.push(paseoHome);
+    const store = new DaemonConfigStore(paseoHome, {
+      relay: { enabled: false },
+      mcp: { injectIntoAgents: false },
+      browserTools: { enabled: false },
+      providers: {},
+      metadataGeneration: { providers: [] },
+      autoArchiveAfterMerge: false,
+      enableTerminalAgentHooks: false,
+      appendSystemPrompt: "",
+      agentProfiles: [
+        {
+          id: "secure",
+          name: "Secure",
+          provider: "codex",
+          providerOptions: { sandbox_mode: "read-only" },
+        },
+      ],
+    });
+
+    expect(() =>
+      store.patch({
+        agentProfiles: [{ id: "secure", name: "Secure", provider: "claude" }],
+      }),
+    ).toThrow(
+      "Cannot preserve provider options when Agent Profile 'secure' changes provider from 'codex' to 'claude'",
+    );
+    expect(store.get().agentProfiles).toEqual([
+      {
+        id: "secure",
+        name: "Secure",
+        provider: "codex",
+        providerOptions: { sandbox_mode: "read-only" },
+      },
+    ]);
+
+    store.patch({
+      agentProfiles: [
+        {
+          id: "secure",
+          name: "Secure",
+          provider: "claude",
+          providerOptions: null,
+        },
+      ],
+    });
+    const expectedProfiles = [{ id: "secure", name: "Secure", provider: "claude" }];
+    expect(store.get().agentProfiles).toEqual(expectedProfiles);
+    expect(loadPersistedConfig(paseoHome).daemon?.agentProfiles).toEqual(expectedProfiles);
+  });
+
+  test("rejects ambiguous omitted provider options but accepts explicit duplicate entries", () => {
+    const paseoHome = mkdtempSync(path.join(tmpdir(), "paseo-daemon-config-store-"));
+    tempDirs.push(paseoHome);
+    const store = new DaemonConfigStore(paseoHome, {
+      relay: { enabled: false },
+      mcp: { injectIntoAgents: false },
+      browserTools: { enabled: false },
+      providers: {},
+      metadataGeneration: { providers: [] },
+      autoArchiveAfterMerge: false,
+      enableTerminalAgentHooks: false,
+      appendSystemPrompt: "",
+      agentProfiles: [
+        {
+          id: "duplicate",
+          name: "Secure",
+          provider: "codex",
+          providerOptions: { sandbox_mode: "read-only" },
+        },
+      ],
+    });
+
+    expect(() =>
+      store.patch({
+        agentProfiles: [
+          { id: "duplicate", name: "First", provider: "codex" },
+          { id: "duplicate", name: "Second", provider: "codex" },
+        ],
+      }),
+    ).toThrow("Cannot preserve provider options for duplicate Agent Profile ID 'duplicate'");
+    expect(store.get().agentProfiles).toEqual([
+      {
+        id: "duplicate",
+        name: "Secure",
+        provider: "codex",
+        providerOptions: { sandbox_mode: "read-only" },
+      },
+    ]);
+
+    store.patch({
+      agentProfiles: [
+        {
+          id: "duplicate",
+          name: "First",
+          provider: "codex",
+          providerOptions: null,
+        },
+        {
+          id: "duplicate",
+          name: "Second",
+          provider: "codex",
+          providerOptions: { sandbox_mode: "workspace-write" },
+        },
+      ],
+    });
+
+    const expectedProfiles = [
+      { id: "duplicate", name: "First", provider: "codex" },
+      {
+        id: "duplicate",
+        name: "Second",
+        provider: "codex",
+        providerOptions: { sandbox_mode: "workspace-write" },
+      },
+    ];
+    expect(store.get().agentProfiles).toEqual(expectedProfiles);
+    expect(loadPersistedConfig(paseoHome).daemon?.agentProfiles).toEqual(expectedProfiles);
+
+    expect(() =>
+      store.patch({
+        agentProfiles: [{ id: "duplicate", name: "Repaired?", provider: "codex" }],
+      }),
+    ).toThrow("Cannot preserve provider options for duplicate Agent Profile ID 'duplicate'");
+    expect(store.get().agentProfiles).toEqual(expectedProfiles);
+    expect(loadPersistedConfig(paseoHome).daemon?.agentProfiles).toEqual(expectedProfiles);
+  });
+
   test("rolls back config when a field transition fails", () => {
     const paseoHome = mkdtempSync(path.join(tmpdir(), "paseo-daemon-config-store-"));
     tempDirs.push(paseoHome);

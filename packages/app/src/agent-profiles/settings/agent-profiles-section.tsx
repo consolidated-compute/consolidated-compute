@@ -3,7 +3,7 @@ import { Alert, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
-import type { AgentProfile } from "@getpaseo/protocol/messages";
+import type { AgentProfile, AgentProfilePatch } from "@getpaseo/protocol/messages";
 import { Button } from "@/components/ui/button";
 import { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
@@ -54,7 +54,7 @@ export function AgentProfilesSection({ serverId }: { serverId: string }): ReactE
       // The edited profile is replaced, not merged: `value` omits the fields the
       // user cleared, so spreading it over the stored record would silently keep
       // the old model, mode, thinking option or notes.
-      const next: AgentProfile[] = editing
+      const next: AgentProfilePatch[] = editing
         ? current.map((entry) => (entry.id === editing.id ? { id: entry.id, ...value } : entry))
         : [...current, { id: generateAgentProfileId(), ...value }];
       await saveProfiles(next);

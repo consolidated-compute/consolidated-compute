@@ -175,6 +175,8 @@ export const TerminalProfileSchema = z
 
 export type TerminalProfile = z.infer<typeof TerminalProfileSchema>;
 
+const ProviderOptionsSchema = z.record(z.string(), z.json());
+
 /**
  * A named launch bundle: a provider plus the agent-config values a client would
  * otherwise set one control at a time. Field names mirror `AgentSessionConfig`
@@ -182,7 +184,9 @@ export type TerminalProfile = z.infer<typeof TerminalProfileSchema>;
  *
  * There is deliberately no system prompt here. `AgentSessionConfig.systemPrompt`
  * is creation-only, so a profile carrying one would apply when starting a new
- * agent and silently do nothing when applied to a running one.
+ * agent and silently do nothing when applied to a running one. Provider options
+ * are the exception: they are creation-only because they can define the native
+ * launch boundary, and running-agent consumers must leave them unapplied.
  */
 export const AgentProfileSchema = z
   .object({
@@ -197,12 +201,24 @@ export const AgentProfileSchema = z
     modeId: z.string().optional(),
     thinkingOptionId: z.string().optional(),
     featureValues: z.record(z.string(), z.unknown()).optional(),
+    /** Provider-native launch settings. Optional because older daemons omit them. */
+    providerOptions: ProviderOptionsSchema.optional(),
     /** Free text, surfaced to orchestrating agents by the `list_profiles` MCP tool. */
     notes: z.string().optional(),
   })
   .passthrough();
 
 export type AgentProfile = z.infer<typeof AgentProfileSchema>;
+
+/**
+ * Full-list profile writes use null as an explicit clear sentinel. Persisted
+ * profiles and profile reads always use AgentProfileSchema and never expose it.
+ */
+export const AgentProfilePatchSchema = AgentProfileSchema.extend({
+  providerOptions: ProviderOptionsSchema.nullable().optional(),
+});
+
+export type AgentProfilePatch = z.infer<typeof AgentProfilePatchSchema>;
 
 const MutableBrowserToolsConfigSchema = z
   .object({
@@ -289,7 +305,7 @@ export const MutableDaemonConfigPatchSchema = z
     enableTerminalAgentHooks: z.boolean().optional(),
     appendSystemPrompt: z.string().optional(),
     terminalProfiles: z.array(TerminalProfileSchema).optional(),
-    agentProfiles: z.array(AgentProfileSchema).optional(),
+    agentProfiles: z.array(AgentProfilePatchSchema).optional(),
     pluginsEnabled: z.boolean().optional(),
     plugins: z.record(PluginIdSchema, PluginSourceSchema).optional(),
   })
@@ -476,8 +492,6 @@ const McpServerConfigSchema = z.discriminatedUnion("type", [
   McpHttpServerConfigSchema,
   McpSseServerConfigSchema,
 ]);
-
-const ProviderOptionsSchema = z.record(z.string(), z.json());
 
 const McpToolRefSchema = z
   .object({
@@ -3486,6 +3500,8 @@ export const ServerInfoStatusPayloadSchema = z
         // agentProfiles to one is silently dropped. The client hides the feature
         // rather than letting a save appear to succeed.
         agentProfiles: z.boolean().optional(),
+        // COMPAT(agentProfileProviderOptions): added in v0.6.2, remove gate after 2027-02-28.
+        agentProfileProviderOptions: z.boolean().optional(),
         // COMPAT(teams): added in v0.6.0, remove gate after 2027-02-26.
         teams: z.boolean().optional(),
         // COMPAT(assignments): added in v0.6.x, remove gate after 2027-02-27.

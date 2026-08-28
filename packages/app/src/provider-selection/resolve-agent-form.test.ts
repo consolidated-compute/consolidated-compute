@@ -95,6 +95,7 @@ function makeState(
       modeId: "",
       model: "",
       thinkingOptionId: "",
+      providerOptions: {},
       workingDir: "",
       ...overrides,
     },
@@ -960,25 +961,71 @@ describe("resolveAgentForm", () => {
 
   describe("SET_SERVER_ID", () => {
     it("updates serverId without marking it user-modified", () => {
-      const state = makeState();
+      const state = makeState({
+        serverId: "host-0",
+        providerOptions: { approval_policy: "never" },
+      });
       const next = resolveAgentForm(state, { type: "SET_SERVER_ID", value: "host-1" });
 
       expect(next.form.serverId).toBe("host-1");
+      expect(next.form.providerOptions).toEqual({});
       expect(next.userModified.serverId).toBe(false);
+    });
+
+    it("retains profile-native options when the host identity is unchanged", () => {
+      const providerOptions = { approval_policy: "never" };
+      const state = makeState({ serverId: "host-1", providerOptions });
+      const next = resolveAgentForm(state, { type: "SET_SERVER_ID", value: "host-1" });
+
+      expect(next.form.providerOptions).toBe(providerOptions);
     });
   });
 
   describe("SET_SERVER_ID_FROM_USER", () => {
     it("updates serverId and marks it user-modified", () => {
-      const state = makeState();
+      const state = makeState({
+        serverId: "host-1",
+        providerOptions: { approval_policy: "never" },
+      });
       const next = resolveAgentForm(state, { type: "SET_SERVER_ID_FROM_USER", value: "host-2" });
 
       expect(next.form.serverId).toBe("host-2");
+      expect(next.form.providerOptions).toEqual({});
       expect(next.userModified.serverId).toBe(true);
     });
   });
 
   describe("SET_PROVIDER_AND_MODEL_FROM_USER", () => {
+    it("clears profile-native options when switching providers", () => {
+      const state = makeState({
+        provider: "codex",
+        providerOptions: { sandbox: { mode: "workspace-write" } },
+      });
+      const next = resolveAgentForm(state, {
+        type: "SET_PROVIDER_AND_MODEL_FROM_USER",
+        provider: "claude",
+        modelId: "",
+        providerDef: TEST_CLAUDE_DEFINITION,
+        providerModels: null,
+      });
+
+      expect(next.form.providerOptions).toEqual({});
+    });
+
+    it("retains profile-native options when changing models within the same provider", () => {
+      const providerOptions = { sandbox: { mode: "workspace-write" } };
+      const state = makeState({ provider: "codex", providerOptions });
+      const next = resolveAgentForm(state, {
+        type: "SET_PROVIDER_AND_MODEL_FROM_USER",
+        provider: "codex",
+        modelId: "gpt-5.3-codex",
+        providerDef: TEST_CODEX_DEFINITION,
+        providerModels: CODEX_MODELS,
+      });
+
+      expect(next.form.providerOptions).toBe(providerOptions);
+    });
+
     it("sets provider, model, and default mode; marks both modified", () => {
       const state = makeState();
       const next = resolveAgentForm(state, {
@@ -1050,6 +1097,25 @@ describe("resolveAgentForm", () => {
   });
 
   describe("APPLY_PROFILE_FROM_USER", () => {
+    it("retains provider options from the selected profile", () => {
+      const providerOptions = {
+        sandbox: { mode: "workspace-write" },
+        approvalPolicy: "on-request",
+      };
+      const next = resolveAgentForm(makeState(), {
+        type: "APPLY_PROFILE_FROM_USER",
+        provider: "codex",
+        modelId: "gpt-5.3-codex",
+        modeId: "full-access",
+        thinkingOptionId: "xhigh",
+        providerOptions,
+        providerDef: TEST_CODEX_DEFINITION,
+        providerModels: CODEX_MODELS,
+      });
+
+      expect(next.form.providerOptions).toEqual(providerOptions);
+    });
+
     it("drops a stale saved mode for a modeless profile provider", () => {
       const next = resolveAgentForm(makeState({ provider: "codex", modeId: "full-access" }), {
         type: "APPLY_PROFILE_FROM_USER",
@@ -1057,6 +1123,7 @@ describe("resolveAgentForm", () => {
         modelId: "anthropic/sonnet",
         modeId: "",
         thinkingOptionId: "",
+        providerOptions: {},
         providerDef: TEST_PI_DEFINITION,
         providerModels: [{ provider: "pi", id: "anthropic/sonnet", label: "Sonnet" }],
         providerPrefs: { mode: "full-access" },
@@ -1076,6 +1143,7 @@ describe("resolveAgentForm", () => {
         modelId: "gpt-5.3-codex",
         modeId: "full-access",
         thinkingOptionId: "",
+        providerOptions: {},
         providerDef: TEST_CODEX_DEFINITION,
         providerModels: CODEX_MODELS,
         providerPrefs: { thinkingByModel: { "gpt-5.3-codex": "low" } },
@@ -1215,14 +1283,19 @@ describe("resolveAgentForm", () => {
   describe("RESET", () => {
     it("keeps form values but marks them unresolved for the next open", () => {
       const state = makeState(
-        { provider: "codex", modeId: "full-access", model: "gpt-5.3-codex" },
+        {
+          provider: "codex",
+          modeId: "full-access",
+          model: "gpt-5.3-codex",
+          providerOptions: { approval_policy: "never" },
+        },
         { provider: true, modeId: true, model: true },
         { status: "completed" },
       );
       const next = resolveAgentForm(state, { type: "RESET" });
 
       expect(next.userModified).toEqual(INITIAL_USER_MODIFIED);
-      expect(next.form).toEqual(state.form);
+      expect(next.form).toEqual({ ...state.form, providerOptions: {} });
       expect(next.resolution.status).toBe("pending");
     });
   });

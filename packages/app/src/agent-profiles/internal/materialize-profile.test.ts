@@ -24,6 +24,9 @@ describe("materializeAgentProfile", () => {
           modeId: "plan",
           thinkingOptionId: "think-hard",
           featureValues: { web_search: true },
+          providerOptions: {
+            sandbox: { enabled: true, failIfUnavailable: true },
+          },
         }),
       ),
     ).toEqual({
@@ -32,6 +35,9 @@ describe("materializeAgentProfile", () => {
       modeId: "plan",
       thinkingOptionId: "think-hard",
       featureValues: { web_search: true },
+      providerOptions: {
+        sandbox: { enabled: true, failIfUnavailable: true },
+      },
     });
   });
 
@@ -42,6 +48,7 @@ describe("materializeAgentProfile", () => {
       modeId: "",
       thinkingOptionId: "",
       featureValues: {},
+      providerOptions: {},
     });
   });
 
@@ -89,6 +96,16 @@ describe("toAgentConfigApply", () => {
     expect(
       toAgentConfigApply(materializeAgentProfile(profile({ model: "claude-opus-5" }))),
     ).not.toHaveProperty("provider");
+  });
+
+  it("does not apply creation-only provider options to an already running agent", () => {
+    expect(
+      toAgentConfigApply(
+        materializeAgentProfile(
+          profile({ providerOptions: { sandbox: { enabled: true, failIfUnavailable: true } } }),
+        ),
+      ),
+    ).not.toHaveProperty("providerOptions");
   });
 });
 

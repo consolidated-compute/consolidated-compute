@@ -18,7 +18,10 @@ import type { CreateAgentInitialValues } from "@/hooks/use-agent-form-state";
 import { useDraftAgentCreateFlow, type DraftCreateAttempt } from "@/composer/draft/create-flow";
 import { resolveTurnPresentation, TURN_LIVENESS_IDLE } from "@/timeline/turn-liveness";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
-import { buildWorkspaceDraftAgentConfig } from "@/screens/workspace/workspace-draft-agent-config";
+import {
+  buildWorkspaceDraftAgentConfig,
+  resolveWorkspaceDraftProviderOptions,
+} from "@/screens/workspace/workspace-draft-agent-config";
 import { buildDraftStoreKey } from "@/stores/draft-keys";
 import { useCreateFlowStore } from "@/stores/create-flow-store";
 import type { Agent } from "@/stores/session-store";
@@ -32,7 +35,7 @@ import {
   shouldAllowEmptyDraftText,
   validateDraftSubmission,
 } from "@/composer/draft/workspace-tab-core";
-import type { AgentCapabilityFlags } from "@getpaseo/protocol/agent-types";
+import type { AgentCapabilityFlags, ProviderOptions } from "@getpaseo/protocol/agent-types";
 import type { AgentSnapshotPayload } from "@getpaseo/protocol/messages";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { WorkspaceComposerAttachment } from "@/attachments/types";
@@ -72,6 +75,7 @@ interface AutoSubmitConfig {
   model: string | null;
   thinkingOptionId: string | null;
   featureValues: Record<string, unknown>;
+  providerOptions: ProviderOptions;
 }
 
 function resolveAutoSubmitConfig(
@@ -81,6 +85,7 @@ function resolveAutoSubmitConfig(
     model?: string | null;
     thinkingOptionId?: string | null;
     featureValues?: Record<string, unknown>;
+    providerOptions?: ProviderOptions;
   } | null,
 ): AutoSubmitConfig | null {
   if (!pending) return null;
@@ -90,6 +95,7 @@ function resolveAutoSubmitConfig(
     model: pending.model ?? null,
     thinkingOptionId: pending.thinkingOptionId ?? null,
     featureValues: pending.featureValues ?? {},
+    providerOptions: pending.providerOptions ?? {},
   };
 }
 
@@ -154,6 +160,7 @@ async function submitDraftCreateRequest(input: {
     effectiveModelId: string | null;
     effectiveThinkingOptionId: string | null;
     featureValues: Record<string, unknown> | undefined;
+    selectedProviderOptions: ProviderOptions;
   };
   hostDisconnectedMessage: string;
   selectModelMessage: string;
@@ -194,6 +201,10 @@ async function submitDraftCreateRequest(input: {
     thinkingOptionId:
       autoSubmitConfig?.thinkingOptionId ?? (composerState.effectiveThinkingOptionId || undefined),
     featureValues: autoSubmitConfig?.featureValues ?? composerState.featureValues,
+    providerOptions: resolveWorkspaceDraftProviderOptions({
+      autoSubmitConfig,
+      selectedProviderOptions: composerState.selectedProviderOptions,
+    }),
   });
 
   const imagesData = await encodeImages(images);

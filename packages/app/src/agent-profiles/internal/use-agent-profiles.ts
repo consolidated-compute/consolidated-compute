@@ -1,8 +1,8 @@
 import { useCallback } from "react";
-import type { AgentProfile } from "@getpaseo/protocol/messages";
+import type { AgentProfile, AgentProfilePatch } from "@getpaseo/protocol/messages";
 import { useDaemonConfig } from "@/hooks/use-daemon-config";
 import { useSessionStore } from "@/stores/session-store";
-import { supportsAgentProfiles } from "./capabilities";
+import { assertAgentProfilePatchesSupported, supportsAgentProfiles } from "./capabilities";
 
 export interface UseAgentProfilesResult {
   /** `null` until the daemon config has arrived. */
@@ -10,20 +10,20 @@ export interface UseAgentProfilesResult {
   /** False on daemons that predate agent profiles, or while disconnected. */
   isSupported: boolean;
   /** Writes the whole list; there is no per-profile RPC. */
-  saveProfiles: (next: AgentProfile[]) => Promise<void>;
+  saveProfiles: (next: AgentProfilePatch[]) => Promise<void>;
 }
 
 export function useAgentProfiles(serverId: string | null): UseAgentProfilesResult {
   const { config, patchConfig } = useDaemonConfig(serverId);
-  const isSupported = useSessionStore((state) => {
-    return supportsAgentProfiles(state.sessions[serverId ?? ""]?.serverInfo?.features);
-  });
+  const features = useSessionStore((state) => state.sessions[serverId ?? ""]?.serverInfo?.features);
+  const isSupported = supportsAgentProfiles(features);
 
   const saveProfiles = useCallback(
-    async (next: AgentProfile[]) => {
+    async (next: AgentProfilePatch[]) => {
+      assertAgentProfilePatchesSupported(features, next);
       await patchConfig({ agentProfiles: next });
     },
-    [patchConfig],
+    [features, patchConfig],
   );
 
   return {

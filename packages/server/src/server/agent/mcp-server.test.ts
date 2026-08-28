@@ -3296,6 +3296,112 @@ describe("create_agent MCP tool", () => {
     );
   });
 
+  it("resolves profile launches on the server instead of inheriting caller options", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    const parentAgent = {
+      id: "parent-agent",
+      cwd: existingCwd,
+      workspaceId: "wks_parent",
+      provider: "codex",
+      currentModeId: null,
+      config: {
+        providerOptions: {
+          sandbox_mode: "danger-full-access",
+          approval_policy: "never",
+        },
+      },
+    } as ManagedAgent;
+    spies.agentManager.getAgent.mockReturnValue(parentAgent);
+    spies.agentManager.createAgent.mockResolvedValue({
+      id: "profile-child",
+      provider: "codex",
+      cwd: existingCwd,
+      workspaceId: "wks_parent",
+      lifecycle: "idle",
+      currentModeId: "default",
+      availableModes: [],
+      config: { title: "Restricted reviewer" },
+    } as ManagedAgent);
+    const profiles: AgentProfile[] = [
+      {
+        id: "restricted-reviewer",
+        name: "Restricted reviewer",
+        provider: "codex",
+        model: "gpt-5.4",
+        modeId: "default",
+        thinkingOptionId: "high",
+        featureValues: { fast_mode: true },
+        providerOptions: {
+          sandbox_mode: "read-only",
+          approval_policy: "on-request",
+        },
+      },
+    ];
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      providerSnapshotManager: createOpenCodeManager().manager,
+      daemonConfigStore: daemonConfigStoreStub(profiles),
+      callerAgentId: "parent-agent",
+      logger,
+    });
+    const tool = registeredTool(server, "create_agent");
+    const input = {
+      ...subagentCurrentWorkspace(),
+      title: "Restricted reviewer",
+      profileId: "restricted-reviewer",
+      initialPrompt: "Review the implementation",
+    };
+
+    expect((await tool.inputSchema.safeParseAsync(input)).success).toBe(true);
+    expect(
+      (await tool.inputSchema.safeParseAsync({ ...input, provider: "codex/gpt-5.4" })).success,
+    ).toBe(false);
+    expect(
+      (await tool.inputSchema.safeParseAsync({ ...input, settings: { modeId: "full-access" } }))
+        .success,
+    ).toBe(false);
+    await tool.handler(input);
+
+    expect(spies.agentManager.createAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "codex",
+        model: "gpt-5.4",
+        modeId: "default",
+        thinkingOptionId: "high",
+        featureValues: { fast_mode: true },
+        providerOptions: {
+          sandbox_mode: "read-only",
+          approval_policy: "on-request",
+        },
+      }),
+      undefined,
+      expect.objectContaining({ workspaceId: "wks_parent" }),
+    );
+  });
+
+  it("rejects a missing profile before creating a top-level workspace", async () => {
+    const { agentManager, agentStorage } = createTestDeps();
+    const ensureWorkspace = vi.fn(async () => "workspace-created");
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      providerSnapshotManager: createOpenCodeManager().manager,
+      daemonConfigStore: daemonConfigStoreStub([]),
+      ensureWorkspaceForCreate: ensureWorkspace,
+      logger,
+    });
+
+    await expect(
+      registeredTool(server, "create_agent").handler({
+        title: "Missing profile",
+        profileId: "missing-profile",
+        initialPrompt: "Do work",
+      }),
+    ).rejects.toThrow("Agent Profile 'missing-profile' was not found");
+    expect(ensureWorkspace).not.toHaveBeenCalled();
+  });
+
   it("inherits the parent's workspaceId when an MCP child is created in the parent's working tree", async () => {
     const workdir = await mkdtemp(join(tmpdir(), "mcp-workspace-inherit-"));
     const storage = new AgentStorage(join(workdir, "agents"), logger);

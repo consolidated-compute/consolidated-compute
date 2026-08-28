@@ -187,6 +187,73 @@ describe("openAgentProfileForm", () => {
     expect(state.catalogResolution).toBe("idle");
   });
 
+  it("preserves opaque provider options across ordinary edit changes", () => {
+    const providerOptions = {
+      sandbox: {
+        enabled: true,
+        failIfUnavailable: true,
+        filesystem: {
+          allowWrite: ["/workspace/packages/app"],
+        },
+      },
+    };
+    const model = openAgentProfileForm({
+      mode: "edit",
+      profile: {
+        id: "p1",
+        name: "UI work",
+        provider: "claude",
+        model: "claude-opus-5",
+        modeId: "plan",
+        providerOptions,
+      },
+    });
+    model.applyProviderCatalog(ENTRIES);
+
+    model.setName("UI implementation");
+    model.setModel("claude-haiku-4-5", { label: "Haiku 4.5" });
+    model.setMode("accept-edits", { label: "Accept edits" });
+    model.setNotes("Keep the launch boundary intact.");
+
+    expect(model.getState().submitValue).toMatchObject({
+      name: "UI implementation",
+      provider: "claude",
+      model: "claude-haiku-4-5",
+      modeId: "accept-edits",
+      notes: "Keep the launch boundary intact.",
+      providerOptions,
+    });
+    expect(model.getState().submitValue?.providerOptions).toBe(providerOptions);
+  });
+
+  it("does not add provider options to a newly created profile", () => {
+    const model = openWithCatalog({ mode: "create" });
+    model.setName("UI work");
+    selectClaude(model);
+
+    expect(model.getState().submitValue).not.toHaveProperty("providerOptions");
+  });
+
+  it("clears provider-native options across a provider change", () => {
+    const model = openAgentProfileForm({
+      mode: "edit",
+      profile: {
+        id: "p1",
+        name: "Restricted review",
+        provider: "codex",
+        providerOptions: { sandbox_mode: "read-only" },
+      },
+    });
+    model.applyProviderCatalog(ENTRIES);
+
+    model.setProvider("claude", { label: "Claude" });
+
+    expect(model.getState().submitValue).toMatchObject({
+      provider: "claude",
+      providerOptions: null,
+    });
+  });
+
   it("upgrades seeded displays to catalog labels without touching selections", () => {
     const model = openAgentProfileForm({
       mode: "edit",

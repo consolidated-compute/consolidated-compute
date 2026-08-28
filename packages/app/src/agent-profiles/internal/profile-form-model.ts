@@ -5,26 +5,26 @@ import type {
   AgentSelectOption,
   ProviderSnapshotEntry,
 } from "@getpaseo/protocol/agent-types";
-import type { AgentProfile } from "@getpaseo/protocol/messages";
+import type { AgentProfile, AgentProfilePatch } from "@getpaseo/protocol/messages";
 import { formatAgentModeLabel, formatThinkingOptionLabel } from "@/agent-controls/labels";
 import { applyFeatureValues, pruneFeatureValues } from "@/hooks/feature-preferences";
 import { filterSelectableModels } from "@/provider-selection/model-catalog";
 
 /**
- * The persisted profile minus the id; the list owns identity.
+ * The profile patch minus the id; the list owns identity.
  *
- * `Omit` does not work here. `AgentProfileSchema` is `.passthrough()`, so
- * `AgentProfile` carries a `[key: string]: unknown` index signature, and
- * `Exclude<keyof AgentProfile, "id">` stays `string | number` — the named keys
+ * `Omit` does not work here. `AgentProfilePatchSchema` is `.passthrough()`, so
+ * `AgentProfilePatch` carries a `[key: string]: unknown` index signature, and
+ * `Exclude<keyof AgentProfilePatch, "id">` stays `string | number` — the named keys
  * come back as `unknown` and `name`/`provider` stop being required. Mapping
  * `keyof` with an `as` filter drops the index signature and the id together.
  */
 export type AgentProfileValue = {
-  [K in keyof AgentProfile as string extends K
+  [K in keyof AgentProfilePatch as string extends K
     ? never
     : K extends "id"
       ? never
-      : K]: AgentProfile[K];
+      : K]: AgentProfilePatch[K];
 };
 
 export interface AgentProfileFormDisplay {
@@ -336,7 +336,11 @@ export function buildFeatureRequestKey(request: AgentProfileFeatureRequest | nul
   ].join("|");
 }
 
-function buildSubmitValue(state: AgentProfileFormState): AgentProfileValue | null {
+function buildSubmitValue(
+  state: AgentProfileFormState,
+  preservedProvider: string | undefined,
+  preservedProviderOptions: AgentProfile["providerOptions"] | undefined,
+): AgentProfileValue | null {
   const name = state.name.trim();
   const notes = state.notes.trim();
   if (!name || !state.provider) {
@@ -352,6 +356,11 @@ function buildSubmitValue(state: AgentProfileFormState): AgentProfileValue | nul
     ...(state.thinkingOptionId ? { thinkingOptionId: state.thinkingOptionId } : {}),
     ...(Object.keys(state.featureValues).length > 0 ? { featureValues: state.featureValues } : {}),
     ...(notes ? { notes } : {}),
+    ...(preservedProviderOptions !== undefined
+      ? {
+          providerOptions: state.provider === preservedProvider ? preservedProviderOptions : null,
+        }
+      : {}),
   };
 }
 
@@ -420,6 +429,13 @@ function buildInitialState(snapshot: AgentProfileFormSnapshot): AgentProfileForm
 }
 
 export function openAgentProfileForm(snapshot: AgentProfileFormSnapshot): AgentProfileFormModel {
+  // Provider options are provider-native security configuration. Until this
+  // form has a dedicated authoring surface, edit mode carries the stored value
+  // through opaquely while the provider stays unchanged. A provider transition
+  // emits the patch protocol's explicit clear sentinel.
+  const preservedProvider = snapshot.mode === "edit" ? snapshot.profile?.provider : undefined;
+  const preservedProviderOptions =
+    snapshot.mode === "edit" ? snapshot.profile?.providerOptions : undefined;
   let entries: readonly ProviderSnapshotEntry[] = [];
   let catalogResolution: AgentProfileResolutionStatus = "idle";
   let resolvedFeatureKey: string | null = null;
@@ -499,7 +515,12 @@ export function openAgentProfileForm(snapshot: AgentProfileFormSnapshot): AgentP
       withOptions.provider.length > 0 &&
       !withOptions.isSubmitting;
     const resolved: AgentProfileFormState = { ...withOptions, disclosure, canSubmit };
-    return { ...resolved, submitValue: canSubmit ? buildSubmitValue(resolved) : null };
+    return {
+      ...resolved,
+      submitValue: canSubmit
+        ? buildSubmitValue(resolved, preservedProvider, preservedProviderOptions)
+        : null,
+    };
   }
 
   let state: AgentProfileFormState = derive(buildInitialState(snapshot));

@@ -90,8 +90,9 @@ import type { UserComposerAttachment } from "@/attachments/types";
 import type { AgentAttachment, ForgeSearchItem } from "@getpaseo/protocol/messages";
 import type { CreatePaseoWorktreeInput } from "@getpaseo/client/internal/daemon-client";
 import type { AgentProvider } from "@getpaseo/protocol/agent-types";
-import type { WorkspaceDraftTabSetup, WorkspaceTabTarget } from "@/workspace-tabs/model";
+import type { WorkspaceDraftTabSetup } from "@/workspace-tabs/model";
 import { isEmptyWorkspaceSubmission, runCreateEmptyWorkspace } from "./new-workspace-empty";
+import { resolveWorkspaceDraftSubmissionConfig } from "./new-workspace-draft-submission";
 import {
   getWorkspaceNamingAttachments,
   remapDraftCwdToWorkspace,
@@ -760,16 +761,6 @@ type NewWorkspaceComposerState = NonNullable<
   ReturnType<typeof useAgentInputDraft>["composerState"]
 >;
 
-interface WorkspaceDraftSubmissionConfig {
-  cwd: string;
-  provider: AgentProvider;
-  modeId: string | null;
-  model: string | null;
-  thinkingOptionId: string | null;
-  featureValues: Record<string, unknown> | undefined;
-  target: WorkspaceTabTarget;
-}
-
 async function createAndMergeWorkspace(input: {
   client: NonNullable<ReturnType<typeof useHostRuntimeClient>>;
   createInput: Parameters<
@@ -993,36 +984,6 @@ function usePendingWorkspaceDraftSetup(
   });
 }
 
-function resolveWorkspaceDraftSubmissionConfig(input: {
-  draftId: string;
-  workspaceDirectory: string;
-  provider: AgentProvider;
-  composerState: NewWorkspaceComposerState;
-  initialSetup?: WorkspaceDraftTabSetup;
-}): WorkspaceDraftSubmissionConfig {
-  const { draftId, workspaceDirectory, provider, composerState, initialSetup } = input;
-  if (initialSetup) {
-    return {
-      cwd: initialSetup.cwd,
-      provider: initialSetup.provider,
-      modeId: initialSetup.modeId,
-      model: initialSetup.model,
-      thinkingOptionId: initialSetup.thinkingOptionId,
-      featureValues: initialSetup.featureValues,
-      target: { kind: "draft", draftId, setup: initialSetup },
-    };
-  }
-  return {
-    cwd: workspaceDirectory,
-    provider,
-    modeId: composerState.selectedMode || null,
-    model: composerState.effectiveModelId || null,
-    thinkingOptionId: composerState.effectiveThinkingOptionId || null,
-    featureValues: composerState.featureValues,
-    target: { kind: "draft", draftId },
-  };
-}
-
 function submitWorkspaceDraft(input: SubmitDraftInput): void {
   const {
     serverId,
@@ -1076,6 +1037,7 @@ function submitWorkspaceDraft(input: SubmitDraftInput): void {
     ...(submission.model ? { model: submission.model } : {}),
     ...(submission.thinkingOptionId ? { thinkingOptionId: submission.thinkingOptionId } : {}),
     ...(submission.featureValues ? { featureValues: submission.featureValues } : {}),
+    ...(submission.providerOptions ? { providerOptions: submission.providerOptions } : {}),
     allowEmptyText: true,
   });
   clearDraft("sent");

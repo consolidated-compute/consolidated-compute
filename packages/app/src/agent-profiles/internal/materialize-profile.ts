@@ -23,8 +23,9 @@ export function reconcileMaterializedProfileMode(
 
 /**
  * The payload for a running agent. Omitted fields are left alone by the daemon,
- * so a profile that names no mode does not reset the agent's mode. Provider is
- * absent because a running agent cannot change the process it is.
+ * so a profile that names no mode does not reset the agent's mode. Provider and
+ * provider options are absent because a running agent cannot change its process
+ * or retroactively replace its native launch boundary.
  */
 export function toAgentConfigApply(profile: MaterializedAgentProfile): AgentConfigApply {
   return {

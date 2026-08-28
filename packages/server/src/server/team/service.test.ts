@@ -255,6 +255,10 @@ class MemoryProviderCatalog implements TeamProviderCatalog {
   async resolveCreateConfig(input: Parameters<TeamProviderCatalog["resolveCreateConfig"]>[0]) {
     return { modeId: input.requestedMode, featureValues: input.featureValues };
   }
+
+  async validateAgentConfiguration() {
+    return [];
+  }
 }
 
 class MemoryDaemonConfigStore {

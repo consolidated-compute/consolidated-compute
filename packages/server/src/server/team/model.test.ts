@@ -322,6 +322,7 @@ describe("Team Run contract", () => {
       modeId: "accept-edits",
       thinkingOptionId: null,
       featureValues: { auto_accept: false },
+      providerOptions: { permission: { edit: "allow", bash: "ask" } },
     };
 
     expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
@@ -362,6 +363,29 @@ describe("Team Run contract", () => {
       "snapshot",
       "resolvedLaunch",
       "featureValues",
+      "callback",
+    ]);
+  });
+
+  test("rejects non-JSON provider options in frozen launch facts", () => {
+    const run = createRun();
+    const unvalidatedLaunch = run.steps[1]!.snapshot.resolvedLaunch as unknown as {
+      providerOptions: Record<string, unknown>;
+    };
+    unvalidatedLaunch.providerOptions = {
+      callback: () => undefined,
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toContainEqual([
+      "steps",
+      1,
+      "snapshot",
+      "resolvedLaunch",
+      "providerOptions",
       "callback",
     ]);
   });

@@ -22,7 +22,7 @@ A Team has:
 
 The first workflow is sequential. A role may appear in more than one step. A step may add instructions for that occurrence. There are no conditions, retries, or fan-out.
 
-Paseo Agent Profiles own how one worker launches: provider, model, mode, thinking, and feature settings. Team roles own what that worker does. Do not copy profile launch fields into a Team definition.
+Paseo Agent Profiles own how one worker launches: provider, model, mode, thinking, feature settings, and provider-native options. Team roles own what that worker does. Do not copy profile launch fields into a Team definition.
 
 Profile IDs are host-local. A Team remains visible when one is missing or deleted, but it cannot run until every role references exactly one configured profile. Never select another profile, provider, or model as a fallback.
 
@@ -32,7 +32,7 @@ A Team does not own a Workspace. Starting a run supplies an opaque `workspaceId`
 
 Team updates, deletion, and run start use the expected Team revision. Run start also uses a caller-retained idempotency key. The repository must snapshot the accepted revision and write the run before execution begins.
 
-Run admission reads the daemon's authoritative Agent Profile configuration once. It materializes each referenced profile with vanilla Paseo semantics, validates the provider, model, mode, thinking, and feature settings against the selected Workspace, and freezes the profile ID and resolved launch values into every run step. Later profile edits affect only future admissions. Missing or invalid profiles make future starts fail explicitly; they cannot change an active or historical run.
+Run admission reads the daemon's authoritative Agent Profile configuration once. It materializes each referenced profile with vanilla Paseo semantics, validates the provider, model, mode, thinking, feature settings, and provider-native options against the selected Workspace, and freezes the profile ID and resolved launch values into every run step. Later profile edits affect only future admissions. Missing or invalid profiles make future starts fail explicitly; they cannot change an active or historical run.
 
 Only one Team Run may own a Workspace at a time. The lock covers active, permission-waiting, stopping, and stop-failed runs. It does not isolate the Workspace from people or ordinary Paseo agents.
 

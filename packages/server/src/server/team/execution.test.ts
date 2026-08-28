@@ -84,6 +84,10 @@ function createProfiles(): AgentProfile[] {
       modeId: " workspace-write ",
       thinkingOptionId: " high ",
       featureValues: { fast_mode: true },
+      providerOptions: {
+        sandbox_mode: "workspace-write",
+        approval_policy: "on-request",
+      },
     },
     {
       id: "profile_reviewer",
@@ -136,6 +140,18 @@ class MemoryProviderCatalog implements TeamProviderCatalog {
     featureValues: Record<string, unknown> | undefined;
   }> = [];
   readonly modes = new Map<string, string[]>();
+  readonly configurationReads: Array<{
+    cwd?: string;
+    provider: string;
+    model?: string;
+    modeId?: string;
+    thinkingOptionId?: string;
+    providerOptions?: AgentSessionConfig["providerOptions"];
+  }> = [];
+  readonly configurationIssues = new Map<
+    string,
+    Array<{ path: Array<string | number>; message: string }>
+  >();
 
   constructor() {
     this.models.set("codex", [
@@ -182,6 +198,18 @@ class MemoryProviderCatalog implements TeamProviderCatalog {
       throw new Error(`Invalid mode '${input.requestedMode}' for provider '${input.provider}'`);
     }
     return { modeId: input.requestedMode, featureValues: input.featureValues };
+  }
+
+  async validateAgentConfiguration(input: {
+    cwd?: string;
+    provider: string;
+    model?: string;
+    modeId?: string;
+    thinkingOptionId?: string;
+    providerOptions?: AgentSessionConfig["providerOptions"];
+  }) {
+    this.configurationReads.push(input);
+    return this.configurationIssues.get(input.provider) ?? [];
   }
 }
 
@@ -337,6 +365,10 @@ describe("Team Run preflight", () => {
         modeId: "workspace-write",
         thinkingOptionId: "high",
         featureValues: { fast_mode: true },
+        providerOptions: {
+          sandbox_mode: "workspace-write",
+          approval_policy: "on-request",
+        },
       },
       {
         profileId: "profile_reviewer",
@@ -345,6 +377,7 @@ describe("Team Run preflight", () => {
         modeId: null,
         thinkingOptionId: null,
         featureValues: {},
+        providerOptions: {},
       },
     ]);
     expect(harness.providerCatalog.refreshes).toEqual([
@@ -376,6 +409,10 @@ describe("Team Run preflight", () => {
         modeId: "workspace-write",
         thinkingOptionId: "high",
         featureValues: { fast_mode: true },
+        providerOptions: {
+          sandbox_mode: "workspace-write",
+          approval_policy: "on-request",
+        },
       },
     ]);
     expect(harness.workspaceStore.reads).toEqual(["wks_team_test", "wks_team_test"]);
@@ -414,6 +451,35 @@ describe("Team Run preflight", () => {
     expect(harness.providerCatalog.refreshes).toEqual([]);
     expect(harness.providerCatalog.reads).toEqual([]);
     expect(harness.providerCatalog.createConfigReads).toEqual([]);
+  });
+
+  test("rejects provider options that are invalid for the selected Workspace launch", async () => {
+    const harness = createHarness();
+    harness.providerCatalog.configurationIssues.set("codex", [
+      {
+        path: ["providerOptions", "approval_policy"],
+        message: "Invalid approval policy",
+      },
+    ]);
+
+    await expect(
+      preflightTeamRun(harness.preflightDependencies, {
+        definition: createDefinition(),
+        workspaceId: "wks_team_test",
+      }),
+    ).rejects.toMatchObject({
+      code: "team_execution_preflight_failed",
+      issues: [
+        {
+          kind: "launch_unavailable",
+          roleId: "role_builder",
+          profileId: "profile_builder",
+          provider: "codex",
+          message: "providerOptions.approval_policy: Invalid approval policy",
+        },
+      ],
+    });
+    expect(harness.creations).toEqual([]);
   });
 
   test("resolves every Team role even when the workflow does not use it", async () => {
@@ -654,6 +720,42 @@ describe("Team step execution", () => {
     expect(harness.creations).toEqual([]);
   });
 
+  test("revalidates frozen provider options before agent creation", async () => {
+    const harness = createHarness();
+    const definition = createDefinition();
+    const accepted = await preflightTeamRun(harness.preflightDependencies, {
+      definition,
+      workspaceId: "wks_team_test",
+    });
+    const run = createRun(definition, accepted);
+    harness.providerCatalog.configurationIssues.set("codex", [
+      {
+        path: ["providerOptions", "approval_policy"],
+        message: "Approval policy is no longer available",
+      },
+    ]);
+
+    await expect(
+      collectEvents(
+        executeTeamStep(harness.executionDependencies, {
+          run,
+          stepId: "step_build",
+          plannedAgentId,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      issues: [
+        {
+          kind: "launch_unavailable",
+          roleId: "role_builder",
+          profileId: "profile_builder",
+          message: "providerOptions.approval_policy: Approval policy is no longer available",
+        },
+      ],
+    });
+    expect(harness.creations).toEqual([]);
+  });
+
   test("owns one stream and launches the frozen profile after that profile is deleted", async () => {
     const harness = createHarness();
     const definition = createDefinition();
@@ -744,6 +846,12 @@ describe("Team step execution", () => {
       mode: "workspace-write",
       thinking: "high",
       features: { fast_mode: true },
+      config: {
+        providerOptions: {
+          sandbox_mode: "workspace-write",
+          approval_policy: "on-request",
+        },
+      },
       title: "Delivery Team: Builder",
       labels: {
         [TEAM_ID_LABEL]: "team_delivery",

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, type ReactElement } from "react";
-import type { AgentProfile } from "@getpaseo/protocol/messages";
+import type { AgentProfile, AgentProfilePatch } from "@getpaseo/protocol/messages";
 import { AgentProfileEditModal } from "./settings/agent-profile-edit-modal";
 import { generateAgentProfileId } from "./internal/profile-id";
 import type { AgentProfileSeed, AgentProfileValue } from "./internal/profile-form-model";
@@ -47,7 +47,7 @@ export function useAgentProfileEditor(serverId: string | null): AgentProfileEdit
     async (value: AgentProfileValue) => {
       const current = profiles ?? [];
       const editing = request?.mode === "edit" ? request.profile : undefined;
-      const next: AgentProfile[] = editing
+      const next: AgentProfilePatch[] = editing
         ? current.map((entry) => (entry.id === editing.id ? { id: entry.id, ...value } : entry))
         : [...current, { id: generateAgentProfileId(), ...value }];
       await saveProfiles(next);
