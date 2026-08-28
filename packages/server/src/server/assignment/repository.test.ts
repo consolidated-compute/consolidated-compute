@@ -14,6 +14,7 @@ import {
 import {
   AssignmentArtifactConflictError,
   AssignmentArtifactPageError,
+  AssignmentNotFoundError,
   AssignmentRepository,
   AssignmentRevisionConflictError,
   AssignmentStateConflictError,
@@ -338,6 +339,12 @@ describe("AssignmentRepository", () => {
         cursor: firstPage.nextCursor!,
       }),
     ).rejects.toBeInstanceOf(AssignmentArtifactPageError);
+  });
+
+  test("rejects Artifact listing for a missing Assignment", async () => {
+    await expect(
+      repository.listArtifacts({ assignmentId: "asgn_0123456789abcdef" }),
+    ).rejects.toBeInstanceOf(AssignmentNotFoundError);
   });
 
   test("reports corrupt Artifact files while retaining healthy results", async () => {

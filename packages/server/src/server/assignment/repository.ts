@@ -361,7 +361,7 @@ export class AssignmentRepository {
   }
 
   async listArtifacts(input: ListAssignmentArtifactsInput): Promise<AssignmentArtifactPage> {
-    requireAssignmentId(input.assignmentId);
+    await this.requireAssignment(input.assignmentId);
     const limit = normalizeArtifactPageLimit(input.limit);
     const { records, issues } = await this.readArtifacts();
     const assignmentArtifacts = records.filter(
