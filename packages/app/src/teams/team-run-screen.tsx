@@ -22,7 +22,7 @@ import {
 } from "@/utils/host-routes";
 import { formatTimeAgo } from "@/utils/time";
 import { toErrorMessage } from "@/utils/error-messages";
-import { canCancelTeamRun, matchesTeamRunRoute } from "./run-data";
+import { canCancelTeamRun, matchesTeamRunRoute, resolveTeamRunBackTarget } from "./run-data";
 import { useTeamRunMutations } from "./use-team-run-mutations";
 import { useTeamRun } from "./use-team-runs";
 
@@ -43,15 +43,21 @@ export function TeamRunScreen({
   const mutations = useTeamRunMutations();
   const [cancelError, setCancelError] = useState<string | null>(null);
   const run = query.data && matchesTeamRunRoute(query.data, teamId) ? query.data : null;
-  const back = useCallback(
-    () =>
-      router.replace(
-        (run?.assignmentId
-          ? buildAssignmentRoute(serverId, run.assignmentId)
-          : buildTeamRoute(serverId, teamId)) as Href,
-      ),
-    [run?.assignmentId, serverId, teamId],
-  );
+  const back = useCallback(() => {
+    const target = resolveTeamRunBackTarget({
+      canGoBack: router.canGoBack(),
+      assignmentId: run?.assignmentId,
+    });
+    if (target.kind === "history") {
+      router.back();
+      return;
+    }
+    router.replace(
+      (target.kind === "assignment"
+        ? buildAssignmentRoute(serverId, target.assignmentId)
+        : buildTeamRoute(serverId, teamId)) as Href,
+    );
+  }, [run?.assignmentId, serverId, teamId]);
   const openWorkspace = useCallback(() => {
     if (!run) return;
     router.push(buildHostWorkspaceRoute(serverId, run.workspace.workspaceId) as Href);

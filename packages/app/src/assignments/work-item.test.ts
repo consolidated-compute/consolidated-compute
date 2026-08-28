@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { forgeSearchItemToWorkItem, pluginAttachmentItemToWorkItem } from "./work-item";
+import {
+  forgeSearchItemToWorkItem,
+  pluginAttachmentItemToWorkItem,
+  resolveWorkItemSearchSnapshot,
+} from "./work-item";
 
 describe("Assignment Work Item adapters", () => {
   it("captures only a bounded forge reference snapshot", () => {
@@ -46,5 +50,36 @@ describe("Assignment Work Item adapters", () => {
       title: "Implement UI",
       url: "https://linear.app/example/issue/ENG-12",
     });
+  });
+
+  it("surfaces Forge payload failures and authentication state", () => {
+    const snapshot = resolveWorkItemSearchSnapshot({
+      useForge: true,
+      forge: {
+        data: { error: "Run gh auth login", authState: "unauthenticated" },
+        error: null,
+        isFetching: false,
+      },
+      plugin: { error: null, isFetching: false },
+      forgeSetupError: "Set up Forge on this host",
+    });
+
+    expect(snapshot).toEqual({
+      error: "Run gh auth login",
+      authState: "unauthenticated",
+      isFetching: false,
+    });
+    expect(
+      resolveWorkItemSearchSnapshot({
+        useForge: true,
+        forge: {
+          data: { error: null, authState: "cli_missing" },
+          error: null,
+          isFetching: false,
+        },
+        plugin: { error: null, isFetching: false },
+        forgeSetupError: "Set up Forge on this host",
+      }).error,
+    ).toBe("Set up Forge on this host");
   });
 });

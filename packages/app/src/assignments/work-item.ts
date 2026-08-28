@@ -1,7 +1,23 @@
-import type { ForgeSearchItem } from "@getpaseo/protocol/messages";
+import type { ForgeAuthState, ForgeSearchItem } from "@getpaseo/protocol/messages";
 import type { AssignmentWorkItemReferenceDto } from "@getpaseo/protocol/assignment/types";
 import type { PluginAttachmentItem } from "@getpaseo/plugin";
 import { getForgePresentation } from "@/git/forge";
+
+interface WorkItemSearchQuerySnapshot {
+  error: unknown;
+  isFetching: boolean;
+}
+
+interface WorkItemForgeSearchQuerySnapshot extends WorkItemSearchQuerySnapshot {
+  data?: {
+    error: string | null;
+    authState: ForgeAuthState;
+  };
+}
+
+export interface WorkItemSearchSnapshot extends WorkItemSearchQuerySnapshot {
+  authState: ForgeAuthState | null;
+}
 
 function normalizeResourceType(value: string): string {
   const normalized = value
@@ -43,4 +59,27 @@ export function pluginAttachmentItemToWorkItem(
     title: item.title,
     url: item.url,
   };
+}
+
+export function resolveWorkItemSearchSnapshot(input: {
+  useForge: boolean;
+  forge: WorkItemForgeSearchQuerySnapshot;
+  plugin: WorkItemSearchQuerySnapshot;
+  forgeSetupError: string;
+}): WorkItemSearchSnapshot {
+  if (!input.useForge) {
+    return { error: input.plugin.error, authState: null, isFetching: input.plugin.isFetching };
+  }
+  const authError = forgeSearchRequiresSetup(input.forge.data?.authState ?? null)
+    ? input.forgeSetupError
+    : null;
+  return {
+    error: input.forge.error ?? input.forge.data?.error ?? authError,
+    authState: input.forge.data?.authState ?? null,
+    isFetching: input.forge.isFetching,
+  };
+}
+
+function forgeSearchRequiresSetup(authState: ForgeAuthState | null): boolean {
+  return authState !== null && authState !== "authenticated";
 }

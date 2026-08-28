@@ -20,7 +20,11 @@ import type { InstalledPlugin } from "@/plugins/types";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
 import { useHostWorkspaces } from "@/stores/session-store-hooks";
-import { forgeSearchItemToWorkItem, pluginAttachmentItemToWorkItem } from "./work-item";
+import {
+  forgeSearchItemToWorkItem,
+  pluginAttachmentItemToWorkItem,
+  resolveWorkItemSearchSnapshot,
+} from "./work-item";
 
 type WorkItemSource =
   | {
@@ -115,16 +119,8 @@ function buildSources(
   return [...forgeSources, ...pluginSources];
 }
 
-function resolveSearchSnapshot(
-  useForge: boolean,
-  forge: { error: unknown; isFetching: boolean },
-  plugin: { error: unknown; isFetching: boolean },
-) {
-  if (useForge) return forge;
-  return plugin;
-}
-
 function useWorkItemPicker(serverId: string) {
+  const { t } = useTranslation();
   const client = useHostRuntimeClient(serverId);
   const connected = useHostRuntimeIsConnected(serverId);
   const workspaces = useHostWorkspaces(serverId);
@@ -192,7 +188,12 @@ function useWorkItemPicker(serverId: string) {
     setSelectedSourceId(sourceId);
     setQuery("");
   }, []);
-  const searchSnapshot = resolveSearchSnapshot(activeForge !== null, forgeQuery, pluginQuery);
+  const searchSnapshot = resolveWorkItemSearchSnapshot({
+    useForge: activeForge !== null,
+    forge: forgeQuery,
+    plugin: pluginQuery,
+    forgeSetupError: t("workspace.git.forgeSetup.generic", { brand: "Forge" }),
+  });
   return {
     activeSource,
     connected,
