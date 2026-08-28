@@ -794,6 +794,16 @@ describe("Team Run form model", () => {
       submission: null,
     });
     expect(model.getState().roleResolutions[0]?.securityPosture).toBeNull();
+
+    model.applySecurityPreviewPending(request.requestKey);
+
+    expect(model.getState()).toMatchObject({
+      securityPreviewStatus: "pending",
+      securityPreviewError: null,
+      validationIssue: "security_preview_loading",
+      canSubmit: false,
+      submission: null,
+    });
   });
 
   it("does not republish identical security adapter results", () => {
@@ -815,8 +825,10 @@ describe("Team Run form model", () => {
     model.applySecurityPreviewError(request.requestKey, "Preview failed");
     model.applySecurityPreviewError(request.requestKey, "Preview failed");
     model.applySecurityPreviewCapability(true);
+    model.applySecurityPreviewPending(request.requestKey);
+    model.applySecurityPreviewPending(request.requestKey);
 
-    expect(notifications).toBe(1);
+    expect(notifications).toBe(2);
     unsubscribe();
   });
 
@@ -835,6 +847,7 @@ describe("Team Run form model", () => {
     model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
     model.applyFeatureCatalog("planner", "late", []);
     model.applySecurityPreviewCapability(true);
+    model.applySecurityPreviewPending("late");
     model.applySecurityPreview("late", securityPreview());
     model.applySecurityPreviewError("late", "late");
     expect(model.getState()).toBe(stateAtClose);

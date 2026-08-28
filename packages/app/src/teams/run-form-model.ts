@@ -121,6 +121,7 @@ export interface TeamRunFormModel {
     entries: readonly ProviderSnapshotEntry[] | null,
   ) => void;
   applySecurityPreviewCapability: (supported: boolean) => void;
+  applySecurityPreviewPending: (requestKey: string) => void;
   applySecurityPreview: (requestKey: string, preview: TeamRunPreviewDto) => void;
   applySecurityPreviewError: (requestKey: string, error: string) => void;
   applyFeatureCatalog: (
@@ -705,6 +706,13 @@ export function openTeamRunForm(
     applySecurityPreviewCapability: (supported) => {
       if (securityPreviewCapability === supported) return;
       securityPreviewCapability = supported;
+      publish(state);
+    },
+    applySecurityPreviewPending: (requestKey) => {
+      if (requestKey !== state.securityPreviewRequest?.requestKey) return;
+      if (!securityPreviewFailure && resolvedSecurityPreview?.requestKey !== requestKey) return;
+      resolvedSecurityPreview = null;
+      securityPreviewFailure = null;
       publish(state);
     },
     applySecurityPreview: (requestKey, preview) => {

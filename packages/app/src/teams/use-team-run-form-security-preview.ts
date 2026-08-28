@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useFetchQuery } from "@/data/query";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
@@ -9,7 +9,7 @@ import type { TeamRunFormModel, TeamRunFormState } from "./run-form-model";
 export function useTeamRunFormSecurityPreview(
   model: TeamRunFormModel,
   state: TeamRunFormState,
-): void {
+): { retry: () => void } {
   const { t } = useTranslation();
   const client = useHostRuntimeClient(state.serverId);
   const connected = useHostRuntimeIsConnected(state.serverId);
@@ -44,4 +44,13 @@ export function useTeamRunFormSecurityPreview(
     if (!requestKey || !query.isError) return;
     model.applySecurityPreviewError(requestKey, toErrorMessage(query.error));
   }, [model, query.error, query.isError, requestKey]);
+
+  const { refetch } = query;
+  const retry = useCallback(() => {
+    if (!requestKey) return;
+    model.applySecurityPreviewPending(requestKey);
+    void refetch();
+  }, [model, refetch, requestKey]);
+
+  return { retry };
 }

@@ -61,7 +61,7 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
   const state = useSyncExternalStore(model.subscribe, model.getState, model.getState);
   useTeamRunFormProviderSnapshot(model, state);
   const { connected } = useTeamRunFormFeatureCatalogs(model, state);
-  useTeamRunFormSecurityPreview(model, state);
+  const { retry: retrySecurityPreview } = useTeamRunFormSecurityPreview(model, state);
   const { cancelCompletion, pending, startPress } = useTeamRunFormSubmission(
     model,
     props.onStarted,
@@ -174,11 +174,22 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
             <TeamSecurityPostureNotice kind="pending" testID="team-run-security-preview-pending" />
           ) : null}
           {state.securityPreviewStatus === "error" ? (
-            <TeamSecurityPostureNotice
-              kind="error"
-              message={state.securityPreviewError ?? undefined}
-              testID="team-run-security-preview-error"
-            />
+            <View style={styles.securityPreviewError}>
+              <TeamSecurityPostureNotice
+                kind="error"
+                message={state.securityPreviewError ?? undefined}
+                testID="team-run-security-preview-error"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onPress={retrySecurityPreview}
+                disabled={pending || !connected}
+                testID="team-run-security-preview-retry"
+              >
+                {t("common.actions.retry")}
+              </Button>
+            </View>
           ) : null}
           {state.roleResolutions.map((resolution) => (
             <View
@@ -264,6 +275,7 @@ const styles = StyleSheet.create((theme) => ({
   },
   assignmentMeta: { color: theme.colors.foregroundExtraMuted, fontSize: theme.fontSize.sm },
   section: { gap: theme.spacing[3] },
+  securityPreviewError: { alignItems: "flex-start", gap: theme.spacing[2] },
   sectionTitle: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.base,
