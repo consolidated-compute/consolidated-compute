@@ -271,6 +271,7 @@ export const ptBR: TranslationResources = {
       refreshFailed: "Não foi possível atualizar Visual",
     },
   },
+  assignments: en.assignments,
   teams: {
     ...en.teams,
     title: "Equipes",

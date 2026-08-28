@@ -10,11 +10,15 @@ import { BackHeader } from "@/components/headers/back-header";
 import { Button } from "@/components/ui/button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { StatusBadge, type StatusBadgeVariant } from "@/components/ui/status-badge";
+import { AssignmentArtifactCard } from "@/assignments/artifact-card";
+import { artifactsForRun } from "@/assignments/artifact-data";
+import { useAssignmentArtifacts } from "@/assignments/use-assignment-artifacts";
 import { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import {
   buildHostAgentDetailRoute,
   buildHostWorkspaceRoute,
+  buildAssignmentRoute,
   buildTeamRoute,
 } from "@/utils/host-routes";
 import { formatTimeAgo } from "@/utils/time";
@@ -41,8 +45,13 @@ export function TeamRunScreen({
   const [cancelError, setCancelError] = useState<string | null>(null);
   const run = query.data && matchesTeamRunRoute(query.data, teamId) ? query.data : null;
   const back = useCallback(
-    () => router.replace(buildTeamRoute(serverId, teamId) as Href),
-    [serverId, teamId],
+    () =>
+      router.replace(
+        (run?.assignmentId
+          ? buildAssignmentRoute(serverId, run.assignmentId)
+          : buildTeamRoute(serverId, teamId)) as Href,
+      ),
+    [run?.assignmentId, serverId, teamId],
   );
   const openWorkspace = useCallback(() => {
     if (!run) return;
@@ -132,6 +141,31 @@ export function TeamRunScreen({
         <DetailSection title={t("teams.runs.detail.objective")}>
           <Text style={styles.bodyText}>{run.objective}</Text>
         </DetailSection>
+        {run.assignmentSnapshot ? (
+          <DetailSection title={t("teams.runs.detail.frozenAssignment")}>
+            <View
+              style={styles.card}
+              testID={`team-run-frozen-assignment-${encodeURIComponent(serverId)}-${encodeURIComponent(run.assignmentSnapshot.id)}`}
+            >
+              <Text style={styles.cardTitle}>{run.assignmentSnapshot.title}</Text>
+              <Text style={styles.meta}>
+                {t("assignments.detail.revision", {
+                  revision: run.assignmentSnapshot.revision,
+                })}
+              </Text>
+              <Text style={styles.bodyText}>{run.assignmentSnapshot.objective}</Text>
+              {run.assignmentSnapshot.workItem ? (
+                <View style={styles.frozenReference}>
+                  <Text style={styles.cardTitle}>{run.assignmentSnapshot.workItem.title}</Text>
+                  <Text style={styles.meta}>
+                    {run.assignmentSnapshot.workItem.sourceLabel} ·{" "}
+                    {run.assignmentSnapshot.workItem.identifier}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          </DetailSection>
+        ) : null}
         <DetailSection title={t("teams.runs.detail.workspace")}>
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{run.workspace.displayName}</Text>
@@ -166,6 +200,13 @@ export function TeamRunScreen({
             </View>
           </View>
         </DetailSection>
+        <DetailSection title={t("teams.runs.detail.artifacts")}>
+          {run.assignmentId ? (
+            <TeamRunArtifacts serverId={serverId} assignmentId={run.assignmentId} runId={run.id} />
+          ) : (
+            <Text style={styles.bodyText}>{t("assignments.artifacts.legacy")}</Text>
+          )}
+        </DetailSection>
         {"error" in run.state ? <Text style={styles.error}>{run.state.error}</Text> : null}
         {cancelError ? <Text style={styles.error}>{cancelError}</Text> : null}
       </ScrollView>
@@ -176,6 +217,74 @@ export function TeamRunScreen({
     <View style={styles.container}>
       <BackHeader title={run?.teamSnapshot.name ?? t("teams.runs.detail.title")} onBack={back} />
       {content}
+    </View>
+  );
+}
+
+function TeamRunArtifacts({
+  serverId,
+  assignmentId,
+  runId,
+}: {
+  serverId: string;
+  assignmentId: string;
+  runId: string;
+}): ReactElement {
+  const { t } = useTranslation();
+  const query = useAssignmentArtifacts(serverId, assignmentId);
+  const artifacts = useMemo(
+    () => artifactsForRun(query.artifacts, runId),
+    [query.artifacts, runId],
+  );
+  const { refetch, fetchNextPage } = query;
+  const retry = useCallback(() => void refetch(), [refetch]);
+  const loadMore = useCallback(() => void fetchNextPage(), [fetchNextPage]);
+
+  if (query.isLoading) {
+    return (
+      <View style={styles.artifactLoading}>
+        <LoadingSpinner size="small" color={styles.spinner.color} />
+      </View>
+    );
+  }
+
+  return (
+    <View
+      style={styles.cards}
+      testID={`team-run-artifacts-${encodeURIComponent(serverId)}-${encodeURIComponent(assignmentId)}-${encodeURIComponent(runId)}`}
+    >
+      {query.isError ? (
+        <View style={styles.inlineAction}>
+          <Text style={styles.error}>{toErrorMessage(query.error)}</Text>
+          <Button variant="ghost" size="sm" onPress={retry}>
+            {t("common.actions.retry")}
+          </Button>
+        </View>
+      ) : null}
+      {query.issues.map((issue) => (
+        <Text key={`${issue.collection}:${issue.fileName}`} style={styles.error}>
+          {issue.fileName}: {issue.message}
+        </Text>
+      ))}
+      {!query.isError && artifacts.length === 0 ? (
+        <Text style={styles.bodyText}>
+          {t(query.canLoad ? "assignments.artifacts.empty" : "assignments.artifacts.offline")}
+        </Text>
+      ) : null}
+      {artifacts.map((artifact) => (
+        <AssignmentArtifactCard key={artifact.id} artifact={artifact} serverId={serverId} />
+      ))}
+      {query.hasNextPage ? (
+        <Button
+          variant="outline"
+          size="sm"
+          onPress={loadMore}
+          disabled={query.isFetchingNextPage}
+          loading={query.isFetchingNextPage}
+        >
+          {t("teams.runs.actions.loadMore")}
+        </Button>
+      ) : null}
     </View>
   );
 }
@@ -341,6 +450,12 @@ const styles = StyleSheet.create((theme) => ({
     borderTopWidth: 1,
     borderTopColor: theme.colors.border,
   },
+  frozenReference: {
+    gap: theme.spacing[1],
+    paddingTop: theme.spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+  },
   meta: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.sm },
   bodyText: { color: theme.colors.foregroundMuted, fontSize: theme.fontSize.base, lineHeight: 22 },
   stepHeading: { flexDirection: "row", alignItems: "center", gap: theme.spacing[3] },
@@ -362,5 +477,7 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.surface2,
   },
   profileLabel: { color: theme.colors.foreground, fontSize: theme.fontSize.sm },
+  artifactLoading: { minHeight: 72, alignItems: "center", justifyContent: "center" },
+  inlineAction: { flexDirection: "row", alignItems: "center", gap: theme.spacing[2] },
   error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm },
 }));

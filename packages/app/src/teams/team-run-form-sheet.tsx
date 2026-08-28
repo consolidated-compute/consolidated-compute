@@ -7,6 +7,7 @@ import {
   type TeamDefinitionDto,
   type TeamRunDto,
 } from "@getpaseo/protocol/team/types";
+import type { AssignmentDto } from "@getpaseo/protocol/assignment/types";
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
 import { Button } from "@/components/ui/button";
 import type { FieldControlSize } from "@/components/ui/control-geometry";
@@ -24,6 +25,7 @@ import { useTeamRunFormSubmission } from "./use-team-run-form-submission";
 export interface TeamRunFormSheetProps {
   serverId: string;
   team: TeamDefinitionDto;
+  assignment?: AssignmentDto;
   onClose: () => void;
   onStarted: (run: TeamRunDto) => void;
 }
@@ -52,6 +54,7 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
     team: props.team,
     workspaces: workspaceOptions,
     profiles,
+    assignment: props.assignment,
   });
   const state = useSyncExternalStore(model.subscribe, model.getState, model.getState);
   useTeamRunFormProviderSnapshot(model, state);
@@ -129,21 +132,33 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
           size={controlSize}
           testID="team-run-workspace-field"
         />
-        <Field label={t("teams.runs.form.objective")}>
-          <FormTextInput
-            initialValue={state.objective}
-            onChangeText={model.setObjective}
-            placeholder={t("teams.runs.form.objectivePlaceholder")}
-            maxLength={TEAM_OBJECTIVE_MAX_CHARS}
-            multiline
-            numberOfLines={5}
-            editable={!pending}
-            size={controlSize}
-            style={styles.multiline}
-            accessibilityLabel={t("teams.runs.form.objective")}
-            testID="team-run-objective"
-          />
-        </Field>
+        {state.assignment ? (
+          <View style={styles.assignmentCard} testID="team-run-assignment">
+            <Text style={styles.assignmentTitle}>{state.assignment.title}</Text>
+            <Text style={styles.assignmentObjective}>{state.assignment.objective}</Text>
+            {state.assignment.workItem ? (
+              <Text style={styles.assignmentMeta}>
+                {state.assignment.workItem.sourceLabel} · {state.assignment.workItem.identifier}
+              </Text>
+            ) : null}
+          </View>
+        ) : (
+          <Field label={t("teams.runs.form.objective")}>
+            <FormTextInput
+              initialValue={state.objective}
+              onChangeText={model.setObjective}
+              placeholder={t("teams.runs.form.objectivePlaceholder")}
+              maxLength={TEAM_OBJECTIVE_MAX_CHARS}
+              multiline
+              numberOfLines={5}
+              editable={!pending}
+              size={controlSize}
+              style={styles.multiline}
+              accessibilityLabel={t("teams.runs.form.objective")}
+              testID="team-run-objective"
+            />
+          </Field>
+        )}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t("teams.runs.form.launchPlan")}</Text>
           {state.roleResolutions.map((resolution) => (
@@ -199,6 +214,25 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
 const styles = StyleSheet.create((theme) => ({
   body: { padding: theme.spacing[6], gap: theme.spacing[6] },
   multiline: { minHeight: 120 },
+  assignmentCard: {
+    gap: theme.spacing[2],
+    padding: theme.spacing[4],
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface1,
+  },
+  assignmentTitle: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.medium,
+  },
+  assignmentObjective: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.base,
+    lineHeight: 22,
+  },
+  assignmentMeta: { color: theme.colors.foregroundExtraMuted, fontSize: theme.fontSize.sm },
   section: { gap: theme.spacing[3] },
   sectionTitle: {
     color: theme.colors.foreground,

@@ -4,6 +4,7 @@ import type {
   ProviderSnapshotEntry,
 } from "@getpaseo/protocol/agent-types";
 import { materializeAgentProfile } from "@getpaseo/protocol/agent-profiles";
+import type { AssignmentDto } from "@getpaseo/protocol/assignment/types";
 import type { AgentProfile } from "@getpaseo/protocol/messages";
 import { TEAM_OBJECTIVE_MAX_CHARS, type TeamDefinitionDto } from "@getpaseo/protocol/team/types";
 import { filterSelectableModels } from "@/provider-selection/model-catalog";
@@ -54,7 +55,7 @@ export type TeamRunFormValidationIssue =
   | "profiles_loading"
   | "profile_unavailable";
 
-export interface TeamRunFormSubmission {
+interface TeamRunFormSubmissionBase {
   serverId: string;
   teamId: string;
   expectedRevision: number;
@@ -62,6 +63,12 @@ export interface TeamRunFormSubmission {
   objective: string;
   workspaceId: string;
 }
+
+export type TeamRunFormSubmission = TeamRunFormSubmissionBase &
+  (
+    | { assignmentId: string; expectedAssignmentRevision: number }
+    | { assignmentId?: never; expectedAssignmentRevision?: never }
+  );
 
 export interface TeamRunFormState {
   serverId: string;
@@ -72,6 +79,7 @@ export interface TeamRunFormState {
   selectedWorkspaceCwd: string | null;
   catalogGeneration: number;
   objective: string;
+  assignment: AssignmentDto | null;
   roleResolutions: TeamRunRoleResolution[];
   validationIssue: TeamRunFormValidationIssue | null;
   canSubmit: boolean;
@@ -84,6 +92,7 @@ export interface TeamRunFormSnapshot {
   team: TeamDefinitionDto;
   workspaces: readonly TeamRunWorkspaceOption[];
   profiles?: readonly AgentProfile[] | null;
+  assignment?: AssignmentDto;
 }
 
 export interface TeamRunFormModel {
@@ -397,7 +406,8 @@ export function openTeamRunForm(
     selectedWorkspaceDisplay: initialWorkspace?.display ?? null,
     selectedWorkspaceCwd: initialWorkspace?.cwd ?? null,
     catalogGeneration: 0,
-    objective: "",
+    objective: snapshot.assignment?.objective ?? "",
+    assignment: snapshot.assignment ?? null,
     roleResolutions: [],
     validationIssue: null,
     canSubmit: false,
@@ -421,17 +431,26 @@ export function openTeamRunForm(
     });
     const draft = { ...next, roleResolutions };
     const issue = validationIssue(draft);
-    const submission =
-      issue === null && draft.selectedWorkspaceId
-        ? {
-            serverId: draft.serverId,
-            teamId: draft.team.id,
-            expectedRevision: draft.team.revision,
-            idempotencyKey,
-            objective: draft.objective.trim(),
-            workspaceId: draft.selectedWorkspaceId,
-          }
-        : null;
+    let submission: TeamRunFormSubmission | null = null;
+    if (issue === null && draft.selectedWorkspaceId) {
+      const base = {
+        serverId: draft.serverId,
+        teamId: draft.team.id,
+        expectedRevision: draft.team.revision,
+        idempotencyKey,
+        objective: draft.objective.trim(),
+        workspaceId: draft.selectedWorkspaceId,
+      };
+      if (draft.assignment) {
+        submission = {
+          ...base,
+          assignmentId: draft.assignment.id,
+          expectedAssignmentRevision: draft.assignment.revision,
+        };
+      } else {
+        submission = base;
+      }
+    }
     state = {
       ...draft,
       validationIssue: issue,
@@ -521,7 +540,10 @@ export function openTeamRunForm(
         submitError: null,
       });
     },
-    setObjective: (objective) => publish({ ...state, objective, submitError: null }),
+    setObjective: (objective) => {
+      if (state.assignment) return;
+      publish({ ...state, objective, submitError: null });
+    },
     setSubmitError: (submitError) => publish({ ...state, submitError }),
   };
 }

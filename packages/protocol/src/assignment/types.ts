@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+export const ASSIGNMENT_TITLE_MAX_CHARS = 120;
+export const ASSIGNMENT_OBJECTIVE_MAX_CHARS = 32_000;
+export const ASSIGNMENT_WORK_ITEM_SOURCE_ID_MAX_CHARS = 128;
+export const ASSIGNMENT_WORK_ITEM_SOURCE_LABEL_MAX_CHARS = 120;
+export const ASSIGNMENT_WORK_ITEM_RESOURCE_TYPE_MAX_CHARS = 128;
+export const ASSIGNMENT_WORK_ITEM_RESOURCE_ID_MAX_CHARS = 2_048;
+export const ASSIGNMENT_WORK_ITEM_IDENTIFIER_MAX_CHARS = 256;
+export const ASSIGNMENT_WORK_ITEM_TITLE_MAX_CHARS = 512;
+export const ASSIGNMENT_WORK_ITEM_URL_MAX_CHARS = 8_192;
+
 export const AssignmentWorkItemReferenceDtoSchema = z.object({
   sourceId: z.string(),
   sourceLabel: z.string(),

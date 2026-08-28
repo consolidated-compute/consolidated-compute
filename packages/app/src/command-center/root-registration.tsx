@@ -5,6 +5,7 @@ import {
   Activity,
   CalendarClock,
   CircleDashed,
+  ClipboardList,
   Folder,
   FolderPlus,
   History,
@@ -28,6 +29,7 @@ import { clearCommandCenterFocusRestoreElement } from "@/utils/command-center-fo
 import {
   buildOpenProjectRoute,
   buildOperationsRoute,
+  buildAssignmentsRoute,
   buildSchedulesRoute,
   buildSessionsRoute,
   buildSettingsRoute,
@@ -62,6 +64,9 @@ const ThemedSettings = withUnistyles(Settings, (theme) => ({
   color: theme.colors.foregroundMuted,
 }));
 const ThemedUsersRound = withUnistyles(UsersRound, (theme) => ({
+  color: theme.colors.foregroundMuted,
+}));
+const ThemedClipboardList = withUnistyles(ClipboardList, (theme) => ({
   color: theme.colors.foregroundMuted,
 }));
 const ThemedHome = withUnistyles(Home, (theme) => ({ color: theme.colors.foregroundMuted }));
@@ -102,6 +107,10 @@ function TeamsIcon({ size }: CommandCenterIconProps) {
   return <ThemedUsersRound size={size} strokeWidth={2.2} />;
 }
 
+function AssignmentsIcon({ size }: CommandCenterIconProps) {
+  return <ThemedClipboardList size={size} strokeWidth={2.2} />;
+}
+
 function KeyboardIcon({ size }: CommandCenterIconProps) {
   return <ThemedKeyboard size={size} strokeWidth={2.2} />;
 }
@@ -131,6 +140,7 @@ export function CommandCenterRootActions() {
   const sessionsRoute = useMemo<Href>(() => buildSessionsRoute(), []);
   const schedulesRoute = useMemo<Href>(() => buildSchedulesRoute(), []);
   const teamsRoute = useMemo<Href>(() => buildTeamsRoute() as Href, []);
+  const assignmentsRoute = useMemo<Href>(() => buildAssignmentsRoute() as Href, []);
   const setShortcutsDialogOpen = useKeyboardShortcutsStore((state) => state.setShortcutsDialogOpen);
   // Narrow selector on purpose: a whole-store subscription would re-register every root action
   // each time host filters are reconciled.
@@ -294,7 +304,7 @@ export function CommandCenterRootActions() {
         id: "settings",
         group: "actions",
         groupRank: 0,
-        rank: 8,
+        rank: 9,
         keywords: ["settings", "preferences", "config", "configuration"],
         visibility: "always",
         run: () => {
@@ -311,6 +321,24 @@ export function CommandCenterRootActions() {
             undefined,
         },
       },
+      {
+        id: "assignments",
+        group: "actions",
+        groupRank: 0,
+        rank: 8,
+        keywords: ["assignments", "work", "intent", "artifacts", "teams"],
+        visibility: "always",
+        run: () => {
+          clearCommandCenterFocusRestoreElement();
+          router.push(assignmentsRoute);
+        },
+        presentation: {
+          kind: "action",
+          title: t("assignments.title"),
+          sectionTitle: t("shell.commandCenter.actions"),
+          icon: AssignmentsIcon,
+        },
+      },
     ];
 
     if (shortcutsAvailable) {
@@ -318,7 +346,7 @@ export function CommandCenterRootActions() {
         id: "keyboard-shortcuts",
         group: "actions",
         groupRank: 0,
-        rank: 9,
+        rank: 10,
         keywords: ["keyboard", "shortcuts", "keys", "hotkeys"],
         visibility: "always",
         run: () => setShortcutsDialogOpen(true),
@@ -350,6 +378,7 @@ export function CommandCenterRootActions() {
     return availableActions;
   }, [
     groupMode,
+    assignmentsRoute,
     homeRoute,
     keyboardActionDispatcher,
     openAddProject,

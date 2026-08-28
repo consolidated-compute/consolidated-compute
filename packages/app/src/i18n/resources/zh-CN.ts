@@ -268,6 +268,7 @@ export const zhCN: TranslationResources = {
       refreshFailed: "无法刷新可视化",
     },
   },
+  assignments: en.assignments,
   teams: {
     ...en.teams,
     title: "团队",

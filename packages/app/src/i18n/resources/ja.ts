@@ -271,6 +271,7 @@ export const ja: TranslationResources = {
       refreshFailed: "ビジュアルを更新できませんでした",
     },
   },
+  assignments: en.assignments,
   teams: {
     ...en.teams,
     title: "チーム",

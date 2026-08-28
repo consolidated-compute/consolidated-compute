@@ -14,6 +14,8 @@ import {
   buildTeamRoute,
   buildTeamRunRoute,
   buildTeamsRoute,
+  buildAssignmentRoute,
+  buildAssignmentsRoute,
   buildProjectSettingsRoute,
   buildProjectsSettingsRoute,
   decodeFilePathFromPathSegment,
@@ -214,6 +216,16 @@ describe("projects settings routes", () => {
 });
 
 describe("global routes", () => {
+  it("builds host-qualified Assignment routes", () => {
+    expect(buildAssignmentsRoute()).toBe("/assignments");
+    expect(buildAssignmentRoute("host a", "assignment/1")).toBe(
+      "/assignments/host%20a/assignment%2F1",
+    );
+    expect(() => buildAssignmentRoute("", "assignment-1")).toThrow(
+      "buildAssignmentRoute requires a serverId and assignmentId",
+    );
+  });
+
   it("builds host-qualified Team routes", () => {
     expect(buildTeamsRoute()).toBe("/teams");
     expect(buildTeamRoute("host a", "team/1")).toBe("/teams/host%20a/team%2F1");

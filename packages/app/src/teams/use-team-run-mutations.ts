@@ -40,8 +40,21 @@ export function useTeamRunMutations() {
 
   const start = useMutation({
     mutationFn: async (input: TeamRunFormSubmission) => {
-      const { serverId, ...options } = input;
-      return requireClient(serverId).startTeamRun(options);
+      const client = requireClient(input.serverId);
+      const shared = {
+        teamId: input.teamId,
+        expectedRevision: input.expectedRevision,
+        idempotencyKey: input.idempotencyKey,
+        workspaceId: input.workspaceId,
+      };
+      if (input.assignmentId !== undefined) {
+        return client.startAssignmentTeamRun({
+          ...shared,
+          assignmentId: input.assignmentId,
+          expectedAssignmentRevision: input.expectedAssignmentRevision,
+        });
+      }
+      return client.startTeamRun({ ...shared, objective: input.objective });
     },
     onSuccess: async (payload, input) => applyRun(input.serverId, payload.run),
   });

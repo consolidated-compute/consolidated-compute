@@ -2,6 +2,7 @@ import { router, usePathname, type Href } from "expo-router";
 import {
   Activity,
   CalendarClock,
+  ClipboardList,
   FolderPlus,
   GitBranch,
   History,
@@ -70,6 +71,7 @@ import {
   buildNewWorkspaceRoute,
   buildOpenProjectRoute,
   buildOperationsRoute,
+  buildAssignmentsRoute,
   buildSchedulesRoute,
   buildSessionsRoute,
   buildSettingsAddHostRoute,
@@ -126,6 +128,7 @@ interface SidebarLabels {
   operations: string;
   visual: string;
   teams: string;
+  assignments: string;
   closeSidebar: string;
 }
 
@@ -138,6 +141,7 @@ interface MobileSidebarProps extends SidebarSharedProps {
   handleViewOperationsNavigate: () => void;
   handleViewVisualNavigate: () => void;
   handleViewTeamsNavigate: () => void;
+  handleViewAssignmentsNavigate: () => void;
 }
 
 interface DesktopSidebarProps extends SidebarSharedProps {
@@ -148,6 +152,7 @@ interface DesktopSidebarProps extends SidebarSharedProps {
   handleViewOperations: () => void;
   handleViewVisual: () => void;
   handleViewTeams: () => void;
+  handleViewAssignments: () => void;
 }
 
 export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boolean }) {
@@ -258,6 +263,10 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
     router.push(buildTeamsRoute() as Href);
   }, []);
 
+  const handleViewAssignmentsNavigate = useCallback(() => {
+    router.push(buildAssignmentsRoute() as Href);
+  }, []);
+
   const newWorkspaceKeys = useShortcutKeys("new-workspace");
   const labels = useMemo(
     (): SidebarLabels => ({
@@ -272,6 +281,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
       operations: t("operations.title"),
       visual: t("visual.title"),
       teams: t("teams.title"),
+      assignments: t("assignments.title"),
       closeSidebar: t("sidebar.actions.closeSidebar"),
     }),
     [t],
@@ -316,6 +326,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
           handleViewOperationsNavigate={handleViewOperationsNavigate}
           handleViewVisualNavigate={handleViewVisualNavigate}
           handleViewTeamsNavigate={handleViewTeamsNavigate}
+          handleViewAssignmentsNavigate={handleViewAssignmentsNavigate}
         />
       </RetainedPanelActivity>
     );
@@ -337,6 +348,7 @@ export const LeftSidebar = memo(function LeftSidebar({ active }: { active: boole
         handleViewOperations={handleViewOperationsNavigate}
         handleViewVisual={handleViewVisualNavigate}
         handleViewTeams={handleViewTeamsNavigate}
+        handleViewAssignments={handleViewAssignmentsNavigate}
       />
     </RetainedPanelActivity>
   );
@@ -671,6 +683,7 @@ function MobileSidebar({
   handleViewOperationsNavigate,
   handleViewVisualNavigate,
   handleViewTeamsNavigate,
+  handleViewAssignmentsNavigate,
 }: MobileSidebarProps) {
   const pathname = usePathname();
   const hasActiveHostFilter = useSidebarViewStore((state) => state.hostFilters.length > 0);
@@ -679,6 +692,7 @@ function MobileSidebar({
   const isOperationsActive = pathname === "/operations";
   const isVisualActive = pathname === "/visual";
   const isTeamsActive = pathname === "/teams" || pathname.startsWith("/teams/");
+  const isAssignmentsActive = pathname === "/assignments" || pathname.startsWith("/assignments/");
   const { gesture: closeGesture, gestureRef: closeGestureRef } = useCloseAgentListGesture();
   const dragGestureHostPresented = useIsMobilePanelPresented("agent-list");
 
@@ -706,6 +720,11 @@ function MobileSidebar({
     closeSidebar();
     handleViewTeamsNavigate();
   }, [closeSidebar, handleViewTeamsNavigate]);
+
+  const handleViewAssignments = useCallback(() => {
+    closeSidebar();
+    handleViewAssignmentsNavigate();
+  }, [closeSidebar, handleViewAssignmentsNavigate]);
 
   const handleWorkspacePress = useCallback(() => {
     closeSidebar();
@@ -774,6 +793,14 @@ function MobileSidebar({
             onPress={handleViewTeams}
             isActive={isTeamsActive}
             testID="sidebar-teams"
+            variant="compact"
+          />
+          <SidebarHeaderRow
+            icon={ClipboardList}
+            label={labels.assignments}
+            onPress={handleViewAssignments}
+            isActive={isAssignmentsActive}
+            testID="sidebar-assignments"
             variant="compact"
           />
           <PluginSidebarItems onBeforeNavigate={closeSidebar} />
@@ -868,6 +895,7 @@ function DesktopSidebar({
   handleViewOperations,
   handleViewVisual,
   handleViewTeams,
+  handleViewAssignments,
 }: DesktopSidebarProps) {
   const ownsTopLeft = useOwnsWindowChromeCorner("top-left");
   const pathname = usePathname();
@@ -877,6 +905,7 @@ function DesktopSidebar({
   const isOperationsActive = pathname === "/operations";
   const isVisualActive = pathname === "/visual";
   const isTeamsActive = pathname === "/teams" || pathname.startsWith("/teams/");
+  const isAssignmentsActive = pathname === "/assignments" || pathname.startsWith("/assignments/");
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
   const { width: viewportWidth } = useWindowDimensions();
@@ -1029,6 +1058,14 @@ function DesktopSidebar({
               onPress={handleViewTeams}
               isActive={isTeamsActive}
               testID="sidebar-teams"
+              variant="compact"
+            />
+            <SidebarHeaderRow
+              icon={ClipboardList}
+              label={labels.assignments}
+              onPress={handleViewAssignments}
+              isActive={isAssignmentsActive}
+              testID="sidebar-assignments"
               variant="compact"
             />
             <PluginSidebarItems />
