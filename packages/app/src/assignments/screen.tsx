@@ -785,7 +785,9 @@ function AssignmentRunRow({
 
 function AssignmentArtifacts({ assignment }: { assignment: AggregatedAssignment }): ReactElement {
   const { t } = useTranslation();
-  const query = useAssignmentArtifacts(assignment.serverId, assignment.id);
+  const query = useAssignmentArtifacts(assignment.serverId, assignment.id, {
+    assignmentStatus: assignment.state.status,
+  });
   const { refetch, fetchNextPage } = query;
   const retry = useCallback(() => void refetch(), [refetch]);
   const loadMore = useCallback(() => void fetchNextPage(), [fetchNextPage]);

@@ -1,6 +1,7 @@
 import type {
   AssignmentArtifactDto,
   AssignmentCollectionIssueDto,
+  AssignmentStateDto,
 } from "@getpaseo/protocol/assignment/types";
 
 export const assignmentArtifactsQueryBaseKey = ["assignmentArtifacts"] as const;
@@ -12,11 +13,13 @@ export interface AssignmentArtifactPage {
 }
 
 export interface AssignmentArtifactQueryOptions {
+  assignmentStatus?: AssignmentStateDto["status"];
   teamRunId?: string;
   runIsActive?: boolean;
 }
 
 export function assignmentArtifactsShouldPoll(options: AssignmentArtifactQueryOptions): boolean {
+  if (options.assignmentStatus && options.assignmentStatus !== "open") return false;
   return !options.teamRunId || options.runIsActive === true;
 }
 

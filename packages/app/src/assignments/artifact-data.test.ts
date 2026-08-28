@@ -43,8 +43,11 @@ describe("Assignment Artifact data", () => {
     ]);
   });
 
-  it("polls active data but not terminal run-scoped history", () => {
+  it("polls only while the owning Assignment or Team Run can produce Artifacts", () => {
     expect(assignmentArtifactsShouldPoll({})).toBe(true);
+    expect(assignmentArtifactsShouldPoll({ assignmentStatus: "open" })).toBe(true);
+    expect(assignmentArtifactsShouldPoll({ assignmentStatus: "completed" })).toBe(false);
+    expect(assignmentArtifactsShouldPoll({ assignmentStatus: "canceled" })).toBe(false);
     expect(assignmentArtifactsShouldPoll({ teamRunId: "run-1", runIsActive: true })).toBe(true);
     expect(assignmentArtifactsShouldPoll({ teamRunId: "run-1", runIsActive: false })).toBe(false);
   });
