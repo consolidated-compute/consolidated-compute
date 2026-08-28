@@ -624,6 +624,14 @@ function applyProfile(state: AgentFormReducerState, action: ApplyProfileAction) 
   };
 }
 
+function setFormServerId(form: FormState, serverId: string | null): FormState {
+  return {
+    ...form,
+    serverId,
+    providerOptions: form.serverId === serverId ? form.providerOptions : {},
+  };
+}
+
 export function resolveAgentForm(
   state: AgentFormReducerState,
   action: AgentFormAction,
@@ -640,12 +648,15 @@ export function resolveAgentForm(
       return completeResolution(state, action);
 
     case "SET_SERVER_ID":
-      return { ...state, form: { ...state.form, serverId: action.value } };
+      return {
+        ...state,
+        form: setFormServerId(state.form, action.value),
+      };
 
     case "SET_SERVER_ID_FROM_USER":
       return {
         ...state,
-        form: { ...state.form, serverId: action.value },
+        form: setFormServerId(state.form, action.value),
         userModified: { ...state.userModified, serverId: true },
       };
 
@@ -759,6 +770,7 @@ export function resolveAgentForm(
     case "RESET":
       return {
         ...state,
+        form: { ...state.form, providerOptions: {} },
         userModified: INITIAL_USER_MODIFIED,
         resolution: INITIAL_AGENT_FORM_RESOLUTION,
       };

@@ -961,20 +961,36 @@ describe("resolveAgentForm", () => {
 
   describe("SET_SERVER_ID", () => {
     it("updates serverId without marking it user-modified", () => {
-      const state = makeState();
+      const state = makeState({
+        serverId: "host-0",
+        providerOptions: { approval_policy: "never" },
+      });
       const next = resolveAgentForm(state, { type: "SET_SERVER_ID", value: "host-1" });
 
       expect(next.form.serverId).toBe("host-1");
+      expect(next.form.providerOptions).toEqual({});
       expect(next.userModified.serverId).toBe(false);
+    });
+
+    it("retains profile-native options when the host identity is unchanged", () => {
+      const providerOptions = { approval_policy: "never" };
+      const state = makeState({ serverId: "host-1", providerOptions });
+      const next = resolveAgentForm(state, { type: "SET_SERVER_ID", value: "host-1" });
+
+      expect(next.form.providerOptions).toBe(providerOptions);
     });
   });
 
   describe("SET_SERVER_ID_FROM_USER", () => {
     it("updates serverId and marks it user-modified", () => {
-      const state = makeState();
+      const state = makeState({
+        serverId: "host-1",
+        providerOptions: { approval_policy: "never" },
+      });
       const next = resolveAgentForm(state, { type: "SET_SERVER_ID_FROM_USER", value: "host-2" });
 
       expect(next.form.serverId).toBe("host-2");
+      expect(next.form.providerOptions).toEqual({});
       expect(next.userModified.serverId).toBe(true);
     });
   });
@@ -1267,14 +1283,19 @@ describe("resolveAgentForm", () => {
   describe("RESET", () => {
     it("keeps form values but marks them unresolved for the next open", () => {
       const state = makeState(
-        { provider: "codex", modeId: "full-access", model: "gpt-5.3-codex" },
+        {
+          provider: "codex",
+          modeId: "full-access",
+          model: "gpt-5.3-codex",
+          providerOptions: { approval_policy: "never" },
+        },
         { provider: true, modeId: true, model: true },
         { status: "completed" },
       );
       const next = resolveAgentForm(state, { type: "RESET" });
 
       expect(next.userModified).toEqual(INITIAL_USER_MODIFIED);
-      expect(next.form).toEqual(state.form);
+      expect(next.form).toEqual({ ...state.form, providerOptions: {} });
       expect(next.resolution.status).toBe("pending");
     });
   });
