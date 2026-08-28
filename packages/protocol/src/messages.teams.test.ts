@@ -8,6 +8,7 @@ import {
 } from "./messages.js";
 import {
   TeamDefinitionDtoSchema,
+  TeamResolvedLaunchDtoSchema,
   TeamRunDtoSchema,
   TeamRunStepDtoSchema,
   TeamRunStepSnapshotDtoSchema,
@@ -59,6 +60,10 @@ const run = {
           modeId: "default",
           thinkingOptionId: "high",
           featureValues: { fast_mode: false },
+          providerOptions: {
+            sandbox_mode: "workspace-write",
+            approval_policy: "on-request",
+          },
         },
       },
       state: { status: "pending" as const },
@@ -90,6 +95,31 @@ describe("Team wire contracts", () => {
 
   test("carries the frozen resolved profile facts only in Team Run history", () => {
     expect(TeamRunDtoSchema.parse({ ...run, serverId: "must-not-cross-the-wire" })).toEqual(run);
+  });
+
+  test("keeps frozen provider options compatible with old Team Run payloads and clients", () => {
+    const LegacyResolvedLaunchSchema = TeamResolvedLaunchDtoSchema.omit({
+      providerOptions: true,
+    });
+    const LegacyStepSnapshotSchema = TeamRunStepSnapshotDtoSchema.extend({
+      resolvedLaunch: LegacyResolvedLaunchSchema,
+    });
+    const LegacyStepSchema = TeamRunStepDtoSchema.extend({ snapshot: LegacyStepSnapshotSchema });
+    const LegacyRunSchema = TeamRunDtoSchema.extend({ steps: z.array(LegacyStepSchema) });
+    const { providerOptions: _providerOptions, ...legacyResolvedLaunch } =
+      run.steps[0].snapshot.resolvedLaunch;
+    const legacyRun = {
+      ...run,
+      steps: [
+        {
+          ...run.steps[0],
+          snapshot: { ...run.steps[0].snapshot, resolvedLaunch: legacyResolvedLaunch },
+        },
+      ],
+    };
+
+    expect(TeamRunDtoSchema.parse(legacyRun)).toEqual(legacyRun);
+    expect(LegacyRunSchema.parse(run)).toEqual(legacyRun);
   });
 
   test("keeps Assignment-backed run fields optional for old run payloads and ignorable by old clients", () => {

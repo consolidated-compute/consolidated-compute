@@ -1,5 +1,15 @@
 import type { AgentSessionConfig } from "@getpaseo/protocol/agent-types";
 
+export function resolveWorkspaceDraftProviderOptions(input: {
+  autoSubmitConfig: { providerOptions: NonNullable<AgentSessionConfig["providerOptions"]> } | null;
+  selectedProviderOptions: NonNullable<AgentSessionConfig["providerOptions"]>;
+}): NonNullable<AgentSessionConfig["providerOptions"]> {
+  if (input.autoSubmitConfig) {
+    return input.autoSubmitConfig.providerOptions;
+  }
+  return input.selectedProviderOptions;
+}
+
 export function buildWorkspaceDraftAgentConfig(input: {
   provider: AgentSessionConfig["provider"];
   cwd: string;

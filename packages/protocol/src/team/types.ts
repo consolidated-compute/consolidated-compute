@@ -16,6 +16,7 @@ export const TeamResolvedLaunchDtoSchema = z.object({
   modeId: z.string().nullable(),
   thinkingOptionId: z.string().nullable(),
   featureValues: z.record(z.string(), z.unknown()),
+  providerOptions: z.record(z.string(), z.json()).optional(),
 });
 
 export const TeamRoleDtoSchema = z.object({

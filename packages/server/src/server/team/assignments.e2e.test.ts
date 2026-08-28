@@ -172,6 +172,7 @@ test("freezes a three-role Assignment run and hands forward only declared Artifa
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: {},
+        providerOptions: {},
       },
       {
         profileId: "codex-builder",
@@ -180,6 +181,7 @@ test("freezes a three-role Assignment run and hands forward only declared Artifa
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: { test_feature: true },
+        providerOptions: {},
       },
       {
         profileId: "security-review",
@@ -188,6 +190,7 @@ test("freezes a three-role Assignment run and hands forward only declared Artifa
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: {},
+        providerOptions: {},
       },
     ]);
 

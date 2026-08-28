@@ -102,7 +102,7 @@ export interface TeamWorkspaceStore {
 
 export type TeamProviderCatalog = Pick<
   ProviderSnapshotManager,
-  "refreshSnapshotForCwd" | "listModels" | "resolveCreateConfig"
+  "refreshSnapshotForCwd" | "listModels" | "resolveCreateConfig" | "validateAgentConfiguration"
 >;
 
 export interface TeamFeatureCatalog {
@@ -362,6 +362,21 @@ async function resolveRoleLaunch(input: {
   const resolvedModeId = resolvedCreateConfig.modeId ?? null;
   const resolvedFeatureValues = resolvedCreateConfig.featureValues ?? {};
   if (
+    !(await validateLaunchConfiguration({
+      providerCatalog: input.providerCatalog,
+      cwd: input.cwd,
+      provider: input.materialized.provider,
+      model: model.model,
+      modeId: resolvedModeId,
+      thinkingOptionId,
+      providerOptions: input.materialized.providerOptions,
+      issueInput: input,
+      issues: input.issues,
+    }))
+  ) {
+    return null;
+  }
+  if (
     !(await validateFeatureValues({
       featureCatalog: input.featureCatalog,
       config: {
@@ -372,6 +387,9 @@ async function resolveRoleLaunch(input: {
         ...(thinkingOptionId ? { thinkingOptionId } : {}),
         ...(Object.keys(resolvedFeatureValues).length > 0
           ? { featureValues: resolvedFeatureValues }
+          : {}),
+        ...(Object.keys(input.materialized.providerOptions).length > 0
+          ? { providerOptions: input.materialized.providerOptions }
           : {}),
       },
       issueInput: input,
@@ -389,6 +407,7 @@ async function resolveRoleLaunch(input: {
     modeId: resolvedModeId,
     thinkingOptionId,
     featureValues: resolvedFeatureValues,
+    providerOptions: input.materialized.providerOptions,
   });
   if (!parsed.success) {
     input.issues.push({
@@ -424,6 +443,54 @@ function nonEmptyFeatureValues(
   featureValues: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   return Object.keys(featureValues).length > 0 ? featureValues : undefined;
+}
+
+function nonEmptyProviderOptions(
+  providerOptions: AgentSessionConfig["providerOptions"],
+): AgentSessionConfig["providerOptions"] {
+  return providerOptions && Object.keys(providerOptions).length > 0 ? providerOptions : undefined;
+}
+
+async function validateLaunchConfiguration(input: {
+  providerCatalog: TeamProviderCatalog;
+  cwd: string;
+  provider: string;
+  model: string | null;
+  modeId: string | null;
+  thinkingOptionId: string | null;
+  providerOptions: AgentSessionConfig["providerOptions"];
+  issueInput: {
+    role: { id: string; profileId: string };
+    materialized: { provider: string };
+  };
+  issues: TeamExecutionPreflightIssue[];
+}): Promise<boolean> {
+  try {
+    const validationIssues = await input.providerCatalog.validateAgentConfiguration({
+      cwd: input.cwd,
+      provider: input.provider,
+      ...(input.model ? { model: input.model } : {}),
+      ...(input.modeId ? { modeId: input.modeId } : {}),
+      ...(input.thinkingOptionId ? { thinkingOptionId: input.thinkingOptionId } : {}),
+      ...(nonEmptyProviderOptions(input.providerOptions)
+        ? { providerOptions: input.providerOptions }
+        : {}),
+    });
+    for (const issue of validationIssues) {
+      const path = issue.path.join(".");
+      input.issues.push(
+        launchIssue(
+          input.issueInput,
+          input.model,
+          path ? `${path}: ${issue.message}` : issue.message,
+        ),
+      );
+    }
+    return validationIssues.length === 0;
+  } catch (error) {
+    input.issues.push(launchIssue(input.issueInput, input.model, errorMessage(error)));
+    return false;
+  }
 }
 
 function findModel(models: AgentModelDefinition[], requestedModel: string) {
@@ -604,6 +671,9 @@ export async function* executeTeamStep(
     mode: launch.modeId ?? undefined,
     thinking: launch.thinkingOptionId ?? undefined,
     features: nonEmptyFeatureValues(launch.featureValues),
+    ...(launch.providerOptions && Object.keys(launch.providerOptions).length > 0
+      ? { config: { providerOptions: launch.providerOptions } }
+      : {}),
     title: `${input.run.teamSnapshot.name}: ${step.snapshot.roleName}`,
     labels: {
       [TEAM_ID_LABEL]: input.run.teamId,
@@ -727,6 +797,22 @@ async function validateResolvedLaunch(
     return;
   }
 
+  if (
+    !(await validateLaunchConfiguration({
+      providerCatalog,
+      cwd,
+      provider,
+      model,
+      modeId: launch.modeId,
+      thinkingOptionId: launch.thinkingOptionId,
+      providerOptions: launch.providerOptions,
+      issueInput,
+      issues,
+    }))
+  ) {
+    return;
+  }
+
   try {
     const resolved = await providerCatalog.resolveCreateConfig({
       cwd,
@@ -758,6 +844,9 @@ async function validateResolvedLaunch(
         ...(launch.thinkingOptionId ? { thinkingOptionId: launch.thinkingOptionId } : {}),
         ...(Object.keys(resolvedFeatureValues).length > 0
           ? { featureValues: resolvedFeatureValues }
+          : {}),
+        ...(nonEmptyProviderOptions(launch.providerOptions)
+          ? { providerOptions: launch.providerOptions }
           : {}),
       },
       issueInput,
