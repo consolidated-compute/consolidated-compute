@@ -7,6 +7,8 @@ import type { TeamRunDto } from "@getpaseo/protocol/team/types";
 import { expect, test } from "vitest";
 
 import type { AgentPromptInput } from "../agent/agent-sdk-types.js";
+import { projectClaudeSecurityPosture } from "../agent/providers/claude/security-posture.js";
+import { projectCodexSecurityPosture } from "../agent/providers/codex/security-posture.js";
 import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
 import { DaemonClient, createTestPaseoDaemon } from "../test-utils/index.js";
 
@@ -85,6 +87,7 @@ test("freezes a three-role Assignment run and hands forward only declared Artifa
       agentProfiles: true,
       assignments: true,
       teams: true,
+      teamSecurity: true,
     });
     const createdWorkspace = await client.createWorkspace({
       source: { kind: "directory", path: cwd },
@@ -172,6 +175,11 @@ test("freezes a three-role Assignment run and hands forward only declared Artifa
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: {},
+        securityPosture: projectCodexSecurityPosture({
+          provider: "codex",
+          modeId: "full-access",
+          providerOptions: {},
+        }),
       },
       {
         profileId: "codex-builder",
@@ -180,6 +188,11 @@ test("freezes a three-role Assignment run and hands forward only declared Artifa
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: { test_feature: true },
+        securityPosture: projectCodexSecurityPosture({
+          provider: "codex",
+          modeId: "full-access",
+          providerOptions: {},
+        }),
       },
       {
         profileId: "security-review",
@@ -188,6 +201,11 @@ test("freezes a three-role Assignment run and hands forward only declared Artifa
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: {},
+        securityPosture: projectClaudeSecurityPosture({
+          provider: "claude",
+          modeId: "full-access",
+          providerOptions: {},
+        }),
       },
     ]);
     const persisted = await daemon.daemon.teamRepository.getRun(started.id);

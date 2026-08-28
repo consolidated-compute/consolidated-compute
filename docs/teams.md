@@ -34,7 +34,9 @@ Team updates, deletion, and run start use the expected Team revision. Run start 
 
 Run admission reads the daemon's authoritative Agent Profile configuration once. It materializes each referenced profile with vanilla Paseo semantics, validates the provider, model, mode, thinking, feature settings, and provider-native options against the selected Workspace, and freezes the profile ID and resolved launch values into every run step. Later profile edits affect only future admissions. Missing or invalid profiles make future starts fail explicitly; they cannot change an active or historical run.
 
-Raw provider-native options remain in daemon-owned run persistence and launch requests. Team Run DTOs do not expose them.
+Raw provider-native options remain in daemon-owned run persistence and launch requests. Team Run DTOs do not expose them. New runs also freeze a provider-authored security posture beside each resolved launch. The posture contains bounded, redacted facts for filesystem writes, network access, and tool or shell policy. It reports `enforced` only when the frozen launch proves a fail-closed provider restriction; inherited settings, unsupported controls, and custom providers remain `unavailable` or `policy_only`.
+
+The posture records facts derived from the frozen launch configuration. It does not add enforcement, and it never derives claims about credentials, secrets, repository isolation, production access, or host containment. Instructions and Artifact content are policy context, not technical controls. Runs created before posture snapshots remain without one; never reconstruct history from a current Agent Profile.
 
 Only one Team Run may own a Workspace at a time. The lock covers active, permission-waiting, stopping, and stop-failed runs. It does not isolate the Workspace from people or ordinary Paseo agents.
 
@@ -70,4 +72,4 @@ Shutdown fences new starts before agents close. Mark in-flight runs interrupted 
 
 Stored v0.2 runs remain objective-only: their Objective is not a durable Assignment and their bounded inline handoff is not an Artifact. [Assignments and Artifacts](assignments.md) own the v0.3 path; stored runs and older clients keep the legacy behavior.
 
-Teams still add no policy enforcement, sandbox, supervisor, conditional revision loop, retry, fan-out, new scheduler, or Team-owned Workspace creation. Issues #6–#8 own those later contracts.
+Teams still add no generic policy engine, sandbox, supervisor, conditional revision loop, retry, fan-out, new scheduler, or Team-owned Workspace creation. The frozen security posture reports provider behavior already selected by the Agent Profile; it does not create a new boundary.

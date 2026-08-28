@@ -1801,7 +1801,7 @@ export class VoiceAssistantWebSocketServer {
         // COMPAT(agentProfileProviderOptions): added in v0.6.2, remove gate after 2027-02-28.
         agentProfileProviderOptions: true,
         // COMPAT(teams): added in v0.6.0, remove gate after 2027-02-26.
-        ...(this.teamRepository && this.teamRunService ? { teams: true } : {}),
+        ...(this.teamRepository && this.teamRunService ? { teams: true, teamSecurity: true } : {}),
         // COMPAT(assignments): added in v0.6.x, remove gate after 2027-02-27.
         ...(this.assignmentRepository && this.teamRunService ? { assignments: true } : {}),
         // COMPAT(agentConfigApply): added in v0.3.2, remove gate after 2027-02-11.

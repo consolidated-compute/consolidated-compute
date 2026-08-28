@@ -10,6 +10,7 @@ import type {
   AgentStreamEvent,
 } from "../agent/agent-sdk-types.js";
 import type { CreateAgentFromMcpInput } from "../agent/create-agent/create.js";
+import { projectUnavailableProviderSecurityPosture } from "../agent/provider-security-posture.js";
 import { createPersistedWorkspaceRecord } from "../workspace-registry.js";
 import {
   PersistedTeamDefinitionSchema,
@@ -153,6 +154,9 @@ class MemoryProviderCatalog implements TeamProviderCatalog {
     Array<{ path: Array<string | number>; message: string }>
   >();
   readonly normalizedProviderOptions = new Map<string, AgentSessionConfig["providerOptions"]>();
+  readonly securityPostureReads: Array<
+    Parameters<TeamProviderCatalog["projectSecurityPosture"]>[0]
+  > = [];
 
   constructor() {
     this.models.set("codex", [
@@ -218,6 +222,11 @@ class MemoryProviderCatalog implements TeamProviderCatalog {
           ? (this.normalizedProviderOptions.get(input.provider) ?? input.providerOptions)
           : undefined,
     };
+  }
+
+  projectSecurityPosture(input: Parameters<TeamProviderCatalog["projectSecurityPosture"]>[0]) {
+    this.securityPostureReads.push(input);
+    return projectUnavailableProviderSecurityPosture(input);
   }
 }
 
@@ -377,6 +386,14 @@ describe("Team Run preflight", () => {
           sandbox_mode: "workspace-write",
           approval_policy: "on-request",
         },
+        securityPosture: projectUnavailableProviderSecurityPosture({
+          provider: "codex",
+          modeId: "workspace-write",
+          providerOptions: {
+            sandbox_mode: "workspace-write",
+            approval_policy: "on-request",
+          },
+        }),
       },
       {
         profileId: "profile_reviewer",
@@ -386,6 +403,11 @@ describe("Team Run preflight", () => {
         thinkingOptionId: null,
         featureValues: {},
         providerOptions: {},
+        securityPosture: projectUnavailableProviderSecurityPosture({
+          provider: "claude",
+          modeId: null,
+          providerOptions: {},
+        }),
       },
     ]);
     expect(harness.providerCatalog.refreshes).toEqual([
@@ -505,6 +527,14 @@ describe("Team Run preflight", () => {
     expect(accepted.steps[0]?.snapshot.resolvedLaunch.providerOptions).toEqual({
       sandbox_mode: "read-only",
       approval_policy: "never",
+    });
+    expect(harness.providerCatalog.securityPostureReads[0]).toEqual({
+      provider: "codex",
+      modeId: "workspace-write",
+      providerOptions: {
+        sandbox_mode: "read-only",
+        approval_policy: "never",
+      },
     });
   });
 
@@ -847,6 +877,10 @@ describe("Team step execution", () => {
       workspaceId: "wks_team_test",
     });
     const run = createRun(definition, accepted);
+    const frozenSecurityPosture = structuredClone(
+      run.steps[0]!.snapshot.resolvedLaunch.securityPosture,
+    );
+    const admissionProjectionCount = harness.providerCatalog.securityPostureReads.length;
     harness.daemonConfigStore.agentProfiles = [];
     harness.providerCatalog.models.set("codex", [
       {
@@ -919,6 +953,8 @@ describe("Team step execution", () => {
     ]);
     expect(harness.agentStream.calls).toHaveLength(1);
     expect(harness.agentStream.finalResponseReads).toBe(1);
+    expect(run.steps[0]!.snapshot.resolvedLaunch.securityPosture).toEqual(frozenSecurityPosture);
+    expect(harness.providerCatalog.securityPostureReads).toHaveLength(admissionProjectionCount);
     expect(harness.creations).toHaveLength(1);
     expect(harness.creations[0]).toEqual({
       kind: "mcp",

@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 
 import type { AgentPromptInput } from "../agent/agent-sdk-types.js";
+import { projectClaudeSecurityPosture } from "../agent/providers/claude/security-posture.js";
+import { projectCodexSecurityPosture } from "../agent/providers/codex/security-posture.js";
 import { DaemonClient } from "../test-utils/index.js";
 import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
 import { createTestPaseoDaemon } from "../test-utils/paseo-daemon.js";
@@ -55,6 +57,7 @@ test("runs Plan, Implement, and Review through existing Paseo Agent Profiles", a
     expect(client.getLastServerInfoMessage()?.features).toMatchObject({
       agentProfiles: true,
       teams: true,
+      teamSecurity: true,
     });
     const createdWorkspace = await client.createWorkspace({
       source: { kind: "directory", path: cwd },
@@ -121,6 +124,11 @@ test("runs Plan, Implement, and Review through existing Paseo Agent Profiles", a
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: {},
+        securityPosture: projectCodexSecurityPosture({
+          provider: "codex",
+          modeId: "full-access",
+          providerOptions: {},
+        }),
       },
       {
         profileId: "codex-builder",
@@ -129,6 +137,14 @@ test("runs Plan, Implement, and Review through existing Paseo Agent Profiles", a
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: { test_feature: true },
+        securityPosture: projectCodexSecurityPosture({
+          provider: "codex",
+          modeId: "full-access",
+          providerOptions: {
+            sandbox_mode: "workspace-write",
+            approval_policy: "never",
+          },
+        }),
       },
       {
         profileId: "security-review",
@@ -137,6 +153,11 @@ test("runs Plan, Implement, and Review through existing Paseo Agent Profiles", a
         modeId: "full-access",
         thinkingOptionId: null,
         featureValues: {},
+        securityPosture: projectClaudeSecurityPosture({
+          provider: "claude",
+          modeId: "full-access",
+          providerOptions: {},
+        }),
       },
     ]);
     const persisted = await daemon.daemon.teamRepository.getRun(started.id);

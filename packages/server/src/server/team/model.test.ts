@@ -13,6 +13,7 @@ import {
   isTerminalTeamRunStatus,
   PersistedTeamDefinitionSchema,
   PersistedTeamRunRecordSchema,
+  PersistedTeamResolvedLaunchSchema,
   PersistedTeamRunStateSchema,
   PersistedTeamRunStepStateSchema,
   TEAM_INSTRUCTIONS_MAX_CHARS,
@@ -212,6 +213,49 @@ describe("Team definition contract", () => {
 describe("Team Run contract", () => {
   test("accepts a frozen Team, Workspace, resolved steps, and active state", () => {
     expect(PersistedTeamRunRecordSchema.parse(createRun())).toEqual(createRun());
+  });
+
+  test("accepts legacy launches without posture and validates new posture snapshots strictly", () => {
+    const launch = createRun().steps[0]!.snapshot.resolvedLaunch;
+    expect(PersistedTeamResolvedLaunchSchema.parse(launch)).not.toHaveProperty("securityPosture");
+
+    const securityPosture = {
+      source: { provider: launch.provider },
+      filesystemWrite: { status: "enforced", summary: "Writes are denied." },
+      networkAccess: { status: "unavailable", summary: "No network claim." },
+      toolShell: { status: "policy_only", summary: "Provider approvals apply." },
+    } as const;
+    expect(PersistedTeamResolvedLaunchSchema.parse({ ...launch, securityPosture })).toMatchObject({
+      securityPosture,
+    });
+
+    expect(
+      PersistedTeamResolvedLaunchSchema.safeParse({
+        ...launch,
+        securityPosture: {
+          ...securityPosture,
+          source: { provider: "claude" },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      PersistedTeamResolvedLaunchSchema.safeParse({
+        ...launch,
+        securityPosture: {
+          ...securityPosture,
+          networkAccess: { status: "unknown", summary: "Unknown." },
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      PersistedTeamResolvedLaunchSchema.safeParse({
+        ...launch,
+        securityPosture: {
+          ...securityPosture,
+          networkAccess: { status: "unavailable", summary: "x".repeat(241) },
+        },
+      }).success,
+    ).toBe(false);
   });
 
   test("accepts a frozen Assignment and exact sequential Artifact plan", () => {

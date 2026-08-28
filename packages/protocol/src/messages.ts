@@ -3504,6 +3504,8 @@ export const ServerInfoStatusPayloadSchema = z
         agentProfileProviderOptions: z.boolean().optional(),
         // COMPAT(teams): added in v0.6.0, remove gate after 2027-02-26.
         teams: z.boolean().optional(),
+        // COMPAT(teamSecurity): added in v0.6.2, remove gate after 2027-02-28.
+        teamSecurity: z.boolean().optional(),
         // COMPAT(assignments): added in v0.6.x, remove gate after 2027-02-27.
         assignments: z.boolean().optional(),
         // COMPAT(agentConfigApply): added in v0.3.2, remove gate after 2027-02-11.
