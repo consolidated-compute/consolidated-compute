@@ -37,6 +37,7 @@ export function resolveWorkspaceDraftSubmissionConfig(input: {
       model: initialSetup.model,
       thinkingOptionId: initialSetup.thinkingOptionId,
       featureValues: initialSetup.featureValues,
+      providerOptions: composerState.selectedProviderOptions,
       target: { kind: "draft", draftId, setup: initialSetup },
     };
   }
