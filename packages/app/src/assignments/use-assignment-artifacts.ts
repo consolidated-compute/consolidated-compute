@@ -5,8 +5,10 @@ import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-
 import {
   assignmentArtifactIssues,
   assignmentArtifactListQueryKey,
+  assignmentArtifactsShouldPoll,
   flattenAssignmentArtifactPages,
   loadNextTeamRunArtifactPage,
+  type AssignmentArtifactQueryOptions,
   type AssignmentArtifactPage,
 } from "./artifact-data";
 
@@ -16,7 +18,7 @@ const ASSIGNMENT_ARTIFACT_REFRESH_INTERVAL_MS = 5_000;
 export function useAssignmentArtifacts(
   serverId: string,
   assignmentId: string,
-  options: { teamRunId?: string } = {},
+  options: AssignmentArtifactQueryOptions = {},
 ) {
   const client = useHostRuntimeClient(serverId);
   const connected = useHostRuntimeIsConnected(serverId);
@@ -33,7 +35,9 @@ export function useAssignmentArtifacts(
     enabled,
     initialPageParam: null,
     staleTimeMs: 0,
-    refetchInterval: ASSIGNMENT_ARTIFACT_REFRESH_INTERVAL_MS,
+    refetchInterval: assignmentArtifactsShouldPoll(options)
+      ? ASSIGNMENT_ARTIFACT_REFRESH_INTERVAL_MS
+      : false,
     getNextPageParam: (page) => page.nextCursor ?? undefined,
     queryFn: async ({ pageParam }) => {
       if (!client) throw new Error("Host is offline");

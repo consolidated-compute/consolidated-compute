@@ -22,7 +22,12 @@ import {
 } from "@/utils/host-routes";
 import { formatTimeAgo } from "@/utils/time";
 import { toErrorMessage } from "@/utils/error-messages";
-import { canCancelTeamRun, matchesTeamRunRoute, resolveTeamRunBackTarget } from "./run-data";
+import {
+  canCancelTeamRun,
+  isTerminalTeamRunStatus,
+  matchesTeamRunRoute,
+  resolveTeamRunBackTarget,
+} from "./run-data";
 import { useTeamRunMutations } from "./use-team-run-mutations";
 import { useTeamRun } from "./use-team-runs";
 
@@ -102,6 +107,7 @@ export function TeamRunScreen({
       </View>
     );
   } else {
+    const runIsActive = !isTerminalTeamRunStatus(run.state.status);
     content = (
       <ScrollView
         style={styles.scroll}
@@ -207,7 +213,13 @@ export function TeamRunScreen({
         </DetailSection>
         <DetailSection title={t("teams.runs.detail.artifacts")}>
           {run.assignmentId ? (
-            <TeamRunArtifacts serverId={serverId} assignmentId={run.assignmentId} runId={run.id} />
+            <TeamRunArtifacts
+              key={`${run.id}:${runIsActive ? "active" : "terminal"}`}
+              serverId={serverId}
+              assignmentId={run.assignmentId}
+              runId={run.id}
+              runIsActive={runIsActive}
+            />
           ) : (
             <Text style={styles.bodyText}>{t("assignments.artifacts.legacy")}</Text>
           )}
@@ -230,13 +242,15 @@ function TeamRunArtifacts({
   serverId,
   assignmentId,
   runId,
+  runIsActive,
 }: {
   serverId: string;
   assignmentId: string;
   runId: string;
+  runIsActive: boolean;
 }): ReactElement {
   const { t } = useTranslation();
-  const query = useAssignmentArtifacts(serverId, assignmentId, { teamRunId: runId });
+  const query = useAssignmentArtifacts(serverId, assignmentId, { teamRunId: runId, runIsActive });
   const artifacts = query.artifacts;
   const { refetch, fetchNextPage } = query;
   const retry = useCallback(() => void refetch(), [refetch]);

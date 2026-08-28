@@ -11,6 +11,15 @@ export interface AssignmentArtifactPage {
   issues: AssignmentCollectionIssueDto[];
 }
 
+export interface AssignmentArtifactQueryOptions {
+  teamRunId?: string;
+  runIsActive?: boolean;
+}
+
+export function assignmentArtifactsShouldPoll(options: AssignmentArtifactQueryOptions): boolean {
+  return !options.teamRunId || options.runIsActive === true;
+}
+
 export function assignmentArtifactListQueryKey(
   serverId: string,
   assignmentId: string,

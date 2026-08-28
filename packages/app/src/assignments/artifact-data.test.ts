@@ -4,6 +4,7 @@ import {
   artifactsForRun,
   assignmentArtifactIssues,
   assignmentArtifactListQueryKey,
+  assignmentArtifactsShouldPoll,
   flattenAssignmentArtifactPages,
   loadNextTeamRunArtifactPage,
 } from "./artifact-data";
@@ -40,6 +41,12 @@ describe("Assignment Artifact data", () => {
       "run-1",
       "list",
     ]);
+  });
+
+  it("polls active data but not terminal run-scoped history", () => {
+    expect(assignmentArtifactsShouldPoll({})).toBe(true);
+    expect(assignmentArtifactsShouldPoll({ teamRunId: "run-1", runIsActive: true })).toBe(true);
+    expect(assignmentArtifactsShouldPoll({ teamRunId: "run-1", runIsActive: false })).toBe(false);
   });
 
   it("deduplicates paginated Artifacts and filters exact run provenance", () => {
