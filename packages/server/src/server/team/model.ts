@@ -795,6 +795,7 @@ function validateSupervisedRunStepSnapshots(run: TeamRunRecordShape): ContractIs
     }
   }
 
+  issues.push(...validateSupervisorDecisionOwnership(run, context.supervisorSteps));
   issues.push(...validateSupervisionAttempts(run, context.stepsByAttemptId));
   return issues;
 }
@@ -825,6 +826,33 @@ function validateSupervisorStep(
       message: "A succeeded supervisor turn must own a durable decision",
     });
   }
+}
+
+function validateSupervisorDecisionOwnership(
+  run: TeamRunRecordShape,
+  supervisorSteps: SupervisedRunStep[],
+): ContractIssue[] {
+  const issues: ContractIssue[] = [];
+  const ownedDecisionIds = new Set<string>();
+  for (const step of supervisorSteps) {
+    const metadata = step.snapshot.supervision;
+    if (metadata?.kind !== "supervisor" || step.state.status !== "succeeded") continue;
+    if (ownedDecisionIds.has(metadata.decisionId)) {
+      issues.push({
+        path: ["steps", run.steps.indexOf(step), "snapshot", "supervision", "decisionId"],
+        message: "A durable supervisor decision must belong to exactly one succeeded turn",
+      });
+    }
+    ownedDecisionIds.add(metadata.decisionId);
+  }
+  for (const [index, decision] of run.supervision!.decisions.entries()) {
+    if (ownedDecisionIds.has(decision.id)) continue;
+    issues.push({
+      path: ["supervision", "decisions", index, "id"],
+      message: "A durable supervisor decision must belong to exactly one succeeded turn",
+    });
+  }
+  return issues;
 }
 
 function validateWorkerStep(

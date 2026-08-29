@@ -775,7 +775,31 @@ describe("TeamRepository runs", () => {
       },
       (current) => ({
         state: current.state,
-        steps: current.steps,
+        steps: [
+          ...current.steps,
+          {
+            snapshot: {
+              stepId: "supervisor_turn_2",
+              roleId: current.supervision.supervisor.roleId,
+              roleName: current.supervision.supervisor.roleName,
+              roleInstructions: current.supervision.supervisor.roleInstructions,
+              stepInstructions: null,
+              resolvedLaunch: current.supervision.supervisor.resolvedLaunch,
+              supervision: {
+                kind: "supervisor",
+                turn: 2,
+                decisionId: escalationDecision.id,
+              },
+            },
+            state: {
+              status: "succeeded",
+              plannedAgentId: current.supervision.supervisor.agentId,
+              agentId: current.supervision.supervisor.agentId,
+              startedAt: secondTimestamp,
+              endedAt: secondTimestamp,
+            },
+          },
+        ],
         supervision: {
           ...current.supervision,
           revision: 3,
@@ -833,6 +857,17 @@ describe("TeamRepository runs", () => {
     });
     expect(toTeamRunDto(canceled).supervision).not.toHaveProperty("pendingHumanRequest");
     await expect(repository.getActiveRunForAssignment(assignment.id)).resolves.toBeNull();
+
+    const postTerminalChanges: TeamRepositoryChange[] = [];
+    const unsubscribe = repository.subscribe((change) => postTerminalChanges.push(change));
+    currentTimestamp = "2026-08-25T12:02:00.000Z";
+    const unchangedAfterCancellation = await repository.updateRun(admitted.id, (current) => ({
+      steps: current.steps,
+      state: current.state,
+    }));
+    unsubscribe();
+    expect(unchangedAfterCancellation).toEqual(canceled);
+    expect(postTerminalChanges).toEqual([]);
 
     const repeatedAfterCancellation = await repository.commitSupervisionDecision(
       {

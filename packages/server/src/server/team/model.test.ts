@@ -256,6 +256,26 @@ function createSupervisedRunWithDecision(): PersistedTeamRunRecord {
   });
 }
 
+function createSupervisorTurn(
+  run: PersistedTeamRunRecord,
+  turn: number,
+  decisionId: string,
+): PersistedTeamRunRecord["steps"][number] {
+  const firstTurn = run.steps[0]!;
+  return {
+    ...firstTurn,
+    snapshot: {
+      ...firstTurn.snapshot,
+      stepId: `supervisor_turn_${turn}`,
+      supervision: {
+        kind: "supervisor",
+        turn,
+        decisionId,
+      },
+    },
+  };
+}
+
 function createSupervisedRunWithWorkerAttempts(): PersistedTeamRunRecord {
   const run = createSupervisedRunWithDecision();
   const [plannerTemplate, builderTemplate] = run.supervision!.workerTemplates;
@@ -289,6 +309,7 @@ function createSupervisedRunWithWorkerAttempts(): PersistedTeamRunRecord {
     ...run,
     steps: [
       ...run.steps,
+      createSupervisorTurn(run, 2, dispatchPlan.id),
       {
         snapshot: {
           ...plannerTemplate!,
@@ -317,6 +338,7 @@ function createSupervisedRunWithWorkerAttempts(): PersistedTeamRunRecord {
           endedAt: timestamp,
         },
       },
+      createSupervisorTurn(run, 3, dispatchBuild.id),
       {
         snapshot: {
           ...builderTemplate!,
@@ -533,7 +555,8 @@ describe("Team Run contract", () => {
   test("reserves the frozen supervisor agent ID from worker attempts", () => {
     const run = createSupervisedRunWithWorkerAttempts();
     const supervisorAgentId = run.supervision!.supervisor.agentId;
-    run.steps[1]!.state = {
+    const workerStep = run.steps.find((step) => step.snapshot.supervision?.kind === "worker")!;
+    workerStep.state = {
       status: "succeeded",
       plannedAgentId: supervisorAgentId,
       agentId: supervisorAgentId,
@@ -582,6 +605,34 @@ describe("Team Run contract", () => {
         ["supervision", "humanRequest", "artifactIds", 0],
       ]),
     );
+  });
+
+  test("binds every durable decision to exactly one succeeded supervisor turn", () => {
+    const supervised = createSupervisedRunWithDecision();
+    const missingTurn = PersistedTeamRunRecordSchema.safeParse({
+      ...supervised,
+      steps: [],
+    });
+    const duplicateTurn = PersistedTeamRunRecordSchema.safeParse({
+      ...supervised,
+      steps: [
+        ...supervised.steps,
+        createSupervisorTurn(supervised, 2, supervised.supervision!.decisions[0]!.id),
+      ],
+    });
+
+    expect(missingTurn.success).toBe(false);
+    expect(duplicateTurn.success).toBe(false);
+    if (!missingTurn.success) {
+      expect(missingTurn.error.issues.map((issue) => issue.message)).toContain(
+        "A durable supervisor decision must belong to exactly one succeeded turn",
+      );
+    }
+    if (!duplicateTurn.success) {
+      expect(duplicateTurn.error.issues.map((issue) => issue.message)).toContain(
+        "A durable supervisor decision must belong to exactly one succeeded turn",
+      );
+    }
   });
 
   test("rejects supervised runs without an Assignment or with a worker as supervisor", () => {

@@ -53,8 +53,9 @@ admission snapshot is Assignment-only and freezes an unused Team role as supervi
 workflow as worker templates, every resolved launch, the planned supervisor agent ID, and bounded
 work, attempt, action, fan-out, and delegation limits. Dynamic worker attempts belong in the run
 step ledger; normalized decisions and exact Artifact references belong in the optional supervision
-ledger. Repository commands append decisions with revision and action idempotency checks before an
-executor performs external work.
+ledger. Every durable decision belongs to exactly one succeeded supervisor turn. Repository commands
+append decisions with revision and action idempotency checks before an executor performs external
+work.
 
 The wire projection exposes only a compact optional supervision summary. Existing Team Run and
 step lifecycle values do not change. The daemon does not advertise supervised execution until the
@@ -93,7 +94,7 @@ A terminal supervision phase must match the outer Team Run status. That transiti
 unresolved human request and settles every unfinished work item in the same atomic run write. The
 request remains historical evidence, but it no longer keeps the run or its Workspace and Assignment
 locks active. Duplicate supervisor-action retries remain readable after terminalization; new actions
-are rejected.
+are rejected, and late callbacks cannot rewrite a terminal record.
 
 ## Roadmap boundary
 

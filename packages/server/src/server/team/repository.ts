@@ -640,10 +640,18 @@ export class TeamRepository {
       const current = await this.requireRun(runId);
       const preserved = PersistedTeamRunRecordSchema.parse(current);
       const update = await updater(current);
+      const mutableStateChanged =
+        !equal(update.state, preserved.state) ||
+        !equal(
+          update.steps.map((step) => step.state),
+          preserved.steps.map((step) => step.state),
+        );
+      if (!mutableStateChanged) return preserved;
+
       const updatedAt = this.now().toISOString();
       const supervisionPhase = terminalSupervisionPhase(update.state.status);
       const supervision =
-        preserved.supervision && supervisionPhase
+        preserved.supervision && isActiveTeamRunStatus(preserved.state.status) && supervisionPhase
           ? terminalizeSupervision(preserved.supervision, supervisionPhase, updatedAt)
           : preserved.supervision;
       const run = PersistedTeamRunRecordSchema.parse({
