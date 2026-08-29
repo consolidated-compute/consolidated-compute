@@ -643,12 +643,7 @@ export class TeamRepository {
       const supervisionPhase = terminalSupervisionPhase(update.state.status);
       const supervision =
         preserved.supervision && supervisionPhase
-          ? {
-              ...preserved.supervision,
-              revision: preserved.supervision.revision + 1,
-              phase: supervisionPhase,
-              updatedAt,
-            }
+          ? terminalizeSupervision(preserved.supervision, supervisionPhase, updatedAt)
           : preserved.supervision;
       const run = PersistedTeamRunRecordSchema.parse({
         ...preserved,
@@ -697,21 +692,23 @@ export class TeamRepository {
       }
 
       const preserved = PersistedTeamRunRecordSchema.parse(current);
-      const supervisedCurrent = current as PersistedTeamRunRecord & {
+      const supervisedCurrent = PersistedTeamRunRecordSchema.parse(
+        current,
+      ) as PersistedTeamRunRecord & {
         supervision: PersistedTeamRunSupervision;
       };
       const update = await updater(supervisedCurrent);
-      const expectedDecisions = [...current.supervision.decisions, input.decision];
+      const expectedDecisions = [...preserved.supervision!.decisions, input.decision];
       const immutableSnapshotMatches =
-        equal(update.supervision.supervisor, current.supervision.supervisor) &&
-        equal(update.supervision.workerTemplates, current.supervision.workerTemplates) &&
-        equal(update.supervision.limits, current.supervision.limits);
+        equal(update.supervision.supervisor, preserved.supervision!.supervisor) &&
+        equal(update.supervision.workerTemplates, preserved.supervision!.workerTemplates) &&
+        equal(update.supervision.limits, preserved.supervision!.limits);
       const appendMatches = equal(update.supervision.decisions, expectedDecisions);
       const revisionMatches = update.supervision.revision === input.expectedSupervisionRevision + 1;
       if (!immutableSnapshotMatches || !appendMatches || !revisionMatches) {
         throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
       }
-      for (const [index, step] of current.steps.entries()) {
+      for (const [index, step] of preserved.steps.entries()) {
         if (!equal(step.snapshot, update.steps[index]?.snapshot)) {
           throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
         }
@@ -948,6 +945,31 @@ function terminalSupervisionPhase(
   if (status === "canceled") return "canceled";
   if (status === "interrupted") return "interrupted";
   return null;
+}
+
+function terminalizeSupervision(
+  supervision: PersistedTeamRunSupervision,
+  phase: PersistedTeamRunSupervision["phase"],
+  updatedAt: string,
+): PersistedTeamRunSupervision {
+  const humanRequest = supervision.humanRequest;
+  const isPendingRequest = humanRequest && !humanRequest.resolution && !humanRequest.retirement;
+  const retirementReason =
+    phase === "failed" || phase === "canceled" || phase === "interrupted" ? phase : null;
+  return {
+    ...supervision,
+    revision: supervision.revision + 1,
+    phase,
+    ...(isPendingRequest && retirementReason
+      ? {
+          humanRequest: {
+            ...humanRequest,
+            retirement: { reason: retirementReason, retiredAt: updatedAt },
+          },
+        }
+      : {}),
+    updatedAt,
+  };
 }
 
 function compareRunsNewestFirst(

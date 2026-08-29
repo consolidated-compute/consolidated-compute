@@ -211,6 +211,50 @@ function createSupervisedAssignmentRun(): PersistedTeamRunRecord {
   });
 }
 
+function createSupervisedRunWithDecision(): PersistedTeamRunRecord {
+  const run = createSupervisedAssignmentRun();
+  const decision = {
+    id: "decision_plan_1",
+    sequence: 1,
+    actionId: "action_plan_1",
+    kind: "plan" as const,
+    summary: "Accept the bounded workflow templates.",
+    workItemId: null,
+    attemptId: null,
+    createdAt: timestamp,
+  };
+  return PersistedTeamRunRecordSchema.parse({
+    ...run,
+    steps: [
+      {
+        snapshot: {
+          stepId: "supervisor_turn_1",
+          roleId: run.supervision!.supervisor.roleId,
+          roleName: run.supervision!.supervisor.roleName,
+          roleInstructions: run.supervision!.supervisor.roleInstructions,
+          stepInstructions: null,
+          resolvedLaunch: run.supervision!.supervisor.resolvedLaunch,
+          supervision: { kind: "supervisor", turn: 1, decisionId: decision.id },
+        },
+        state: {
+          status: "succeeded",
+          plannedAgentId: run.supervision!.supervisor.agentId,
+          agentId: run.supervision!.supervisor.agentId,
+          startedAt: timestamp,
+          endedAt: timestamp,
+        },
+      },
+    ],
+    state: { status: "running", startedAt: timestamp },
+    supervision: {
+      ...run.supervision!,
+      revision: 2,
+      phase: "planning",
+      decisions: [decision],
+    },
+  });
+}
+
 describe("Team definition contract", () => {
   test("accepts stable roles and an explicit sequential workflow", () => {
     expect(PersistedTeamDefinitionSchema.parse(createTeam())).toEqual(createTeam());
@@ -332,6 +376,24 @@ describe("Team Run contract", () => {
       workItems: [],
       decisions: [],
     });
+  });
+
+  test("requires supervised steps to retain the complete frozen launch", () => {
+    const run = createSupervisedRunWithDecision();
+    run.steps[0]!.snapshot.resolvedLaunch = {
+      ...run.steps[0]!.snapshot.resolvedLaunch,
+      provider: "claude",
+      model: null,
+      providerOptions: { permission: { edit: "allow" } },
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Supervisor step must match the frozen supervisor role",
+    );
   });
 
   test("rejects supervised runs without an Assignment or with a worker as supervisor", () => {

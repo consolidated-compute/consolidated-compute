@@ -21,7 +21,9 @@ export function toTeamRunDto(run: PersistedTeamRunRecord): TeamRunDto {
           (workItem) => workItem.status === "succeeded",
         ).length,
         totalWorkItems: run.supervision.workItems.length,
-        ...(run.supervision.humanRequest && !run.supervision.humanRequest.resolution
+        ...(run.supervision.humanRequest &&
+        !run.supervision.humanRequest.resolution &&
+        !run.supervision.humanRequest.retirement
           ? {
               pendingHumanRequest: {
                 id: run.supervision.humanRequest.id,

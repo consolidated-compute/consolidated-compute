@@ -35,6 +35,7 @@ import {
   type CreateTeamRunInput,
   type TeamRepositoryChange,
 } from "./repository.js";
+import { toTeamRunDto } from "./wire.js";
 
 const firstTimestamp = "2026-08-25T12:00:00.000Z";
 const secondTimestamp = "2026-08-25T12:01:00.000Z";
@@ -696,6 +697,37 @@ describe("TeamRepository runs", () => {
     );
     expect(repeated).toEqual(committed);
 
+    const mutationDecision = {
+      ...decision,
+      id: "decision_dispatch_2",
+      sequence: 2,
+      actionId: "action_dispatch_2",
+      kind: "dispatch" as const,
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: mutationDecision,
+        },
+        (current) => {
+          current.supervision.supervisor.roleName = "Mutated supervisor";
+          return {
+            state: current.state,
+            steps: current.steps,
+            supervision: {
+              ...current.supervision,
+              revision: 3,
+              decisions: [...current.supervision.decisions, mutationDecision],
+              updatedAt: secondTimestamp,
+            },
+          };
+        },
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    await expect(repository.getRun(admitted.id)).resolves.toEqual(committed);
+
     await expect(
       repository.commitSupervisionDecision(
         {
@@ -726,6 +758,70 @@ describe("TeamRepository runs", () => {
         },
       ),
     ).rejects.toBeInstanceOf(TeamRunSupervisionRevisionConflictError);
+
+    const escalationDecision = {
+      ...decision,
+      id: "decision_escalate_2",
+      sequence: 2,
+      actionId: "action_escalate_2",
+      kind: "escalate" as const,
+      summary: "Ask the human to choose the bounded next action.",
+    };
+    const awaitingHuman = await repository.commitSupervisionDecision(
+      {
+        runId: admitted.id,
+        expectedSupervisionRevision: 2,
+        decision: escalationDecision,
+      },
+      (current) => ({
+        state: current.state,
+        steps: current.steps,
+        supervision: {
+          ...current.supervision,
+          revision: 3,
+          phase: "awaiting_human",
+          decisions: [...current.supervision.decisions, escalationDecision],
+          humanRequest: {
+            id: "human_review_1",
+            revision: 1,
+            kind: "approval",
+            title: "Choose the next action",
+            detail: "Select one frozen action before the run continues.",
+            actions: [
+              { id: "continue", label: "Continue", requiresNote: false },
+              { id: "cancel", label: "Cancel", requiresNote: false },
+            ],
+            roleIds: [current.supervision.supervisor.roleId],
+            agentIds: [current.supervision.supervisor.agentId],
+            stepIds: [],
+            artifactIds: [],
+            createdAt: secondTimestamp,
+          },
+          updatedAt: secondTimestamp,
+        },
+      }),
+    );
+    const canceled = await repository.updateRun(admitted.id, (current) => ({
+      steps: current.steps,
+      state: {
+        status: "canceled",
+        startedAt: secondTimestamp,
+        endedAt: secondTimestamp,
+      },
+    }));
+
+    expect(awaitingHuman.supervision?.phase).toBe("awaiting_human");
+    expect(awaitingHuman.supervision?.humanRequest).not.toHaveProperty("retirement");
+    expect(canceled.supervision).toMatchObject({
+      revision: 4,
+      phase: "canceled",
+      humanRequest: {
+        id: "human_review_1",
+        retirement: { reason: "canceled", retiredAt: secondTimestamp },
+      },
+    });
+    expect(toTeamRunDto(canceled).supervision).not.toHaveProperty("pendingHumanRequest");
+    await expect(repository.getActiveRunForAssignment(assignment.id)).resolves.toBeNull();
   });
 
   test("rejects missing, stale, and terminal Assignments before creating a run", async () => {

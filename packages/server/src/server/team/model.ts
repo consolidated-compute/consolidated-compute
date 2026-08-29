@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 
+import equal from "fast-deep-equal";
 import { z } from "zod";
 
 import {
@@ -287,6 +288,13 @@ const PersistedTeamRunSupervisionHumanResolutionSchema = z
   })
   .strict();
 
+const PersistedTeamRunSupervisionHumanRetirementSchema = z
+  .object({
+    reason: z.enum(["failed", "canceled", "interrupted"]),
+    retiredAt: TimestampSchema,
+  })
+  .strict();
+
 export const PersistedTeamRunSupervisionHumanRequestSchema = z
   .object({
     id: PersistedTeamEntityIdSchema,
@@ -304,8 +312,18 @@ export const PersistedTeamRunSupervisionHumanRequestSchema = z
     artifactIds: z.array(PersistedAssignmentArtifactIdSchema).max(TEAM_SUPERVISION_MAX_WORK_ITEMS),
     createdAt: TimestampSchema,
     resolution: PersistedTeamRunSupervisionHumanResolutionSchema.optional(),
+    retirement: PersistedTeamRunSupervisionHumanRetirementSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((request, context) => {
+    if (request.resolution && request.retirement) {
+      context.addIssue({
+        code: "custom",
+        path: ["retirement"],
+        message: "A human request cannot be both resolved and retired",
+      });
+    }
+  });
 
 export const PersistedTeamRunSupervisionSchema = z
   .object({
@@ -1077,7 +1095,19 @@ function validateSupervisionHumanRequest(run: TeamRunRecordShape): ContractIssue
       });
     }
   }
+  if (request.retirement && request.retirement.reason !== run.state.status) {
+    issues.push({
+      path: ["supervision", "humanRequest", "retirement", "reason"],
+      message: "Human request retirement must match the terminal run status",
+    });
+  }
   return issues;
+}
+
+function isPendingHumanRequest(
+  request: NonNullable<TeamRunRecordShape["supervision"]>["humanRequest"],
+): boolean {
+  return Boolean(request && !request.resolution && !request.retirement);
 }
 
 function validateSupervisionAttempts(
@@ -1174,11 +1204,14 @@ function supervisedStepMatchesRole(
   const roleName = role.name ?? role.roleName;
   const roleInstructions = role.instructions ?? role.roleInstructions;
   const profileId = role.profileId ?? role.resolvedLaunch?.profileId;
+  const launchMatches = role.resolvedLaunch
+    ? equal(step.snapshot.resolvedLaunch, role.resolvedLaunch)
+    : step.snapshot.resolvedLaunch.profileId === profileId;
   return (
     step.snapshot.roleId === roleId &&
     step.snapshot.roleName === roleName &&
     step.snapshot.roleInstructions === roleInstructions &&
-    step.snapshot.resolvedLaunch.profileId === profileId
+    launchMatches
   );
 }
 
@@ -1254,18 +1287,14 @@ function validateSupervisedHumanWait(run: TeamRunRecordShape): ContractIssue[] {
   const supervision = run.supervision!;
   const issues: ContractIssue[] = [];
   if (supervision.phase === "awaiting_human") {
-    if (run.state.status !== "running" || supervision.humanRequest?.resolution) {
+    if (run.state.status !== "running" || !isPendingHumanRequest(supervision.humanRequest)) {
       issues.push({
         path: ["supervision", "phase"],
         message: "Human-wait supervision requires a running run and unresolved request",
       });
     }
   }
-  if (
-    supervision.humanRequest &&
-    !supervision.humanRequest.resolution &&
-    supervision.phase !== "awaiting_human"
-  ) {
+  if (isPendingHumanRequest(supervision.humanRequest) && supervision.phase !== "awaiting_human") {
     issues.push({
       path: ["supervision", "humanRequest"],
       message: "An unresolved human request must keep supervision awaiting the human",
@@ -1306,7 +1335,7 @@ function validateSupervisedTerminalState(
         message: "A succeeded supervised run requires every planned work item to succeed",
       });
     }
-    if (supervision.humanRequest && !supervision.humanRequest.resolution) {
+    if (isPendingHumanRequest(supervision.humanRequest)) {
       issues.push({
         path: ["state", "status"],
         message: "A succeeded supervised run cannot retain an unresolved human request",
@@ -1508,6 +1537,22 @@ function validateRunTimestamps(run: TeamRunRecordShape): ContractIssue[] {
           });
         }
       }
+      if (request.retirement) {
+        const retiredAt = validateTimestampBounds(
+          request.retirement.retiredAt,
+          "retiredAt",
+          ["supervision", "humanRequest", "retirement"],
+          createdAt,
+          updatedAt,
+          issues,
+        );
+        if (retiredAt < requestCreatedAt) {
+          issues.push({
+            path: ["supervision", "humanRequest", "retirement", "retiredAt"],
+            message: "Human request retirement cannot precede the request",
+          });
+        }
+      }
     }
   }
   validateRunStepTimestampOrder(run, issues);
@@ -1625,6 +1670,7 @@ type LifecycleTimestampField =
   | "startedAt"
   | "stopRequestedAt"
   | "resolvedAt"
+  | "retiredAt"
   | "endedAt";
 
 function validateTimestampBounds(

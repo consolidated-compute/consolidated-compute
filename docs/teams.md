@@ -89,6 +89,10 @@ Workspace archive or removal wins over the Team Run. Stop the current step and c
 
 Shutdown fences new starts before agents close. Mark in-flight runs interrupted and cancel or settle them best-effort. On startup, mark every leftover active run interrupted. Never replay a prompt whose effects are uncertain.
 
+A terminal supervised transition retires any unresolved human request in the same atomic run write.
+The request remains historical evidence, but it no longer keeps the run or its Workspace and
+Assignment locks active.
+
 ## Roadmap boundary
 
 Stored v0.2 runs remain objective-only: their Objective is not a durable Assignment and their bounded inline handoff is not an Artifact. [Assignments and Artifacts](assignments.md) own the v0.3 path; stored runs and older clients keep the legacy behavior.
