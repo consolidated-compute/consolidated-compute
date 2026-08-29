@@ -833,6 +833,40 @@ describe("TeamRepository runs", () => {
     });
     expect(toTeamRunDto(canceled).supervision).not.toHaveProperty("pendingHumanRequest");
     await expect(repository.getActiveRunForAssignment(assignment.id)).resolves.toBeNull();
+
+    const repeatedAfterCancellation = await repository.commitSupervisionDecision(
+      {
+        runId: admitted.id,
+        expectedSupervisionRevision: 2,
+        decision: escalationDecision,
+      },
+      () => {
+        throw new Error("A terminal idempotent retry must not invoke the updater");
+      },
+    );
+    expect(repeatedAfterCancellation).toEqual(canceled);
+
+    const postCancellationDecision = {
+      ...decision,
+      id: "decision_dispatch_after_cancel",
+      sequence: 3,
+      actionId: "action_dispatch_after_cancel",
+      kind: "dispatch" as const,
+      summary: "This action must not be committed after cancellation.",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: canceled.supervision!.revision,
+          decision: postCancellationDecision,
+        },
+        () => {
+          throw new Error("A terminal run must not invoke the updater for a new action");
+        },
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    await expect(repository.getRun(admitted.id)).resolves.toEqual(canceled);
   });
 
   test("rejects missing, stale, and terminal Assignments before creating a run", async () => {

@@ -691,6 +691,29 @@ describe("Team Run contract", () => {
     );
   });
 
+  test.each([
+    ["completed", "succeeded"],
+    ["failed", "failed"],
+    ["canceled", "canceled"],
+    ["interrupted", "interrupted"],
+  ] as const)("requires supervision phase %s to terminalize the run as %s", (phase, status) => {
+    const supervised = createSupervisedAssignmentRun();
+    const result = PersistedTeamRunRecordSchema.safeParse({
+      ...supervised,
+      state: { status: "running", startedAt: timestamp },
+      supervision: {
+        ...supervised.supervision!,
+        phase,
+      },
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      `Supervision phase ${phase} requires run status ${status}`,
+    );
+  });
+
   test("requires Assignment identity, revision, and snapshot together", () => {
     const run = createAssignmentRun();
     const { assignmentSnapshot: _, ...withoutSnapshot } = run;

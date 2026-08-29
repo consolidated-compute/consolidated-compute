@@ -1367,6 +1367,19 @@ function validateSupervisedTerminalState(
       message: `Terminal run status ${run.state.status} requires supervision phase ${expectedTerminalPhase}`,
     });
   }
+  const terminalStatusByPhase: Partial<Record<typeof supervision.phase, TeamRunStatus>> = {
+    completed: "succeeded",
+    failed: "failed",
+    canceled: "canceled",
+    interrupted: "interrupted",
+  };
+  const expectedTerminalStatus = terminalStatusByPhase[supervision.phase];
+  if (expectedTerminalStatus && run.state.status !== expectedTerminalStatus) {
+    issues.push({
+      path: ["supervision", "phase"],
+      message: `Supervision phase ${supervision.phase} requires run status ${expectedTerminalStatus}`,
+    });
+  }
   if (run.state.status === "succeeded") {
     if (supervision.workItems.some((workItem) => workItem.status !== "succeeded")) {
       issues.push({

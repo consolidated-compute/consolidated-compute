@@ -89,9 +89,11 @@ Workspace archive or removal wins over the Team Run. Stop the current step and c
 
 Shutdown fences new starts before agents close. Mark in-flight runs interrupted and cancel or settle them best-effort. On startup, mark every leftover active run interrupted. Never replay a prompt whose effects are uncertain.
 
-A terminal supervised transition retires any unresolved human request and settles every unfinished
-work item in the same atomic run write. The request remains historical evidence, but it no longer
-keeps the run or its Workspace and Assignment locks active.
+A terminal supervision phase must match the outer Team Run status. That transition retires any
+unresolved human request and settles every unfinished work item in the same atomic run write. The
+request remains historical evidence, but it no longer keeps the run or its Workspace and Assignment
+locks active. Duplicate supervisor-action retries remain readable after terminalization; new actions
+are rejected.
 
 ## Roadmap boundary
 
