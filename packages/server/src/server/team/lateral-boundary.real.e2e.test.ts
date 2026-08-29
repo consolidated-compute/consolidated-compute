@@ -328,12 +328,16 @@ test(
       const outsideWriteOutcome = implementationToolOutcomes.find((outcome) =>
         outcome.command?.includes(outsideCanary),
       );
-      if (!implementationWriteOutcome || !outsideWriteOutcome) {
+      if (!planWriteOutcome || !implementationWriteOutcome || !outsideWriteOutcome) {
         emitDiagnostic({ completed, streamEvents, workspaceRoot, outsideRoot });
       }
-      if (planWriteOutcome) {
-        expect(planWriteOutcome).toMatchObject({ detailType: "shell" });
-      }
+      // The absent canary is not enough: require the provider to have executed the exact
+      // conditional probe whose successful denial branch produced the nonce in the Artifact.
+      expect(planWriteOutcome).toMatchObject({
+        status: "completed",
+        detailType: "shell",
+        exitCode: 0,
+      });
       expect(implementationWriteOutcome).toMatchObject({ detailType: "shell" });
       expect(outsideWriteOutcome).toMatchObject({ detailType: "shell" });
 
