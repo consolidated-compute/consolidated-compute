@@ -956,10 +956,18 @@ function terminalizeSupervision(
   const isPendingRequest = humanRequest && !humanRequest.resolution && !humanRequest.retirement;
   const retirementReason =
     phase === "failed" || phase === "canceled" || phase === "interrupted" ? phase : null;
+  const workItems = retirementReason
+    ? supervision.workItems.map((workItem) =>
+        workItem.status === "planned" || workItem.status === "active"
+          ? { ...workItem, status: retirementReason }
+          : workItem,
+      )
+    : supervision.workItems;
   return {
     ...supervision,
     revision: supervision.revision + 1,
     phase,
+    workItems,
     ...(isPendingRequest && retirementReason
       ? {
           humanRequest: {

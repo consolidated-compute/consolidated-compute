@@ -781,6 +781,16 @@ describe("TeamRepository runs", () => {
           revision: 3,
           phase: "awaiting_human",
           decisions: [...current.supervision.decisions, escalationDecision],
+          workItems: [
+            {
+              id: "work_pending_review",
+              templateStepId: current.supervision.workerTemplates[0]!.stepId,
+              inputArtifactIds: [],
+              attemptIds: [],
+              acceptedAttemptId: null,
+              status: "planned",
+            },
+          ],
           humanRequest: {
             id: "human_review_1",
             revision: 1,
@@ -815,6 +825,7 @@ describe("TeamRepository runs", () => {
     expect(canceled.supervision).toMatchObject({
       revision: 4,
       phase: "canceled",
+      workItems: [{ id: "work_pending_review", status: "canceled" }],
       humanRequest: {
         id: "human_review_1",
         retirement: { reason: "canceled", retiredAt: secondTimestamp },

@@ -24,6 +24,7 @@ import {
 const timestamp = "2026-08-25T12:00:00.000Z";
 const agentId = "9f44cd43-89a5-4371-af49-679bfbf8d1d7";
 const secondAgentId = "d65fc288-0a1b-45a9-b0c8-8346cd1721b3";
+const thirdAgentId = "d5c82f35-5235-48fd-b3ba-425b377d20ab";
 
 function createTeam(): PersistedTeamDefinition {
   return {
@@ -255,6 +256,123 @@ function createSupervisedRunWithDecision(): PersistedTeamRunRecord {
   });
 }
 
+function createSupervisedRunWithWorkerAttempts(): PersistedTeamRunRecord {
+  const run = createSupervisedRunWithDecision();
+  const [plannerTemplate, builderTemplate] = run.supervision!.workerTemplates;
+  const firstArtifactId = "aart_1111111111111111";
+  const secondArtifactId = "aart_2222222222222222";
+  const firstWorkItemId = "work_plan";
+  const secondWorkItemId = "work_build";
+  const firstAttemptId = "attempt_plan_1";
+  const secondAttemptId = "attempt_build_1";
+  const dispatchPlan = {
+    id: "decision_dispatch_plan",
+    sequence: 2,
+    actionId: "action_dispatch_plan",
+    kind: "dispatch" as const,
+    summary: "Dispatch the planning work item.",
+    workItemId: firstWorkItemId,
+    attemptId: firstAttemptId,
+    createdAt: timestamp,
+  };
+  const dispatchBuild = {
+    id: "decision_dispatch_build",
+    sequence: 3,
+    actionId: "action_dispatch_build",
+    kind: "dispatch" as const,
+    summary: "Dispatch the build work item.",
+    workItemId: secondWorkItemId,
+    attemptId: secondAttemptId,
+    createdAt: timestamp,
+  };
+  return PersistedTeamRunRecordSchema.parse({
+    ...run,
+    steps: [
+      ...run.steps,
+      {
+        snapshot: {
+          ...plannerTemplate!,
+          stepId: "supervised_step_plan_1",
+          inputArtifactIds: [],
+          outputArtifact: {
+            id: firstArtifactId,
+            kind: "team_step_output",
+            title: "Planner output",
+            mediaType: "text/markdown",
+          },
+          supervision: {
+            kind: "worker",
+            workItemId: firstWorkItemId,
+            attemptId: firstAttemptId,
+            attemptNumber: 1,
+            templateStepId: plannerTemplate!.stepId,
+            revisionParentAttemptId: null,
+          },
+        },
+        state: {
+          status: "succeeded",
+          plannedAgentId: secondAgentId,
+          agentId: secondAgentId,
+          startedAt: timestamp,
+          endedAt: timestamp,
+        },
+      },
+      {
+        snapshot: {
+          ...builderTemplate!,
+          stepId: "supervised_step_build_1",
+          inputArtifactIds: [firstArtifactId],
+          outputArtifact: {
+            id: secondArtifactId,
+            kind: "team_step_output",
+            title: "Implementer output",
+            mediaType: "text/markdown",
+          },
+          supervision: {
+            kind: "worker",
+            workItemId: secondWorkItemId,
+            attemptId: secondAttemptId,
+            attemptNumber: 1,
+            templateStepId: builderTemplate!.stepId,
+            revisionParentAttemptId: null,
+          },
+        },
+        state: {
+          status: "succeeded",
+          plannedAgentId: thirdAgentId,
+          agentId: thirdAgentId,
+          startedAt: timestamp,
+          endedAt: timestamp,
+        },
+      },
+    ],
+    supervision: {
+      ...run.supervision!,
+      revision: 4,
+      phase: "working",
+      workItems: [
+        {
+          id: firstWorkItemId,
+          templateStepId: plannerTemplate!.stepId,
+          inputArtifactIds: [],
+          attemptIds: [firstAttemptId],
+          acceptedAttemptId: firstAttemptId,
+          status: "succeeded",
+        },
+        {
+          id: secondWorkItemId,
+          templateStepId: builderTemplate!.stepId,
+          inputArtifactIds: [firstArtifactId],
+          attemptIds: [secondAttemptId],
+          acceptedAttemptId: secondAttemptId,
+          status: "succeeded",
+        },
+      ],
+      decisions: [...run.supervision!.decisions, dispatchPlan, dispatchBuild],
+    },
+  });
+}
+
 describe("Team definition contract", () => {
   test("accepts stable roles and an explicit sequential workflow", () => {
     expect(PersistedTeamDefinitionSchema.parse(createTeam())).toEqual(createTeam());
@@ -393,6 +511,76 @@ describe("Team Run contract", () => {
     if (result.success) return;
     expect(result.error.issues.map((issue) => issue.message)).toContain(
       "Supervisor step must match the frozen supervisor role",
+    );
+  });
+
+  test("binds every decision attempt to its named supervised work item", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    run.supervision!.decisions[2] = {
+      ...run.supervision!.decisions[2]!,
+      workItemId: "work_plan",
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Supervisor decision attempt must belong to its named work item",
+    );
+  });
+
+  test("reserves the frozen supervisor agent ID from worker attempts", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const supervisorAgentId = run.supervision!.supervisor.agentId;
+    run.steps[1]!.state = {
+      status: "succeeded",
+      plannedAgentId: supervisorAgentId,
+      agentId: supervisorAgentId,
+      startedAt: timestamp,
+      endedAt: timestamp,
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Each supervised worker attempt must own a distinct agent ID",
+    );
+  });
+
+  test("requires human requests to reference run-local evidence", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    run.supervision = {
+      ...run.supervision!,
+      phase: "awaiting_human",
+      humanRequest: {
+        id: "human_invalid_evidence",
+        revision: 1,
+        kind: "approval",
+        title: "Review the evidence",
+        detail: "Every reference must resolve inside this frozen Team Run.",
+        actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+        roleIds: ["role_missing"],
+        agentIds: ["3ceaf5a8-ee7a-48bb-a01f-b591fe5d7bc5"],
+        stepIds: ["step_missing"],
+        artifactIds: ["aart_ffffffffffffffff"],
+        createdAt: timestamp,
+      },
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toEqual(
+      expect.arrayContaining([
+        ["supervision", "humanRequest", "roleIds", 0],
+        ["supervision", "humanRequest", "agentIds", 0],
+        ["supervision", "humanRequest", "stepIds", 0],
+        ["supervision", "humanRequest", "artifactIds", 0],
+      ]),
     );
   });
 

@@ -755,7 +755,7 @@ function validateSupervisedRunStepSnapshots(run: TeamRunRecordShape): ContractIs
     decisions: new Map(supervision.decisions.map((decision) => [decision.id, decision])),
     templates: new Map(supervision.workerTemplates.map((template) => [template.stepId, template])),
     stepsByAttemptId: new Map(),
-    seenWorkerAgentIds: new Set(),
+    seenWorkerAgentIds: new Set([supervision.supervisor.agentId]),
     supervisorSteps: [],
   };
   const seenStepIds = new Set<string>();
@@ -1023,7 +1023,7 @@ function validateSupervisionWorkItems(run: TeamRunRecordShape): ContractIssue[] 
 function validateSupervisionDecisions(run: TeamRunRecordShape): ContractIssue[] {
   const supervision = run.supervision!;
   const issues: ContractIssue[] = [];
-  const workItemIds = new Set(supervision.workItems.map((workItem) => workItem.id));
+  const workItems = new Map(supervision.workItems.map((workItem) => [workItem.id, workItem]));
   const attemptIds = new Set(supervision.workItems.flatMap((workItem) => workItem.attemptIds));
   const decisionIds = new Set<string>();
   const actionIds = new Set<string>();
@@ -1048,7 +1048,8 @@ function validateSupervisionDecisions(run: TeamRunRecordShape): ContractIssue[] 
       });
     }
     actionIds.add(decision.actionId);
-    if (decision.workItemId !== null && !workItemIds.has(decision.workItemId)) {
+    const workItem = decision.workItemId === null ? null : workItems.get(decision.workItemId);
+    if (decision.workItemId !== null && !workItem) {
       issues.push({
         path: ["supervision", "decisions", index, "workItemId"],
         message: `Unknown supervised work item ID: ${decision.workItemId}`,
@@ -1058,6 +1059,15 @@ function validateSupervisionDecisions(run: TeamRunRecordShape): ContractIssue[] 
       issues.push({
         path: ["supervision", "decisions", index, "attemptId"],
         message: `Unknown supervised attempt ID: ${decision.attemptId}`,
+      });
+    } else if (
+      decision.attemptId !== null &&
+      workItem &&
+      !workItem.attemptIds.includes(decision.attemptId)
+    ) {
+      issues.push({
+        path: ["supervision", "decisions", index, "attemptId"],
+        message: "Supervisor decision attempt must belong to its named work item",
       });
     }
   }
@@ -1101,7 +1111,36 @@ function validateSupervisionHumanRequest(run: TeamRunRecordShape): ContractIssue
       message: "Human request retirement must match the terminal run status",
     });
   }
+  const validRoleIds = new Set(run.teamSnapshot.roles.map((role) => role.id));
+  const validAgentIds = new Set<string>([run.supervision!.supervisor.agentId]);
+  const validStepIds = new Set<string>();
+  const validArtifactIds = new Set<string>();
+  for (const step of run.steps) {
+    validStepIds.add(step.snapshot.stepId);
+    if ("plannedAgentId" in step.state) validAgentIds.add(step.state.plannedAgentId);
+    if ("agentId" in step.state && step.state.agentId) validAgentIds.add(step.state.agentId);
+    if (step.snapshot.outputArtifact) validArtifactIds.add(step.snapshot.outputArtifact.id);
+  }
+  validateHumanRequestReferences(request.roleIds, validRoleIds, "roleIds", issues);
+  validateHumanRequestReferences(request.agentIds, validAgentIds, "agentIds", issues);
+  validateHumanRequestReferences(request.stepIds, validStepIds, "stepIds", issues);
+  validateHumanRequestReferences(request.artifactIds, validArtifactIds, "artifactIds", issues);
   return issues;
+}
+
+function validateHumanRequestReferences(
+  values: readonly string[],
+  validValues: ReadonlySet<string>,
+  field: "roleIds" | "agentIds" | "stepIds" | "artifactIds",
+  issues: ContractIssue[],
+): void {
+  for (const [index, value] of values.entries()) {
+    if (validValues.has(value)) continue;
+    issues.push({
+      path: ["supervision", "humanRequest", field, index],
+      message: `Human request references unknown run-local evidence: ${value}`,
+    });
+  }
 }
 
 function isPendingHumanRequest(
@@ -1341,6 +1380,18 @@ function validateSupervisedTerminalState(
         message: "A succeeded supervised run cannot retain an unresolved human request",
       });
     }
+  }
+  if (
+    run.state.status !== "succeeded" &&
+    TERMINAL_RUN_STATUSES.has(run.state.status) &&
+    supervision.workItems.some(
+      (workItem) => workItem.status === "planned" || workItem.status === "active",
+    )
+  ) {
+    issues.push({
+      path: ["supervision", "workItems"],
+      message: "A terminal supervised run cannot retain unfinished work items",
+    });
   }
   return issues;
 }
