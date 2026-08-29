@@ -44,6 +44,12 @@ function createTeam(): PersistedTeamDefinition {
         instructions: "Implement the accepted plan and verify the change.",
         profileId: "profile_builder",
       },
+      {
+        id: "role_supervisor",
+        name: "Supervisor",
+        instructions: "Coordinate bounded work and escalate explicit exceptions.",
+        profileId: "profile_supervisor",
+      },
     ],
     workflow: [
       { id: "step_plan", roleId: "role_planner", instructions: null },
@@ -156,6 +162,55 @@ function createAssignmentRun() {
   };
 }
 
+function createSupervisedAssignmentRun(): PersistedTeamRunRecord {
+  const source = createAssignmentRun();
+  const supervisorRole = source.teamSnapshot.roles.find((role) => role.id === "role_supervisor")!;
+  const workerTemplates = source.steps.map((step) => {
+    const {
+      inputArtifactIds: _inputArtifactIds,
+      outputArtifact: _outputArtifact,
+      supervision: _supervision,
+      ...snapshot
+    } = step.snapshot;
+    return snapshot;
+  });
+  return PersistedTeamRunRecordSchema.parse({
+    ...source,
+    steps: [],
+    state: { status: "queued" },
+    supervision: {
+      revision: 1,
+      phase: "queued",
+      supervisor: {
+        roleId: supervisorRole.id,
+        roleName: supervisorRole.name,
+        roleInstructions: supervisorRole.instructions,
+        resolvedLaunch: {
+          profileId: supervisorRole.profileId,
+          provider: "codex",
+          model: "gpt-5.6",
+          modeId: "workspace-write",
+          thinkingOptionId: "high",
+          featureValues: {},
+        },
+        agentId: "6cc64262-085a-47ab-8ca7-77ccad4bd505",
+      },
+      workerTemplates,
+      limits: {
+        maxWorkItems: 24,
+        maxActiveWorkers: 1,
+        maxAttemptsPerWorkItem: 4,
+        maxSupervisorActions: 128,
+        maxDelegationDepth: 1,
+      },
+      workItems: [],
+      decisions: [],
+      humanRequest: null,
+      updatedAt: timestamp,
+    },
+  });
+}
+
 describe("Team definition contract", () => {
   test("accepts stable roles and an explicit sequential workflow", () => {
     expect(PersistedTeamDefinitionSchema.parse(createTeam())).toEqual(createTeam());
@@ -262,6 +317,128 @@ describe("Team Run contract", () => {
     const run = createAssignmentRun();
 
     expect(PersistedTeamRunRecordSchema.parse(run)).toEqual(run);
+  });
+
+  test("accepts a bounded supervised Assignment admission snapshot", () => {
+    const run = createSupervisedAssignmentRun();
+
+    expect(PersistedTeamRunRecordSchema.parse(run)).toEqual(run);
+    expect(run.steps).toEqual([]);
+    expect(run.supervision).toMatchObject({
+      revision: 1,
+      phase: "queued",
+      supervisor: { roleId: "role_supervisor" },
+      limits: { maxActiveWorkers: 1, maxDelegationDepth: 1 },
+      workItems: [],
+      decisions: [],
+    });
+  });
+
+  test("rejects supervised runs without an Assignment or with a worker as supervisor", () => {
+    const supervised = createSupervisedAssignmentRun();
+    const withoutAssignment = {
+      ...supervised,
+      assignmentId: undefined,
+      assignmentRevision: undefined,
+      assignmentSnapshot: undefined,
+    };
+    const workerSupervisor = {
+      ...supervised,
+      supervision: {
+        ...supervised.supervision!,
+        supervisor: {
+          ...supervised.supervision!.supervisor,
+          roleId: "role_planner",
+          roleName: "Planner",
+          roleInstructions: "Inspect the objective and produce a bounded plan.",
+          resolvedLaunch: supervised.supervision!.workerTemplates[0]!.resolvedLaunch,
+        },
+      },
+    };
+
+    const missingResult = PersistedTeamRunRecordSchema.safeParse(withoutAssignment);
+    const workerResult = PersistedTeamRunRecordSchema.safeParse(workerSupervisor);
+    expect(missingResult.success).toBe(false);
+    expect(workerResult.success).toBe(false);
+    if (!missingResult.success) {
+      expect(missingResult.error.issues.map((issue) => issue.message)).toContain(
+        "Supervised Team Runs must be backed by an Assignment",
+      );
+    }
+    if (!workerResult.success) {
+      expect(workerResult.error.issues.map((issue) => issue.message)).toContain(
+        "The supervisor role cannot also be a worker workflow role",
+      );
+    }
+  });
+
+  test("enforces frozen supervision limits and unique durable IDs", () => {
+    const supervised = createSupervisedAssignmentRun();
+    const workItem = {
+      id: "work_build",
+      templateStepId: "step_plan",
+      inputArtifactIds: [] as string[],
+      attemptIds: ["attempt_1", "attempt_1"],
+      acceptedAttemptId: null,
+      status: "planned" as const,
+    };
+    const result = PersistedTeamRunRecordSchema.safeParse({
+      ...supervised,
+      state: { status: "running", startedAt: timestamp },
+      supervision: {
+        ...supervised.supervision!,
+        phase: "planning",
+        limits: { ...supervised.supervision!.limits, maxWorkItems: 1 },
+        workItems: [workItem, { ...workItem }],
+      },
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toEqual(
+      expect.arrayContaining([
+        "Supervised work exceeds the frozen work-item limit",
+        "Duplicate supervised work item ID: work_build",
+        "Duplicate supervised attempt ID: attempt_1",
+      ]),
+    );
+  });
+
+  test("rejects terminal success while a human request remains unresolved", () => {
+    const supervised = createSupervisedAssignmentRun();
+    const result = PersistedTeamRunRecordSchema.safeParse({
+      ...supervised,
+      state: { status: "succeeded", startedAt: timestamp, endedAt: timestamp },
+      supervision: {
+        ...supervised.supervision!,
+        phase: "completed",
+        humanRequest: {
+          id: "human_review",
+          revision: 1,
+          kind: "approval",
+          title: "Approve completion",
+          detail: "Confirm the bounded result.",
+          actions: [
+            { id: "approve", label: "Approve", requiresNote: false },
+            { id: "reject", label: "Reject", requiresNote: true },
+          ],
+          roleIds: ["role_supervisor"],
+          agentIds: [supervised.supervision!.supervisor.agentId],
+          stepIds: [],
+          artifactIds: [],
+          createdAt: timestamp,
+        },
+      },
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toEqual(
+      expect.arrayContaining([
+        "An unresolved human request must keep supervision awaiting the human",
+        "A succeeded supervised run cannot retain an unresolved human request",
+      ]),
+    );
   });
 
   test("requires Assignment identity, revision, and snapshot together", () => {

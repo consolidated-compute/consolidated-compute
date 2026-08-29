@@ -39,6 +39,7 @@ import {
 } from "./repository.js";
 import { materializeTeamStepArtifact, resolveTeamStepInputArtifacts } from "./artifacts.js";
 import { buildTeamRunPreview, createTeamRunPreviewFingerprint } from "./security-preview.js";
+import { createInitialTeamRunSupervision } from "./supervision.js";
 
 type TeamRunStep = PersistedTeamRunRecord["steps"][number];
 type TeamRunTerminationReason = "cancel" | "workspace" | "shutdown";
@@ -81,6 +82,10 @@ export interface StartAssignmentTeamRunInput {
   expectedAssignmentRevision: number;
   workspaceId: string;
   expectedPreviewFingerprint?: string;
+}
+
+export interface AdmitSupervisedAssignmentTeamRunInput extends StartAssignmentTeamRunInput {
+  supervisorRoleId: string;
 }
 
 export interface TeamRunServiceOptions {
@@ -297,6 +302,57 @@ export class TeamRunService {
         );
         this.launchExecution(run.id);
         return run;
+      }),
+    );
+  }
+
+  async admitSupervisedAssignmentRun(
+    input: AdmitSupervisedAssignmentTeamRunInput,
+  ): Promise<PersistedTeamRunRecord> {
+    const assignments = this.assignmentRepository;
+    if (!assignments) throw new TeamAssignmentRepositoryUnavailableError();
+    const identity = {
+      kind: "assignment" as const,
+      teamId: input.teamId,
+      expectedRevision: input.expectedRevision,
+      idempotencyKey: input.idempotencyKey,
+      assignmentId: input.assignmentId,
+      expectedAssignmentRevision: input.expectedAssignmentRevision,
+      workspaceId: input.workspaceId,
+      supervisorRoleId: input.supervisorRoleId,
+    };
+    const existing = await this.repository.getRunByAdmissionIdentity(identity);
+    if (existing) return existing;
+    this.requireAcceptingStarts();
+
+    const definition = await this.requireDefinition(input.teamId, input.expectedRevision);
+    const accepted = await this.preflight(definition, input.workspaceId);
+    const supervision = createInitialTeamRunSupervision({
+      definition,
+      accepted,
+      supervisorRoleId: input.supervisorRoleId,
+      supervisorAgentId: this.createAgentId(),
+      timestamp: this.now().toISOString(),
+    });
+    return this.withWorkspaceOperation(input.workspaceId, () =>
+      this.serializeAdmission(async () => {
+        const acceptedExisting = await this.repository.getRunByAdmissionIdentity(identity);
+        if (acceptedExisting) return acceptedExisting;
+        this.requireAcceptingStarts();
+        this.requireMatchingPreview(input.expectedPreviewFingerprint, accepted);
+        await revalidateTeamRunWorkspace(this.workspaceRegistry, accepted.workspace);
+        return this.repository.createSupervisedAssignmentRun(
+          {
+            teamId: input.teamId,
+            expectedRevision: input.expectedRevision,
+            idempotencyKey: input.idempotencyKey,
+            assignmentId: input.assignmentId,
+            expectedAssignmentRevision: input.expectedAssignmentRevision,
+            workspace: accepted.workspace,
+            supervision,
+          },
+          assignments,
+        );
       }),
     );
   }

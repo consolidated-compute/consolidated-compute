@@ -12,7 +12,11 @@ import {
   AssignmentRevisionConflictError,
   AssignmentStateConflictError,
 } from "../assignment/repository.js";
-import type { PersistedTeamDefinition, PersistedTeamRunRecord } from "./model.js";
+import type {
+  PersistedTeamDefinition,
+  PersistedTeamRunRecord,
+  PersistedTeamRunSupervision,
+} from "./model.js";
 import {
   TEAM_RUN_PAGE_MAX_LIMIT,
   TeamRepository,
@@ -21,6 +25,8 @@ import {
   TeamRepositoryIdError,
   TeamRevisionConflictError,
   TeamRunIdempotencyConflictError,
+  TeamRunSupervisionActionConflictError,
+  TeamRunSupervisionRevisionConflictError,
   TeamRunPageError,
   TeamStorageCorruptError,
   TeamWorkspaceHasActiveRunError,
@@ -51,6 +57,12 @@ function createDefinitionInput(): CreateTeamDefinitionInput {
         name: "Reviewer",
         instructions: "Review the implementation for correctness.",
         profileId: "profile_reviewer",
+      },
+      {
+        id: "role_supervisor",
+        name: "Supervisor",
+        instructions: "Coordinate bounded work and escalate exceptions.",
+        profileId: "profile_supervisor",
       },
     ],
     workflow: [
@@ -117,6 +129,41 @@ function createAssignmentRunInput(
     ...runInput,
     assignmentId: assignment.id,
     expectedAssignmentRevision: assignment.revision,
+  };
+}
+
+function createSupervision(definition: PersistedTeamDefinition): PersistedTeamRunSupervision {
+  const runInput = createRunInput(definition);
+  const supervisor = definition.roles.find((role) => role.id === "role_supervisor")!;
+  return {
+    revision: 1,
+    phase: "queued",
+    supervisor: {
+      roleId: supervisor.id,
+      roleName: supervisor.name,
+      roleInstructions: supervisor.instructions,
+      resolvedLaunch: {
+        profileId: supervisor.profileId,
+        provider: "codex",
+        model: "gpt-5.6",
+        modeId: "workspace-write",
+        thinkingOptionId: "high",
+        featureValues: {},
+      },
+      agentId: "0c783b8c-1bd7-4d79-863e-63a311742eef",
+    },
+    workerTemplates: runInput.steps.map((step) => step.snapshot),
+    limits: {
+      maxWorkItems: 24,
+      maxActiveWorkers: 1,
+      maxAttemptsPerWorkItem: 4,
+      maxSupervisorActions: 128,
+      maxDelegationDepth: 1,
+    },
+    workItems: [],
+    decisions: [],
+    humanRequest: null,
+    updatedAt: firstTimestamp,
   };
 }
 
@@ -522,6 +569,163 @@ describe("TeamRepository runs", () => {
       patch: { name: "Edited Team" },
     });
     await expect(repository.getRun(run.id)).resolves.toEqual(run);
+  });
+
+  test("durably admits a supervised Assignment without exposing it to the sequential executor", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const assignment = await assignments.createAssignment({
+      title: "Supervised Assignment",
+      objective: "Freeze supervised execution before any agent starts.",
+      workItem: null,
+    });
+    const sequentialInput = createAssignmentRunInput(definition, assignment);
+    const { steps: _steps, ...admission } = sequentialInput;
+    const run = await repository.createSupervisedAssignmentRun(
+      { ...admission, supervision: createSupervision(definition) },
+      assignments,
+    );
+
+    expect(run).toMatchObject({
+      assignmentId: assignment.id,
+      steps: [],
+      state: { status: "queued" },
+      supervision: {
+        revision: 1,
+        phase: "queued",
+        supervisor: {
+          roleId: "role_supervisor",
+          agentId: "0c783b8c-1bd7-4d79-863e-63a311742eef",
+        },
+        workItems: [],
+        decisions: [],
+      },
+    });
+    await expect(new TeamRepository({ paseoHome }).getRun(run.id)).resolves.toEqual(run);
+    await expect(
+      repository.createAssignmentRun(sequentialInput, assignments),
+    ).rejects.toBeInstanceOf(TeamRunIdempotencyConflictError);
+  });
+
+  test("commits supervisor decisions atomically with revision and action idempotency", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const assignment = await assignments.createAssignment({
+      title: "Durable supervisor decision",
+      objective: "Persist the decision before any later external effect.",
+      workItem: null,
+    });
+    const sequentialInput = createAssignmentRunInput(definition, assignment);
+    const { steps: _steps, ...admission } = sequentialInput;
+    const admitted = await repository.createSupervisedAssignmentRun(
+      { ...admission, supervision: createSupervision(definition) },
+      assignments,
+    );
+    currentTimestamp = secondTimestamp;
+    const decision = {
+      id: "decision_plan_1",
+      sequence: 1,
+      actionId: "action_plan_1",
+      kind: "plan" as const,
+      summary: "Accept the bounded workflow templates.",
+      workItemId: null,
+      attemptId: null,
+      createdAt: secondTimestamp,
+    };
+    const committed = await repository.commitSupervisionDecision(
+      {
+        runId: admitted.id,
+        expectedSupervisionRevision: 1,
+        decision,
+      },
+      (current) => ({
+        state: { status: "running", startedAt: secondTimestamp },
+        steps: [
+          {
+            snapshot: {
+              stepId: "supervisor_turn_1",
+              roleId: current.supervision.supervisor.roleId,
+              roleName: current.supervision.supervisor.roleName,
+              roleInstructions: current.supervision.supervisor.roleInstructions,
+              stepInstructions: null,
+              resolvedLaunch: current.supervision.supervisor.resolvedLaunch,
+              supervision: {
+                kind: "supervisor",
+                turn: 1,
+                decisionId: decision.id,
+              },
+            },
+            state: {
+              status: "succeeded",
+              plannedAgentId: current.supervision.supervisor.agentId,
+              agentId: current.supervision.supervisor.agentId,
+              startedAt: secondTimestamp,
+              endedAt: secondTimestamp,
+            },
+          },
+        ],
+        supervision: {
+          ...current.supervision,
+          revision: 2,
+          phase: "planning",
+          decisions: [decision],
+          updatedAt: secondTimestamp,
+        },
+      }),
+    );
+
+    expect(committed).toMatchObject({
+      state: { status: "running" },
+      supervision: { revision: 2, decisions: [decision] },
+    });
+    const repeated = await repository.commitSupervisionDecision(
+      {
+        runId: admitted.id,
+        expectedSupervisionRevision: 1,
+        decision,
+      },
+      () => {
+        throw new Error("Idempotent retry must not invoke the updater");
+      },
+    );
+    expect(repeated).toEqual(committed);
+
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: { ...decision, summary: "Conflicting action payload." },
+        },
+        () => {
+          throw new Error("Conflicting action must not invoke the updater");
+        },
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 1,
+          decision: {
+            ...decision,
+            id: "decision_dispatch_2",
+            sequence: 2,
+            actionId: "action_dispatch_2",
+            kind: "dispatch",
+          },
+        },
+        () => {
+          throw new Error("Stale revision must not invoke the updater");
+        },
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionRevisionConflictError);
   });
 
   test("rejects missing, stale, and terminal Assignments before creating a run", async () => {

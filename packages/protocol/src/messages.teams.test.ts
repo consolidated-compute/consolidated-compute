@@ -12,6 +12,7 @@ import {
   TeamRunDtoSchema,
   TeamRunStepDtoSchema,
   TeamRunStepSnapshotDtoSchema,
+  TeamRunSupervisionStartDtoSchema,
 } from "./team/types.js";
 
 const team = {
@@ -231,6 +232,39 @@ describe("Team wire contracts", () => {
     expect(TeamRunDtoSchema.parse(legacyRun)).toEqual(legacyRun);
   });
 
+  test("keeps compact supervision summaries optional and forward-readable", () => {
+    const supervisedRun = {
+      ...publicRun,
+      steps: [],
+      supervision: {
+        status: "future_supervision_phase",
+        supervisorRoleId: "supervisor",
+        supervisorAgentId: "00000000-0000-4000-8000-000000000401",
+        completedWorkItems: 1,
+        totalWorkItems: 2,
+        pendingHumanRequest: {
+          id: "human_review",
+          kind: "policy_exception",
+          title: "Choose the bounded next action",
+          revision: 2,
+        },
+        updatedAt: run.updatedAt,
+      },
+    };
+
+    expect(TeamRunDtoSchema.parse(supervisedRun)).toEqual(supervisedRun);
+    expect(TeamRunSupervisionStartDtoSchema.parse({ supervisorRoleId: "supervisor" })).toEqual({
+      supervisorRoleId: "supervisor",
+    });
+
+    const LegacyRunSchema = TeamRunDtoSchema.omit({ supervision: true });
+    expect(LegacyRunSchema.parse(supervisedRun)).toEqual({
+      ...publicRun,
+      steps: [],
+    });
+    expect(TeamRunDtoSchema.parse(publicRun)).toEqual(publicRun);
+  });
+
   test("requires Team updates to include at least one authored field", () => {
     const request = {
       type: "team.update.request",
@@ -343,6 +377,7 @@ describe("Team wire contracts", () => {
           teams: true,
           teamSecurity: true,
           teamRunPreview: true,
+          teamSupervision: true,
         },
       }).features,
     ).toEqual({
@@ -350,6 +385,7 @@ describe("Team wire contracts", () => {
       teams: true,
       teamSecurity: true,
       teamRunPreview: true,
+      teamSupervision: true,
     });
   });
 
@@ -369,6 +405,7 @@ describe("Team wire contracts", () => {
           teams: true,
           teamSecurity: true,
           teamRunPreview: true,
+          teamSupervision: true,
         },
       }),
     ).toEqual({

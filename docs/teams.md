@@ -48,6 +48,19 @@ The posture records facts derived from the frozen launch configuration. It does 
 
 Only one Team Run may own a Workspace at a time. The lock covers active, permission-waiting, stopping, and stop-failed runs. It does not isolate the Workspace from people or ordinary Paseo agents.
 
+Supervised execution uses the same Team Run record rather than a second coordinator store. Its
+admission snapshot is Assignment-only and freezes an unused Team role as supervisor, the existing
+workflow as worker templates, every resolved launch, the planned supervisor agent ID, and bounded
+work, attempt, action, fan-out, and delegation limits. Dynamic worker attempts belong in the run
+step ledger; normalized decisions and exact Artifact references belong in the optional supervision
+ledger. Repository commands append decisions with revision and action idempotency checks before an
+executor performs external work.
+
+The wire projection exposes only a compact optional supervision summary. Existing Team Run and
+step lifecycle values do not change. The daemon does not advertise supervised execution until the
+executor and its server-enforced agent authority are available; the current app continues to start
+sequential runs.
+
 ## Execution
 
 The daemon service coordinates root Paseo agents. Each reached workflow step creates one agent in the selected Workspace from the frozen launch values; execution never resolves the Agent Profile again. Correlation labels identify the Team, run, role, and step. Do not set `paseo.parent-agent-id`; that label means an agent-created child and carries cascade and archive behavior.
@@ -80,4 +93,4 @@ Shutdown fences new starts before agents close. Mark in-flight runs interrupted 
 
 Stored v0.2 runs remain objective-only: their Objective is not a durable Assignment and their bounded inline handoff is not an Artifact. [Assignments and Artifacts](assignments.md) own the v0.3 path; stored runs and older clients keep the legacy behavior.
 
-Teams still add no generic policy engine, sandbox, supervisor, conditional revision loop, retry, fan-out, new scheduler, or Team-owned Workspace creation. The frozen security posture reports provider behavior already selected by the Agent Profile; it does not create a new boundary.
+Teams still add no generic policy engine, sandbox, public supervisor flow, conditional revision loop, retry, fan-out, new scheduler, or Team-owned Workspace creation. The frozen security posture reports provider behavior already selected by the Agent Profile; it does not create a new boundary.
