@@ -18,6 +18,8 @@ import {
   serializeHostPersistenceMutation,
 } from "../persistence-mutation.js";
 import {
+  canTransitionTeamRun,
+  canTransitionTeamRunStep,
   generateTeamId,
   generateTeamRunId,
   PersistedTeamDefinitionSchema,
@@ -717,11 +719,25 @@ export class TeamRepository {
         equal(update.supervision.limits, preserved.supervision!.limits);
       const appendMatches = equal(update.supervision.decisions, expectedDecisions);
       const revisionMatches = update.supervision.revision === input.expectedSupervisionRevision + 1;
-      if (!immutableSnapshotMatches || !appendMatches || !revisionMatches) {
+      const runStateTransitionMatches = canTransitionTeamRun(
+        preserved.state.status,
+        update.state.status,
+      );
+      if (
+        !immutableSnapshotMatches ||
+        !appendMatches ||
+        !revisionMatches ||
+        !runStateTransitionMatches
+      ) {
         throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
       }
       for (const [index, step] of preserved.steps.entries()) {
-        if (!equal(step.snapshot, update.steps[index]?.snapshot)) {
+        const updatedStep = update.steps[index];
+        if (
+          !updatedStep ||
+          !equal(step.snapshot, updatedStep.snapshot) ||
+          !canTransitionTeamRunStep(step.state.status, updatedStep.state.status)
+        ) {
           throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
         }
       }
