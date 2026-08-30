@@ -29,6 +29,7 @@ import {
   type PersistedTeamRunRecord,
   type PersistedTeamRunSupervision,
   isActiveTeamRunStatus,
+  isTerminalTeamRunStepStatus,
   isTeamRunSupervisionDecisionBoundary,
 } from "./model.js";
 
@@ -742,7 +743,8 @@ export class TeamRepository {
         if (
           !updatedStep ||
           !equal(step.snapshot, updatedStep.snapshot) ||
-          !canTransitionTeamRunStep(step.state.status, updatedStep.state.status)
+          !canTransitionTeamRunStep(step.state.status, updatedStep.state.status) ||
+          (isTerminalTeamRunStepStatus(step.state.status) && !equal(step.state, updatedStep.state))
         ) {
           throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
         }
@@ -999,11 +1001,15 @@ function decisionAppendsExpectedWorkerAttempt(
   if (attemptAlreadyExists || appendedWorkers.length !== 1) return false;
   const worker = appendedWorkers[0]!;
   const metadata = worker.snapshot.supervision;
+  const workItem = update.supervision.workItems.find(
+    (candidate) => candidate.id === decision.workItemId,
+  );
   return (
     metadata?.kind === "worker" &&
     metadata.workItemId === decision.workItemId &&
     metadata.attemptId === decision.attemptId &&
-    worker.state.status === "creating"
+    worker.state.status === "creating" &&
+    workItem?.status === "active"
   );
 }
 

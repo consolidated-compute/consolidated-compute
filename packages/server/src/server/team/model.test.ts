@@ -795,6 +795,29 @@ describe("Team Run contract", () => {
     );
   });
 
+  test("requires active worker attempts to activate their work item", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const workerStep = run.steps.findLast((step) => step.snapshot.supervision?.kind === "worker")!;
+    const metadata = workerStep.snapshot.supervision!;
+    if (metadata.kind !== "worker") throw new Error("Expected a worker attempt");
+    workerStep.state = {
+      status: "creating",
+      plannedAgentId: workerStep.state.plannedAgentId!,
+      startedAt: timestamp,
+    };
+    const workItem = run.supervision!.workItems.find((item) => item.id === metadata.workItemId)!;
+    workItem.status = "planned";
+    workItem.acceptedAttemptId = null;
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "An active worker attempt requires an active supervised work item",
+    );
+  });
+
   test("requires complete decisions to terminalize supervision atomically", () => {
     const run = createSupervisedRunWithDecision();
     run.supervision!.decisions[0] = {

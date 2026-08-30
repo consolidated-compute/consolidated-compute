@@ -760,6 +760,101 @@ describe("TeamRepository runs", () => {
       ),
     ).rejects.toBeInstanceOf(TeamRunSupervisionRevisionConflictError);
 
+    const inactiveWorkItemDispatch = {
+      ...decision,
+      id: "decision_dispatch_inactive_work_2",
+      sequence: 2,
+      actionId: "action_dispatch_inactive_work_2",
+      kind: "dispatch" as const,
+      summary: "Dispatch one bounded worker attempt.",
+      workItemId: "work_inactive_dispatch",
+      attemptId: "attempt_inactive_dispatch",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: inactiveWorkItemDispatch,
+        },
+        (current) => {
+          const template = current.supervision.workerTemplates[0]!;
+          return {
+            state: current.state,
+            steps: [
+              ...current.steps,
+              {
+                snapshot: {
+                  stepId: "supervisor_turn_inactive_dispatch_2",
+                  roleId: current.supervision.supervisor.roleId,
+                  roleName: current.supervision.supervisor.roleName,
+                  roleInstructions: current.supervision.supervisor.roleInstructions,
+                  stepInstructions: null,
+                  resolvedLaunch: current.supervision.supervisor.resolvedLaunch,
+                  supervision: {
+                    kind: "supervisor",
+                    turn: 2,
+                    decisionId: inactiveWorkItemDispatch.id,
+                  },
+                },
+                state: {
+                  status: "succeeded",
+                  plannedAgentId: current.supervision.supervisor.agentId,
+                  agentId: current.supervision.supervisor.agentId,
+                  startedAt: secondTimestamp,
+                  endedAt: secondTimestamp,
+                },
+              },
+              {
+                snapshot: {
+                  ...template,
+                  stepId: "worker_inactive_dispatch_1",
+                  inputArtifactIds: [],
+                  outputArtifact: {
+                    id: "aart_4444444444444444",
+                    kind: "team_step_output",
+                    title: `${template.roleName} output`,
+                    mediaType: "text/markdown",
+                  },
+                  supervision: {
+                    kind: "worker",
+                    workItemId: inactiveWorkItemDispatch.workItemId,
+                    attemptId: inactiveWorkItemDispatch.attemptId,
+                    attemptNumber: 1,
+                    templateStepId: template.stepId,
+                    revisionParentAttemptId: null,
+                  },
+                },
+                state: {
+                  status: "creating",
+                  plannedAgentId: firstAgentId,
+                  startedAt: secondTimestamp,
+                },
+              },
+            ],
+            supervision: {
+              ...current.supervision,
+              revision: 3,
+              phase: "working",
+              workItems: [
+                {
+                  id: inactiveWorkItemDispatch.workItemId,
+                  templateStepId: template.stepId,
+                  inputArtifactIds: [],
+                  attemptIds: [inactiveWorkItemDispatch.attemptId],
+                  acceptedAttemptId: null,
+                  status: "planned",
+                },
+              ],
+              decisions: [...current.supervision.decisions, inactiveWorkItemDispatch],
+              updatedAt: secondTimestamp,
+            },
+          };
+        },
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    await expect(repository.getRun(admitted.id)).resolves.toEqual(committed);
+
     const escalationDecision = {
       ...decision,
       id: "decision_escalate_2",
@@ -926,7 +1021,7 @@ describe("TeamRepository runs", () => {
     await expect(repository.getRun(admitted.id)).resolves.toEqual(canceled);
   });
 
-  test("rejects replay of a terminal worker attempt during a supervisor decision", async () => {
+  test("rejects replay or rewrite of terminal worker history during a decision", async () => {
     const assignments = new AssignmentRepository({
       paseoHome,
       now: () => new Date(currentTimestamp),
@@ -1144,13 +1239,12 @@ describe("TeamRepository runs", () => {
           const replayedSteps: PersistedTeamRunRecord["steps"] = [];
           for (const step of current.steps) {
             replayedSteps.push(
-              step.snapshot.supervision?.kind === "worker"
+              step.snapshot.supervision?.kind === "worker" && step.state.status === "failed"
                 ? {
                     ...step,
                     state: {
-                      status: "creating",
-                      plannedAgentId: firstAgentId,
-                      startedAt: secondTimestamp,
+                      ...step.state,
+                      error: "Rewritten worker failure.",
                     },
                   }
                 : step,
@@ -1178,17 +1272,12 @@ describe("TeamRepository runs", () => {
               endedAt: secondTimestamp,
             },
           });
-          const reactivatedWorkItems: PersistedTeamRunSupervision["workItems"] = [];
-          for (const workItem of current.supervision.workItems) {
-            reactivatedWorkItems.push({ ...workItem, status: "active" });
-          }
           return {
             state: current.state,
             steps: replayedSteps,
             supervision: {
               ...current.supervision,
               revision: 3,
-              workItems: reactivatedWorkItems,
               decisions: [...current.supervision.decisions, replayDecision],
               updatedAt: secondTimestamp,
             },

@@ -61,9 +61,9 @@ decisions name one exact work item and attempt. A fresh decision is accepted onl
 queued or running at an idle planning boundary; active work, permission waits, cancellation,
 unresolved human requests, and terminal runs reject it. A decision
 may append steps but every preserved run and step state must follow the lifecycle transition graph;
-terminal attempt history cannot be reopened. A dispatch atomically appends one new `creating`
-attempt, and an attempt has one dispatch decision. A complete decision atomically moves supervision
-and the outer run to successful terminal states.
+terminal attempt history cannot be reopened or rewritten. A dispatch atomically appends one new
+`creating` attempt and marks its Work Item active, and an attempt has one dispatch decision. A
+complete decision atomically moves supervision and the outer run to successful terminal states.
 
 The wire projection exposes only a compact optional supervision summary. Existing Team Run and
 step lifecycle values do not change. The daemon does not advertise supervised execution until the

@@ -581,6 +581,12 @@ const ACTIVE_STEP_STATUSES: ReadonlySet<TeamRunStepStatus> = new Set([
   "stopping",
   "stop_failed",
 ]);
+const TERMINAL_STEP_STATUSES: ReadonlySet<TeamRunStepStatus> = new Set([
+  "succeeded",
+  "failed",
+  "canceled",
+  "interrupted",
+]);
 const TERMINAL_RUN_STATUSES: ReadonlySet<TeamRunStatus> = new Set([
   "succeeded",
   "failed",
@@ -941,6 +947,12 @@ function validateWorkerStep(
     context.issues.push({
       path: ["steps", index, "snapshot", "inputArtifactIds"],
       message: "Worker attempt inputs must match the frozen work item Artifact inputs",
+    });
+  }
+  if (workItem && ACTIVE_STEP_STATUSES.has(step.state.status) && workItem.status !== "active") {
+    context.issues.push({
+      path: ["supervision", "workItems", context.run.supervision!.workItems.indexOf(workItem)],
+      message: "An active worker attempt requires an active supervised work item",
     });
   }
   if (!step.snapshot.outputArtifact) {
@@ -1978,6 +1990,10 @@ export function isActiveTeamRunStatus(status: TeamRunStatus): boolean {
 
 export function isTerminalTeamRunStatus(status: TeamRunStatus): boolean {
   return !isActiveTeamRunStatus(status);
+}
+
+export function isTerminalTeamRunStepStatus(status: TeamRunStepStatus): boolean {
+  return TERMINAL_STEP_STATUSES.has(status);
 }
 
 export function isTeamRunSupervisionDecisionBoundary(run: PersistedTeamRunRecord): boolean {
