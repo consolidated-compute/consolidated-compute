@@ -27,7 +27,7 @@ import {
   type PersistedTeamRunRecord,
   type PersistedTeamRunSupervision,
   isActiveTeamRunStatus,
-  isTerminalTeamRunStatus,
+  isTeamRunSupervisionDecisionBoundary,
 } from "./model.js";
 
 export const TEAM_RUN_PAGE_DEFAULT_LIMIT = 50;
@@ -692,7 +692,7 @@ export class TeamRepository {
         if (equal(existingDecision, input.decision)) return current;
         throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
       }
-      if (isTerminalTeamRunStatus(current.state.status)) {
+      if (!isTeamRunSupervisionDecisionBoundary(current)) {
         throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
       }
       if (current.supervision.revision !== input.expectedSupervisionRevision) {

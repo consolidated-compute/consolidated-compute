@@ -55,7 +55,9 @@ work, attempt, action, fan-out, and delegation limits. Dynamic worker attempts b
 step ledger; normalized decisions and exact Artifact references belong in the optional supervision
 ledger. Every durable decision belongs to exactly one succeeded supervisor turn. Repository commands
 append decisions with revision and action idempotency checks before an executor performs external
-work.
+work. Dispatch and revision decisions name one exact work item and attempt. A fresh decision is
+accepted only while the run is queued or running at an idle planning boundary; active work,
+permission waits, cancellation, unresolved human requests, and terminal runs reject it.
 
 The wire projection exposes only a compact optional supervision summary. Existing Team Run and
 step lifecycle values do not change. The daemon does not advertise supervised execution until the

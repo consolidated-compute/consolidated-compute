@@ -702,7 +702,7 @@ describe("TeamRepository runs", () => {
       id: "decision_dispatch_2",
       sequence: 2,
       actionId: "action_dispatch_2",
-      kind: "dispatch" as const,
+      kind: "plan" as const,
     };
     await expect(
       repository.commitSupervisionDecision(
@@ -750,7 +750,7 @@ describe("TeamRepository runs", () => {
             id: "decision_dispatch_2",
             sequence: 2,
             actionId: "action_dispatch_2",
-            kind: "dispatch",
+            kind: "plan",
           },
         },
         () => {
@@ -835,6 +835,29 @@ describe("TeamRepository runs", () => {
         },
       }),
     );
+    expect(awaitingHuman.supervision?.phase).toBe("awaiting_human");
+    expect(awaitingHuman.supervision?.humanRequest).not.toHaveProperty("retirement");
+
+    const decisionDuringHumanWait = {
+      ...decision,
+      id: "decision_during_human_wait",
+      sequence: 3,
+      actionId: "action_during_human_wait",
+      summary: "This action must wait for the human response.",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: awaitingHuman.supervision!.revision,
+          decision: decisionDuringHumanWait,
+        },
+        () => {
+          throw new Error("A human-waiting run must not invoke the updater for a new action");
+        },
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+
     const canceled = await repository.updateRun(admitted.id, (current) => ({
       steps: current.steps,
       state: {
@@ -844,8 +867,6 @@ describe("TeamRepository runs", () => {
       },
     }));
 
-    expect(awaitingHuman.supervision?.phase).toBe("awaiting_human");
-    expect(awaitingHuman.supervision?.humanRequest).not.toHaveProperty("retirement");
     expect(canceled.supervision).toMatchObject({
       revision: 4,
       phase: "canceled",
@@ -886,7 +907,7 @@ describe("TeamRepository runs", () => {
       id: "decision_dispatch_after_cancel",
       sequence: 3,
       actionId: "action_dispatch_after_cancel",
-      kind: "dispatch" as const,
+      kind: "plan" as const,
       summary: "This action must not be committed after cancellation.",
     };
     await expect(

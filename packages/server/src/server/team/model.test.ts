@@ -10,9 +10,11 @@ import {
   generateTeamRunId,
   generateTeamWorkflowStepId,
   isActiveTeamRunStatus,
+  isTeamRunSupervisionDecisionBoundary,
   isTerminalTeamRunStatus,
   PersistedTeamDefinitionSchema,
   PersistedTeamRunRecordSchema,
+  PersistedTeamRunSupervisionDecisionSchema,
   PersistedTeamResolvedLaunchSchema,
   PersistedTeamRunStateSchema,
   PersistedTeamRunStepStateSchema,
@@ -633,6 +635,53 @@ describe("Team Run contract", () => {
         "A durable supervisor decision must belong to exactly one succeeded turn",
       );
     }
+  });
+
+  test.each(["dispatch", "request_revision"] as const)(
+    "requires exact work and attempt targets for %s decisions",
+    (kind) => {
+      const result = PersistedTeamRunSupervisionDecisionSchema.safeParse({
+        id: `decision_${kind}`,
+        sequence: 1,
+        actionId: `action_${kind}`,
+        kind,
+        summary: "Act on one exact supervised attempt.",
+        workItemId: null,
+        attemptId: null,
+        createdAt: timestamp,
+      });
+
+      expect(result.success).toBe(false);
+    },
+  );
+
+  test("admits supervisor decisions only at idle execution boundaries", () => {
+    const queued = createSupervisedAssignmentRun();
+    const planning = createSupervisedRunWithDecision();
+    const activeWorker = createSupervisedRunWithWorkerAttempts();
+    const workerStep = activeWorker.steps.find(
+      (step) => step.snapshot.supervision?.kind === "worker",
+    )!;
+    workerStep.state = {
+      status: "running",
+      plannedAgentId: workerStep.state.plannedAgentId!,
+      agentId: workerStep.state.plannedAgentId!,
+      startedAt: timestamp,
+    };
+    const awaitingHuman = createSupervisedRunWithDecision();
+    awaitingHuman.supervision!.phase = "awaiting_human";
+    const stopping = createSupervisedRunWithDecision();
+    stopping.state = {
+      status: "stopping",
+      startedAt: timestamp,
+      stopRequestedAt: timestamp,
+    };
+
+    expect(isTeamRunSupervisionDecisionBoundary(queued)).toBe(true);
+    expect(isTeamRunSupervisionDecisionBoundary(planning)).toBe(true);
+    expect(isTeamRunSupervisionDecisionBoundary(activeWorker)).toBe(false);
+    expect(isTeamRunSupervisionDecisionBoundary(awaitingHuman)).toBe(false);
+    expect(isTeamRunSupervisionDecisionBoundary(stopping)).toBe(false);
   });
 
   test("rejects supervised runs without an Assignment or with a worker as supervisor", () => {

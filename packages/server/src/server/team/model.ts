@@ -257,18 +257,41 @@ export const PersistedTeamRunSupervisionWorkItemSchema = z
   })
   .strict();
 
-export const PersistedTeamRunSupervisionDecisionSchema = z
-  .object({
-    id: PersistedTeamEntityIdSchema,
-    sequence: z.number().int().positive(),
-    actionId: PersistedTeamEntityIdSchema,
-    kind: z.enum(["plan", "dispatch", "request_revision", "escalate", "complete"]),
-    summary: nonBlankStringSchema(TEAM_SUPERVISION_DECISION_SUMMARY_MAX_CHARS),
+const PersistedTeamRunSupervisionDecisionBaseSchema = z.object({
+  id: PersistedTeamEntityIdSchema,
+  sequence: z.number().int().positive(),
+  actionId: PersistedTeamEntityIdSchema,
+  summary: nonBlankStringSchema(TEAM_SUPERVISION_DECISION_SUMMARY_MAX_CHARS),
+  createdAt: TimestampSchema,
+});
+
+export const PersistedTeamRunSupervisionDecisionSchema = z.discriminatedUnion("kind", [
+  PersistedTeamRunSupervisionDecisionBaseSchema.extend({
+    kind: z.literal("plan"),
+    workItemId: z.null(),
+    attemptId: z.null(),
+  }).strict(),
+  PersistedTeamRunSupervisionDecisionBaseSchema.extend({
+    kind: z.literal("dispatch"),
+    workItemId: PersistedTeamEntityIdSchema,
+    attemptId: PersistedTeamEntityIdSchema,
+  }).strict(),
+  PersistedTeamRunSupervisionDecisionBaseSchema.extend({
+    kind: z.literal("request_revision"),
+    workItemId: PersistedTeamEntityIdSchema,
+    attemptId: PersistedTeamEntityIdSchema,
+  }).strict(),
+  PersistedTeamRunSupervisionDecisionBaseSchema.extend({
+    kind: z.literal("escalate"),
     workItemId: PersistedTeamEntityIdSchema.nullable(),
     attemptId: PersistedTeamEntityIdSchema.nullable(),
-    createdAt: TimestampSchema,
-  })
-  .strict();
+  }).strict(),
+  PersistedTeamRunSupervisionDecisionBaseSchema.extend({
+    kind: z.literal("complete"),
+    workItemId: z.null(),
+    attemptId: z.null(),
+  }).strict(),
+]);
 
 const PersistedTeamRunSupervisionHumanActionSchema = z
   .object({
@@ -1886,6 +1909,14 @@ export function isActiveTeamRunStatus(status: TeamRunStatus): boolean {
 
 export function isTerminalTeamRunStatus(status: TeamRunStatus): boolean {
   return !isActiveTeamRunStatus(status);
+}
+
+export function isTeamRunSupervisionDecisionBoundary(run: PersistedTeamRunRecord): boolean {
+  if (!run.supervision) return false;
+  if (run.state.status === "queued") return run.supervision.phase === "queued";
+  if (run.state.status !== "running") return false;
+  if (run.supervision.phase !== "planning" && run.supervision.phase !== "working") return false;
+  return !run.steps.some((step) => ACTIVE_STEP_STATUSES.has(step.state.status));
 }
 
 export function generateTeamId(): string {
