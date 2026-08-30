@@ -15,6 +15,7 @@ import {
   PersistedTeamDefinitionSchema,
   PersistedTeamRunRecordSchema,
   PersistedTeamRunSupervisionDecisionSchema,
+  PersistedTeamRunSupervisionWorkItemSchema,
   PersistedTeamResolvedLaunchSchema,
   PersistedTeamRunStateSchema,
   PersistedTeamRunStepStateSchema,
@@ -751,6 +752,24 @@ describe("Team Run contract", () => {
       expect(result.success).toBe(false);
     },
   );
+
+  test("rejects duplicate Artifact inputs in supervised work items", () => {
+    const artifactId = "aart_0123456789abcdef";
+    const result = PersistedTeamRunSupervisionWorkItemSchema.safeParse({
+      id: "work_duplicate_inputs",
+      templateStepId: "step_plan",
+      inputArtifactIds: [artifactId, artifactId],
+      attemptIds: [],
+      acceptedAttemptId: null,
+      status: "planned",
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      `Duplicate supervised input Artifact ID: ${artifactId}`,
+    );
+  });
 
   test("admits supervisor decisions only at idle execution boundaries", () => {
     const queued = createSupervisedAssignmentRun();

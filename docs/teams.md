@@ -53,11 +53,12 @@ admission snapshot is Assignment-only and freezes an unused Team role as supervi
 workflow as worker templates, every resolved launch, the planned supervisor agent ID, and bounded
 work, attempt, action, fan-out, and delegation limits. Dynamic worker attempts belong in the run
 step ledger; normalized decisions and exact Artifact references belong in the optional supervision
-ledger. Human requests may cite only output Artifacts from succeeded steps; a preallocated output ID
-is not evidence. Every durable decision belongs to exactly one succeeded supervisor turn. Repository
-commands append decisions with revision and action idempotency checks before an executor performs
-external work. Dispatch and revision decisions name one exact work item and attempt. A fresh decision is
-accepted only while the run is queued or running at an idle planning boundary; active work,
+ledger. Work Item inputs contain unique accepted Artifact IDs. Human requests may cite only output
+Artifacts from succeeded steps; a preallocated output ID is not evidence. Every durable decision
+belongs to exactly one succeeded supervisor turn. Repository commands append decisions with revision
+and action idempotency checks before an executor performs external work. Dispatch and revision
+decisions name one exact work item and attempt. A fresh decision is accepted only while the run is
+queued or running at an idle planning boundary; active work,
 permission waits, cancellation, unresolved human requests, and terminal runs reject it. A decision
 may append steps but every preserved run and step state must follow the lifecycle transition graph;
 terminal attempt history cannot be reopened.

@@ -255,7 +255,20 @@ export const PersistedTeamRunSupervisionWorkItemSchema = z
     acceptedAttemptId: PersistedTeamEntityIdSchema.nullable(),
     status: z.enum(["planned", "active", "succeeded", "failed", "canceled", "interrupted"]),
   })
-  .strict();
+  .strict()
+  .superRefine((workItem, context) => {
+    const seenArtifactIds = new Set<string>();
+    for (const [index, artifactId] of workItem.inputArtifactIds.entries()) {
+      if (seenArtifactIds.has(artifactId)) {
+        context.addIssue({
+          code: "custom",
+          path: ["inputArtifactIds", index],
+          message: `Duplicate supervised input Artifact ID: ${artifactId}`,
+        });
+      }
+      seenArtifactIds.add(artifactId);
+    }
+  });
 
 const PersistedTeamRunSupervisionDecisionBaseSchema = z.object({
   id: PersistedTeamEntityIdSchema,
