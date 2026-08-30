@@ -539,6 +539,20 @@ describe("Team Run contract", () => {
     );
   });
 
+  test("requires worker attempts to retain frozen template instructions", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const workerStep = run.steps.findLast((step) => step.snapshot.supervision?.kind === "worker")!;
+    workerStep.snapshot.stepInstructions = "Replace the admitted workflow instructions.";
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Worker step must match its frozen workflow template",
+    );
+  });
+
   test("binds every decision attempt to its named supervised work item", () => {
     const run = createSupervisedRunWithWorkerAttempts();
     run.supervision!.decisions[2] = {

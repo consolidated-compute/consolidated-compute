@@ -52,8 +52,9 @@ Supervised execution uses the same Team Run record rather than a second coordina
 admission snapshot is Assignment-only and freezes an unused Team role as supervisor, the existing
 workflow as worker templates, every resolved launch, the planned supervisor agent ID, and bounded
 work, attempt, action, fan-out, and delegation limits. Dynamic worker attempts belong in the run
-step ledger; normalized decisions and exact Artifact references belong in the optional supervision
-ledger. Work Item inputs contain unique accepted Artifact IDs. Human requests may cite only output
+step ledger and preserve their template's role, launch, and step instructions. Normalized decisions
+and exact Artifact references belong in the optional supervision ledger. Work Item inputs contain
+unique accepted Artifact IDs. Human requests may cite only output
 Artifacts from succeeded steps; a preallocated output ID is not evidence. Every durable decision
 belongs to exactly one succeeded supervisor turn. Repository commands append decisions with revision
 and action idempotency checks before an executor performs external work. Dispatch and revision

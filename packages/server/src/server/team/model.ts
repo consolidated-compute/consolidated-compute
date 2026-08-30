@@ -924,7 +924,10 @@ function validateWorkerStep(
       path: ["steps", index, "snapshot", "supervision", "templateStepId"],
       message: `Unknown worker template step ID: ${metadata.templateStepId}`,
     });
-  } else if (!supervisedStepMatchesRole(step, template)) {
+  } else if (
+    !supervisedStepMatchesRole(step, template) ||
+    step.snapshot.stepInstructions !== template.stepInstructions
+  ) {
     context.issues.push({
       path: ["steps", index, "snapshot"],
       message: "Worker step must match its frozen workflow template",
