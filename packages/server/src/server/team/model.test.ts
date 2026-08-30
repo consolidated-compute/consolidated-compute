@@ -850,6 +850,51 @@ describe("Team Run contract", () => {
     );
   });
 
+  test("requires escalation decisions to create a durable human request", () => {
+    const run = createSupervisedRunWithDecision();
+    run.supervision!.decisions[0] = {
+      ...run.supervision!.decisions[0]!,
+      kind: "escalate",
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "An escalation decision must create a durable human request",
+    );
+  });
+
+  test("keeps resolved escalation history readable", () => {
+    const run = createSupervisedRunWithDecision();
+    run.supervision!.decisions[0] = {
+      ...run.supervision!.decisions[0]!,
+      kind: "escalate",
+    };
+    run.supervision!.humanRequest = {
+      id: "human_resolved_escalation",
+      revision: 1,
+      kind: "approval",
+      title: "Choose the next action",
+      detail: "Resume with the selected bounded action.",
+      actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+      roleIds: [run.supervision!.supervisor.roleId],
+      agentIds: [run.supervision!.supervisor.agentId],
+      stepIds: [],
+      artifactIds: [],
+      createdAt: timestamp,
+      resolution: {
+        actionId: "continue",
+        note: null,
+        idempotencyKey: "resolve-escalation-1",
+        resolvedAt: timestamp,
+      },
+    };
+
+    expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
+  });
+
   test("admits supervisor decisions only at idle execution boundaries", () => {
     const queued = createSupervisedAssignmentRun();
     const planning = createSupervisedRunWithDecision();

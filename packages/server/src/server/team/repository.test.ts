@@ -169,6 +169,36 @@ function createSupervision(definition: PersistedTeamDefinition): PersistedTeamRu
   };
 }
 
+function createSucceededSupervisorTurn(
+  run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  decisionId: string,
+  turn: number,
+  timestamp: string,
+): PersistedTeamRunRecord["steps"][number] {
+  return {
+    snapshot: {
+      stepId: `supervisor_turn_${turn}`,
+      roleId: run.supervision.supervisor.roleId,
+      roleName: run.supervision.supervisor.roleName,
+      roleInstructions: run.supervision.supervisor.roleInstructions,
+      stepInstructions: null,
+      resolvedLaunch: run.supervision.supervisor.resolvedLaunch,
+      supervision: {
+        kind: "supervisor",
+        turn,
+        decisionId,
+      },
+    },
+    state: {
+      status: "succeeded",
+      plannedAgentId: run.supervision.supervisor.agentId,
+      agentId: run.supervision.supervisor.agentId,
+      startedAt: timestamp,
+      endedAt: timestamp,
+    },
+  };
+}
+
 function succeededRunState(run: PersistedTeamRunRecord) {
   const agentIds = [firstAgentId, secondAgentId];
   return {
@@ -851,6 +881,114 @@ describe("TeamRepository runs", () => {
             },
           };
         },
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    await expect(repository.getRun(admitted.id)).resolves.toEqual(committed);
+
+    const stateRewriteDecision = {
+      ...decision,
+      id: "decision_rewrite_run_state_2",
+      sequence: 2,
+      actionId: "action_rewrite_run_state_2",
+      summary: "Preserve the existing outer run provenance.",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: stateRewriteDecision,
+        },
+        (current) => ({
+          state: { status: "running", startedAt: firstTimestamp },
+          steps: [
+            ...current.steps,
+            createSucceededSupervisorTurn(current, stateRewriteDecision.id, 2, secondTimestamp),
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 3,
+            decisions: [...current.supervision.decisions, stateRewriteDecision],
+            updatedAt: secondTimestamp,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+
+    const transitionRewriteDecision = {
+      ...decision,
+      id: "decision_rewrite_run_transition_2",
+      sequence: 2,
+      actionId: "action_rewrite_run_transition_2",
+      kind: "complete" as const,
+      summary: "Complete without rewriting the run start time.",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: transitionRewriteDecision,
+        },
+        (current) => ({
+          state: {
+            status: "succeeded",
+            startedAt: firstTimestamp,
+            endedAt: secondTimestamp,
+          },
+          steps: [
+            ...current.steps,
+            createSucceededSupervisorTurn(
+              current,
+              transitionRewriteDecision.id,
+              2,
+              secondTimestamp,
+            ),
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 3,
+            phase: "completed",
+            decisions: [...current.supervision.decisions, transitionRewriteDecision],
+            updatedAt: secondTimestamp,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+
+    const incompleteEscalationDecision = {
+      ...decision,
+      id: "decision_incomplete_escalation_2",
+      sequence: 2,
+      actionId: "action_incomplete_escalation_2",
+      kind: "escalate" as const,
+      summary: "Request a human decision.",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: incompleteEscalationDecision,
+        },
+        (current) => ({
+          state: current.state,
+          steps: [
+            ...current.steps,
+            createSucceededSupervisorTurn(
+              current,
+              incompleteEscalationDecision.id,
+              2,
+              secondTimestamp,
+            ),
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 3,
+            decisions: [...current.supervision.decisions, incompleteEscalationDecision],
+            updatedAt: secondTimestamp,
+          },
+        }),
       ),
     ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
     await expect(repository.getRun(admitted.id)).resolves.toEqual(committed);

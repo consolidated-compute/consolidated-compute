@@ -1196,6 +1196,13 @@ function validateSupervisionDecisionKind(
       message: "A complete supervisor decision must atomically complete the Team Run",
     });
   }
+  const isLatestDecision = index === run.supervision!.decisions.length - 1;
+  if (decision.kind === "escalate" && isLatestDecision && run.supervision!.humanRequest === null) {
+    issues.push({
+      path: ["supervision", "decisions", index, "kind"],
+      message: "An escalation decision must create a durable human request",
+    });
+  }
   return issues;
 }
 

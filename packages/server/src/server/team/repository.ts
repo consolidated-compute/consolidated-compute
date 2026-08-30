@@ -713,41 +713,11 @@ export class TeamRepository {
         supervision: PersistedTeamRunSupervision;
       };
       const update = await updater(supervisedCurrent);
-      const expectedDecisions = [...preserved.supervision!.decisions, input.decision];
-      const immutableSnapshotMatches =
-        equal(update.supervision.supervisor, preserved.supervision!.supervisor) &&
-        equal(update.supervision.workerTemplates, preserved.supervision!.workerTemplates) &&
-        equal(update.supervision.limits, preserved.supervision!.limits);
-      const appendMatches = equal(update.supervision.decisions, expectedDecisions);
-      const revisionMatches = update.supervision.revision === input.expectedSupervisionRevision + 1;
-      const runStateTransitionMatches = canTransitionTeamRun(
-        preserved.state.status,
-        update.state.status,
-      );
-      const workerAttemptAppendMatches = decisionAppendsExpectedWorkerAttempt(
-        preserved,
-        update,
-        input.decision,
-      );
-      if (
-        !immutableSnapshotMatches ||
-        !appendMatches ||
-        !revisionMatches ||
-        !runStateTransitionMatches ||
-        !workerAttemptAppendMatches
-      ) {
+      if (!supervisionDecisionUpdateMatches(preserved, update, input)) {
         throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
       }
-      for (const [index, step] of preserved.steps.entries()) {
-        const updatedStep = update.steps[index];
-        if (
-          !updatedStep ||
-          !equal(step.snapshot, updatedStep.snapshot) ||
-          !canTransitionTeamRunStep(step.state.status, updatedStep.state.status) ||
-          (isTerminalTeamRunStepStatus(step.state.status) && !equal(step.state, updatedStep.state))
-        ) {
-          throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
-        }
+      if (!preservedStepsFollowDecisionTransitions(preserved, update)) {
+        throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
       }
 
       const run = PersistedTeamRunRecordSchema.parse({
@@ -981,6 +951,63 @@ function terminalSupervisionPhase(
   if (status === "canceled") return "canceled";
   if (status === "interrupted") return "interrupted";
   return null;
+}
+
+function supervisionDecisionUpdateMatches(
+  preserved: PersistedTeamRunRecord,
+  update: TeamRunSupervisionUpdate,
+  input: CommitTeamRunSupervisionDecisionInput,
+): boolean {
+  const expectedDecisions = [...preserved.supervision!.decisions, input.decision];
+  const immutableSnapshotMatches =
+    equal(update.supervision.supervisor, preserved.supervision!.supervisor) &&
+    equal(update.supervision.workerTemplates, preserved.supervision!.workerTemplates) &&
+    equal(update.supervision.limits, preserved.supervision!.limits);
+  return (
+    immutableSnapshotMatches &&
+    equal(update.supervision.decisions, expectedDecisions) &&
+    update.supervision.revision === input.expectedSupervisionRevision + 1 &&
+    canTransitionTeamRun(preserved.state.status, update.state.status) &&
+    decisionPreservesRunStateProvenance(preserved.state, update.state) &&
+    decisionProducesRequiredSupervisionEffect(update, input.decision) &&
+    decisionAppendsExpectedWorkerAttempt(preserved, update, input.decision)
+  );
+}
+
+function preservedStepsFollowDecisionTransitions(
+  preserved: PersistedTeamRunRecord,
+  update: TeamRunSupervisionUpdate,
+): boolean {
+  return preserved.steps.every((step, index) => {
+    const updatedStep = update.steps[index];
+    if (!updatedStep || !equal(step.snapshot, updatedStep.snapshot)) return false;
+    if (!canTransitionTeamRunStep(step.state.status, updatedStep.state.status)) return false;
+    return !isTerminalTeamRunStepStatus(step.state.status) || equal(step.state, updatedStep.state);
+  });
+}
+
+function decisionPreservesRunStateProvenance(
+  preserved: PersistedTeamRunRecord["state"],
+  update: PersistedTeamRunRecord["state"],
+): boolean {
+  if (preserved.status === update.status) return equal(preserved, update);
+  if (!("startedAt" in preserved)) return true;
+  return "startedAt" in update && update.startedAt === preserved.startedAt;
+}
+
+function decisionProducesRequiredSupervisionEffect(
+  update: TeamRunSupervisionUpdate,
+  decision: TeamRunSupervisionDecision,
+): boolean {
+  if (decision.kind !== "escalate") return true;
+  const request = update.supervision.humanRequest;
+  return (
+    update.state.status === "running" &&
+    update.supervision.phase === "awaiting_human" &&
+    request !== null &&
+    !request.resolution &&
+    !request.retirement
+  );
 }
 
 function decisionAppendsExpectedWorkerAttempt(
