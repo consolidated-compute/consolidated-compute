@@ -956,6 +956,46 @@ describe("TeamRepository runs", () => {
       ),
     ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
 
+    const unauthorizedCompletionDecision = {
+      ...decision,
+      id: "decision_unauthorized_completion_2",
+      sequence: 2,
+      actionId: "action_unauthorized_completion_2",
+      summary: "A plan must not authorize successful terminalization.",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: unauthorizedCompletionDecision,
+        },
+        (current) => ({
+          state: {
+            status: "succeeded",
+            startedAt: secondTimestamp,
+            endedAt: secondTimestamp,
+          },
+          steps: [
+            ...current.steps,
+            createSucceededSupervisorTurn(
+              current,
+              unauthorizedCompletionDecision.id,
+              2,
+              secondTimestamp,
+            ),
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 3,
+            phase: "completed",
+            decisions: [...current.supervision.decisions, unauthorizedCompletionDecision],
+            updatedAt: secondTimestamp,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+
     const incompleteEscalationDecision = {
       ...decision,
       id: "decision_incomplete_escalation_2",
@@ -986,6 +1026,55 @@ describe("TeamRepository runs", () => {
             ...current.supervision,
             revision: 3,
             decisions: [...current.supervision.decisions, incompleteEscalationDecision],
+            updatedAt: secondTimestamp,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+
+    const unauthorizedHumanWaitDecision = {
+      ...decision,
+      id: "decision_unauthorized_human_wait_2",
+      sequence: 2,
+      actionId: "action_unauthorized_human_wait_2",
+      summary: "A plan must not create a pending human wait.",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: unauthorizedHumanWaitDecision,
+        },
+        (current) => ({
+          state: current.state,
+          steps: [
+            ...current.steps,
+            createSucceededSupervisorTurn(
+              current,
+              unauthorizedHumanWaitDecision.id,
+              2,
+              secondTimestamp,
+            ),
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 3,
+            phase: "awaiting_human",
+            decisions: [...current.supervision.decisions, unauthorizedHumanWaitDecision],
+            humanRequest: {
+              id: "human_unauthorized_wait",
+              revision: 1,
+              kind: "approval",
+              title: "Choose the next action",
+              detail: "Resume with the selected bounded action.",
+              actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+              roleIds: [current.supervision.supervisor.roleId],
+              agentIds: [current.supervision.supervisor.agentId],
+              stepIds: [],
+              artifactIds: [],
+              createdAt: secondTimestamp,
+            },
             updatedAt: secondTimestamp,
           },
         }),

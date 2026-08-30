@@ -1160,12 +1160,40 @@ function validateSupervisionDecisions(run: TeamRunRecordShape): ContractIssue[] 
       });
     }
   }
+  issues.push(...validateLatestSupervisionDecisionEffect(run));
   for (const step of run.steps) {
     const metadata = step.snapshot.supervision;
     if (metadata?.kind !== "worker" || dispatchedAttemptIds.has(metadata.attemptId)) continue;
     issues.push({
       path: ["steps", run.steps.indexOf(step), "snapshot", "supervision", "attemptId"],
       message: `Supervised attempt has no dispatch decision: ${metadata.attemptId}`,
+    });
+  }
+  return issues;
+}
+
+function validateLatestSupervisionDecisionEffect(run: TeamRunRecordShape): ContractIssue[] {
+  const supervision = run.supervision!;
+  const latestDecision = supervision.decisions.at(-1);
+  const issues: ContractIssue[] = [];
+  if (
+    run.state.status === "succeeded" &&
+    supervision.phase === "completed" &&
+    latestDecision?.kind !== "complete"
+  ) {
+    issues.push({
+      path: ["supervision", "decisions"],
+      message: "A succeeded supervised run must end with a complete supervisor decision",
+    });
+  }
+  if (
+    supervision.phase === "awaiting_human" &&
+    isPendingHumanRequest(supervision.humanRequest) &&
+    latestDecision?.kind !== "escalate"
+  ) {
+    issues.push({
+      path: ["supervision", "decisions"],
+      message: "A pending human wait must follow the latest escalation decision",
     });
   }
   return issues;

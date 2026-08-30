@@ -999,14 +999,18 @@ function decisionProducesRequiredSupervisionEffect(
   update: TeamRunSupervisionUpdate,
   decision: TeamRunSupervisionDecision,
 ): boolean {
-  if (decision.kind !== "escalate") return true;
   const request = update.supervision.humanRequest;
-  return (
+  const completesRun =
+    update.state.status === "succeeded" && update.supervision.phase === "completed";
+  const createsPendingHumanWait =
     update.state.status === "running" &&
     update.supervision.phase === "awaiting_human" &&
     request !== null &&
     !request.resolution &&
-    !request.retirement
+    !request.retirement;
+  return (
+    (decision.kind === "complete") === completesRun &&
+    (decision.kind === "escalate") === createsPendingHumanWait
   );
 }
 

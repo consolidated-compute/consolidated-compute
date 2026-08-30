@@ -67,6 +67,8 @@ terminal attempt history cannot be reopened or rewritten. A dispatch atomically 
 complete decision atomically moves supervision and the outer run to successful terminal states. An
 escalation atomically enters the human-wait phase with an unresolved request. Decisions preserve the
 outer run state payload when its status does not change and retain its start time across transitions.
+Successful terminalization requires `complete` to be the latest decision, and a pending human wait
+requires `escalate` to be the latest decision.
 
 The wire projection exposes only a compact optional supervision summary. Existing Team Run and
 step lifecycle values do not change. The daemon does not advertise supervised execution until the

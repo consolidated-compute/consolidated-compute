@@ -850,6 +850,20 @@ describe("Team Run contract", () => {
     );
   });
 
+  test("requires successful supervision to end with a complete decision", () => {
+    const run = createSupervisedRunWithDecision();
+    run.state = { status: "succeeded", startedAt: timestamp, endedAt: timestamp };
+    run.supervision!.phase = "completed";
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "A succeeded supervised run must end with a complete supervisor decision",
+    );
+  });
+
   test("requires escalation decisions to create a durable human request", () => {
     const run = createSupervisedRunWithDecision();
     run.supervision!.decisions[0] = {
@@ -893,6 +907,32 @@ describe("Team Run contract", () => {
     };
 
     expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
+  });
+
+  test("requires pending human waits to follow an escalation decision", () => {
+    const run = createSupervisedRunWithDecision();
+    run.supervision!.phase = "awaiting_human";
+    run.supervision!.humanRequest = {
+      id: "human_unauthorized_wait",
+      revision: 1,
+      kind: "approval",
+      title: "Choose the next action",
+      detail: "Resume with the selected bounded action.",
+      actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+      roleIds: [run.supervision!.supervisor.roleId],
+      agentIds: [run.supervision!.supervisor.agentId],
+      stepIds: [],
+      artifactIds: [],
+      createdAt: timestamp,
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "A pending human wait must follow the latest escalation decision",
+    );
   });
 
   test("admits supervisor decisions only at idle execution boundaries", () => {
