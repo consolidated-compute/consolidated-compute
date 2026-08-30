@@ -970,6 +970,8 @@ function supervisionDecisionUpdateMatches(
     equal(update.supervision.limits, preserved.supervision!.limits);
   return (
     immutableSnapshotMatches &&
+    decisionPreservesWorkItemLedger(preserved, update) &&
+    decisionPreservesHumanRequest(preserved, update, input.decision) &&
     equal(update.supervision.decisions, expectedDecisions) &&
     update.supervision.revision === input.expectedSupervisionRevision + 1 &&
     canTransitionTeamRun(preserved.state.status, update.state.status) &&
@@ -977,6 +979,39 @@ function supervisionDecisionUpdateMatches(
     decisionProducesRequiredSupervisionEffect(update, input.decision) &&
     decisionAppendsExpectedWorkerAttempt(preserved, update, input.decision, reservedArtifactIds)
   );
+}
+
+function decisionPreservesWorkItemLedger(
+  preserved: PersistedTeamRunRecord,
+  update: TeamRunSupervisionUpdate,
+): boolean {
+  const preservedWorkItems = preserved.supervision!.workItems;
+  if (update.supervision.workItems.length < preservedWorkItems.length) return false;
+  return preservedWorkItems.every((workItem, index) => {
+    const updatedWorkItem = update.supervision.workItems[index];
+    if (!updatedWorkItem) return false;
+    const identityMatches =
+      updatedWorkItem.id === workItem.id &&
+      updatedWorkItem.templateStepId === workItem.templateStepId &&
+      equal(updatedWorkItem.inputArtifactIds, workItem.inputArtifactIds);
+    const attemptHistoryMatches = workItem.attemptIds.every(
+      (attemptId, attemptIndex) => updatedWorkItem.attemptIds[attemptIndex] === attemptId,
+    );
+    const acceptedAttemptMatches =
+      workItem.acceptedAttemptId === null ||
+      updatedWorkItem.acceptedAttemptId === workItem.acceptedAttemptId;
+    return identityMatches && attemptHistoryMatches && acceptedAttemptMatches;
+  });
+}
+
+function decisionPreservesHumanRequest(
+  preserved: PersistedTeamRunRecord,
+  update: TeamRunSupervisionUpdate,
+  decision: TeamRunSupervisionDecision,
+): boolean {
+  const preservedRequest = preserved.supervision!.humanRequest;
+  if (decision.kind === "escalate" && preservedRequest === null) return true;
+  return equal(update.supervision.humanRequest, preservedRequest);
 }
 
 function preservedStepsFollowDecisionTransitions(

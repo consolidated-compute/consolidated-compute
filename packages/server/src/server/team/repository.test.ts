@@ -1306,6 +1306,175 @@ describe("TeamRepository runs", () => {
     await expect(repository.getRun(admitted.id)).resolves.toEqual(canceled);
   });
 
+  test("preserves planned work and settled human evidence across decisions", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const assignment = await assignments.createAssignment({
+      title: "Durable supervision evidence",
+      objective: "Keep planned work and human decisions in the run ledger.",
+      workItem: null,
+    });
+    const sequentialInput = createAssignmentRunInput(
+      definition,
+      assignment,
+      "durable-supervision-evidence",
+    );
+    const { steps: _steps, ...admission } = sequentialInput;
+    const admitted = await repository.createSupervisedAssignmentRun(
+      { ...admission, supervision: createSupervision(definition) },
+      assignments,
+    );
+    currentTimestamp = secondTimestamp;
+    const plannedWorkItemId = "work_preserved_plan";
+    const escalationDecision = {
+      id: "decision_preserve_evidence_1",
+      sequence: 1,
+      actionId: "action_preserve_evidence_1",
+      kind: "escalate" as const,
+      summary: "Ask the human before continuing planned work.",
+      workItemId: plannedWorkItemId,
+      attemptId: null,
+      createdAt: secondTimestamp,
+    };
+    const awaitingHuman = await repository.commitSupervisionDecision(
+      {
+        runId: admitted.id,
+        expectedSupervisionRevision: 1,
+        decision: escalationDecision,
+      },
+      (current) => ({
+        state: { status: "running", startedAt: secondTimestamp },
+        steps: [createSucceededSupervisorTurn(current, escalationDecision.id, 1, secondTimestamp)],
+        supervision: {
+          ...current.supervision,
+          revision: 2,
+          phase: "awaiting_human",
+          workItems: [
+            {
+              id: plannedWorkItemId,
+              templateStepId: current.supervision.workerTemplates[0]!.stepId,
+              inputArtifactIds: [],
+              attemptIds: [],
+              acceptedAttemptId: null,
+              status: "planned",
+            },
+          ],
+          decisions: [escalationDecision],
+          humanRequest: {
+            id: "human_preserved_evidence",
+            revision: 1,
+            kind: "approval",
+            title: "Choose the next action",
+            detail: "Resume with the selected bounded action.",
+            actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+            roleIds: [current.supervision.supervisor.roleId],
+            agentIds: [current.supervision.supervisor.agentId],
+            stepIds: [],
+            artifactIds: [],
+            createdAt: secondTimestamp,
+          },
+          updatedAt: secondTimestamp,
+        },
+      }),
+    );
+    const resolved = PersistedTeamRunRecordSchema.parse({
+      ...awaitingHuman,
+      supervision: {
+        ...awaitingHuman.supervision!,
+        revision: 3,
+        phase: "planning",
+        humanRequest: {
+          ...awaitingHuman.supervision!.humanRequest!,
+          resolution: {
+            actionId: "continue",
+            note: null,
+            idempotencyKey: "resolve-preserved-evidence",
+            resolvedAt: secondTimestamp,
+          },
+        },
+        updatedAt: secondTimestamp,
+      },
+    });
+    await writeJsonFileAtomic(join(paseoHome, "teams", "runs", `${admitted.id}.json`), resolved);
+
+    const eraseWorkDecision = {
+      id: "decision_erase_work_2",
+      sequence: 2,
+      actionId: "action_erase_work_2",
+      kind: "complete" as const,
+      summary: "This must not erase unfinished planned work.",
+      workItemId: null,
+      attemptId: null,
+      createdAt: secondTimestamp,
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 3,
+          decision: eraseWorkDecision,
+        },
+        (current) => ({
+          state: {
+            status: "succeeded",
+            startedAt: secondTimestamp,
+            endedAt: secondTimestamp,
+          },
+          steps: [
+            ...current.steps,
+            createSucceededSupervisorTurn(current, eraseWorkDecision.id, 2, secondTimestamp),
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 4,
+            phase: "completed",
+            workItems: [],
+            decisions: [...current.supervision.decisions, eraseWorkDecision],
+            updatedAt: secondTimestamp,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+
+    const eraseHumanDecision = {
+      id: "decision_erase_human_2",
+      sequence: 2,
+      actionId: "action_erase_human_2",
+      kind: "plan" as const,
+      summary: "This must not erase settled human evidence.",
+      workItemId: null,
+      attemptId: null,
+      createdAt: secondTimestamp,
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 3,
+          decision: eraseHumanDecision,
+        },
+        (current) => ({
+          state: current.state,
+          steps: [
+            ...current.steps,
+            createSucceededSupervisorTurn(current, eraseHumanDecision.id, 2, secondTimestamp),
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 4,
+            humanRequest: null,
+            decisions: [...current.supervision.decisions, eraseHumanDecision],
+            updatedAt: secondTimestamp,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    await expect(repository.getRun(admitted.id)).resolves.toEqual(resolved);
+  });
+
   test("rejects replay or rewrite of terminal worker history during a decision", async () => {
     const assignments = new AssignmentRepository({
       paseoHome,
