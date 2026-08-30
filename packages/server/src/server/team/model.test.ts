@@ -771,6 +771,48 @@ describe("Team Run contract", () => {
     );
   });
 
+  test("rejects duplicate dispatch decisions for one worker attempt", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const firstDispatch = run.supervision!.decisions.find(
+      (decision) => decision.kind === "dispatch",
+    )!;
+    const duplicateDispatch = {
+      ...firstDispatch,
+      id: "decision_dispatch_duplicate",
+      sequence: run.supervision!.decisions.length + 1,
+      actionId: "action_dispatch_duplicate",
+    };
+    run.steps.push(createSupervisorTurn(run, 4, duplicateDispatch.id));
+    run.supervision!.decisions.push(duplicateDispatch);
+    run.supervision!.revision += 1;
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      `Supervised attempt may be dispatched only once: ${firstDispatch.attemptId}`,
+    );
+  });
+
+  test("requires complete decisions to terminalize supervision atomically", () => {
+    const run = createSupervisedRunWithDecision();
+    run.supervision!.decisions[0] = {
+      ...run.supervision!.decisions[0]!,
+      kind: "complete",
+      workItemId: null,
+      attemptId: null,
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "A complete supervisor decision must atomically complete the Team Run",
+    );
+  });
+
   test("admits supervisor decisions only at idle execution boundaries", () => {
     const queued = createSupervisedAssignmentRun();
     const planning = createSupervisedRunWithDecision();

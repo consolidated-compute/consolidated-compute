@@ -776,6 +776,7 @@ type SupervisedRunStep = TeamRunRecordShape["steps"][number];
 type SupervisedStepMetadata = NonNullable<SupervisedRunStep["snapshot"]["supervision"]>;
 type SupervisorStepMetadata = Extract<SupervisedStepMetadata, { kind: "supervisor" }>;
 type WorkerStepMetadata = Extract<SupervisedStepMetadata, { kind: "worker" }>;
+type SupervisionDecision = NonNullable<TeamRunRecordShape["supervision"]>["decisions"][number];
 
 interface SupervisedStepValidationContext {
   run: TeamRunRecordShape;
@@ -1098,6 +1099,7 @@ function validateSupervisionDecisions(run: TeamRunRecordShape): ContractIssue[] 
   const attemptIds = new Set(supervision.workItems.flatMap((workItem) => workItem.attemptIds));
   const decisionIds = new Set<string>();
   const actionIds = new Set<string>();
+  const dispatchedAttemptIds = new Set<string>();
   for (const [index, decision] of supervision.decisions.entries()) {
     if (decision.sequence !== index + 1) {
       issues.push({
@@ -1119,6 +1121,7 @@ function validateSupervisionDecisions(run: TeamRunRecordShape): ContractIssue[] 
       });
     }
     actionIds.add(decision.actionId);
+    issues.push(...validateSupervisionDecisionKind(run, index, decision, dispatchedAttemptIds));
     const workItem = decision.workItemId === null ? null : workItems.get(decision.workItemId);
     if (decision.workItemId !== null && !workItem) {
       issues.push({
@@ -1141,6 +1144,42 @@ function validateSupervisionDecisions(run: TeamRunRecordShape): ContractIssue[] 
         message: "Supervisor decision attempt must belong to its named work item",
       });
     }
+  }
+  for (const step of run.steps) {
+    const metadata = step.snapshot.supervision;
+    if (metadata?.kind !== "worker" || dispatchedAttemptIds.has(metadata.attemptId)) continue;
+    issues.push({
+      path: ["steps", run.steps.indexOf(step), "snapshot", "supervision", "attemptId"],
+      message: `Supervised attempt has no dispatch decision: ${metadata.attemptId}`,
+    });
+  }
+  return issues;
+}
+
+function validateSupervisionDecisionKind(
+  run: TeamRunRecordShape,
+  index: number,
+  decision: SupervisionDecision,
+  dispatchedAttemptIds: Set<string>,
+): ContractIssue[] {
+  const issues: ContractIssue[] = [];
+  if (decision.kind === "dispatch") {
+    if (dispatchedAttemptIds.has(decision.attemptId)) {
+      issues.push({
+        path: ["supervision", "decisions", index, "attemptId"],
+        message: `Supervised attempt may be dispatched only once: ${decision.attemptId}`,
+      });
+    }
+    dispatchedAttemptIds.add(decision.attemptId);
+  }
+  if (
+    decision.kind === "complete" &&
+    (run.state.status !== "succeeded" || run.supervision!.phase !== "completed")
+  ) {
+    issues.push({
+      path: ["supervision", "decisions", index, "kind"],
+      message: "A complete supervisor decision must atomically complete the Team Run",
+    });
   }
   return issues;
 }

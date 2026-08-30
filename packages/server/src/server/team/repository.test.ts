@@ -12,10 +12,11 @@ import {
   AssignmentRevisionConflictError,
   AssignmentStateConflictError,
 } from "../assignment/repository.js";
-import type {
-  PersistedTeamDefinition,
-  PersistedTeamRunRecord,
-  PersistedTeamRunSupervision,
+import {
+  PersistedTeamRunRecordSchema,
+  type PersistedTeamDefinition,
+  type PersistedTeamRunRecord,
+  type PersistedTeamRunSupervision,
 } from "./model.js";
 import {
   TEAM_RUN_PAGE_MAX_LIMIT,
@@ -959,7 +960,7 @@ describe("TeamRepository runs", () => {
       createdAt: secondTimestamp,
     };
     currentTimestamp = secondTimestamp;
-    const failed = await repository.commitSupervisionDecision(
+    const creating = await repository.commitSupervisionDecision(
       {
         runId: admitted.id,
         expectedSupervisionRevision: 1,
@@ -1013,12 +1014,9 @@ describe("TeamRepository runs", () => {
                 },
               },
               state: {
-                status: "failed",
+                status: "creating",
                 plannedAgentId: firstAgentId,
-                agentId: firstAgentId,
                 startedAt: secondTimestamp,
-                endedAt: secondTimestamp,
-                error: "Worker failed.",
               },
             },
           ],
@@ -1033,7 +1031,7 @@ describe("TeamRepository runs", () => {
                 inputArtifactIds: [],
                 attemptIds: [attemptId],
                 acceptedAttemptId: null,
-                status: "failed",
+                status: "active",
               },
             ],
             decisions: [dispatchDecision],
@@ -1042,6 +1040,88 @@ describe("TeamRepository runs", () => {
         };
       },
     );
+    const failedSteps: PersistedTeamRunRecord["steps"] = [];
+    for (const step of creating.steps) {
+      failedSteps.push(
+        step.snapshot.supervision?.kind === "worker"
+          ? {
+              ...step,
+              state: {
+                status: "failed",
+                plannedAgentId: firstAgentId,
+                agentId: firstAgentId,
+                startedAt: secondTimestamp,
+                endedAt: secondTimestamp,
+                error: "Worker failed.",
+              },
+            }
+          : step,
+      );
+    }
+    const failedWorkItems: PersistedTeamRunSupervision["workItems"] = [];
+    for (const workItem of creating.supervision!.workItems) {
+      failedWorkItems.push({ ...workItem, status: "failed" });
+    }
+    const failed = PersistedTeamRunRecordSchema.parse({
+      ...creating,
+      steps: failedSteps,
+      supervision: {
+        ...creating.supervision!,
+        workItems: failedWorkItems,
+      },
+    });
+    await writeJsonFileAtomic(join(paseoHome, "teams", "runs", `${admitted.id}.json`), failed);
+    const redispatchDecision = {
+      ...dispatchDecision,
+      id: "decision_redispatch_terminal",
+      sequence: 2,
+      actionId: "action_redispatch_terminal",
+      summary: "This decision must not redispatch a terminal attempt.",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: redispatchDecision,
+        },
+        (current) => ({
+          state: current.state,
+          steps: [
+            ...current.steps,
+            {
+              snapshot: {
+                stepId: "supervisor_turn_redispatch_2",
+                roleId: current.supervision.supervisor.roleId,
+                roleName: current.supervision.supervisor.roleName,
+                roleInstructions: current.supervision.supervisor.roleInstructions,
+                stepInstructions: null,
+                resolvedLaunch: current.supervision.supervisor.resolvedLaunch,
+                supervision: {
+                  kind: "supervisor",
+                  turn: 2,
+                  decisionId: redispatchDecision.id,
+                },
+              },
+              state: {
+                status: "succeeded",
+                plannedAgentId: current.supervision.supervisor.agentId,
+                agentId: current.supervision.supervisor.agentId,
+                startedAt: secondTimestamp,
+                endedAt: secondTimestamp,
+              },
+            },
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 3,
+            decisions: [...current.supervision.decisions, redispatchDecision],
+            updatedAt: secondTimestamp,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+
     const replayDecision = {
       id: "decision_replay_terminal",
       sequence: 2,

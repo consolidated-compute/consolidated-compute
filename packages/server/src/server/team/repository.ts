@@ -723,11 +723,17 @@ export class TeamRepository {
         preserved.state.status,
         update.state.status,
       );
+      const workerAttemptAppendMatches = decisionAppendsExpectedWorkerAttempt(
+        preserved,
+        update,
+        input.decision,
+      );
       if (
         !immutableSnapshotMatches ||
         !appendMatches ||
         !revisionMatches ||
-        !runStateTransitionMatches
+        !runStateTransitionMatches ||
+        !workerAttemptAppendMatches
       ) {
         throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
       }
@@ -973,6 +979,32 @@ function terminalSupervisionPhase(
   if (status === "canceled") return "canceled";
   if (status === "interrupted") return "interrupted";
   return null;
+}
+
+function decisionAppendsExpectedWorkerAttempt(
+  preserved: PersistedTeamRunRecord,
+  update: TeamRunSupervisionUpdate,
+  decision: TeamRunSupervisionDecision,
+): boolean {
+  const appendedWorkers: PersistedTeamRunRecord["steps"] = [];
+  for (const step of update.steps.slice(preserved.steps.length)) {
+    if (step.snapshot.supervision?.kind === "worker") appendedWorkers.push(step);
+  }
+  if (decision.kind !== "dispatch") return appendedWorkers.length === 0;
+  const attemptAlreadyExists = preserved.steps.some(
+    (step) =>
+      step.snapshot.supervision?.kind === "worker" &&
+      step.snapshot.supervision.attemptId === decision.attemptId,
+  );
+  if (attemptAlreadyExists || appendedWorkers.length !== 1) return false;
+  const worker = appendedWorkers[0]!;
+  const metadata = worker.snapshot.supervision;
+  return (
+    metadata?.kind === "worker" &&
+    metadata.workItemId === decision.workItemId &&
+    metadata.attemptId === decision.attemptId &&
+    worker.state.status === "creating"
+  );
 }
 
 function terminalizeSupervision(
