@@ -582,6 +582,13 @@ function requiredCurrentStepStatus(status: TeamRunStatus): TeamRunStepStatus | n
   return null;
 }
 
+function requiredRunStatusForCurrentStep(status: TeamRunStepStatus): TeamRunStatus | null {
+  if (status === "waiting_for_permission") return "waiting_for_permission";
+  if (status === "stopping") return "stopping";
+  if (status === "stop_failed") return "stop_failed";
+  return null;
+}
+
 const PersistedTeamRunRecordBaseSchema = z
   .object({
     id: PersistedTeamEntityIdSchema,
@@ -1170,7 +1177,9 @@ function validateSupervisionHumanRequest(run: TeamRunRecordShape): ContractIssue
     validStepIds.add(step.snapshot.stepId);
     if ("plannedAgentId" in step.state) validAgentIds.add(step.state.plannedAgentId);
     if ("agentId" in step.state && step.state.agentId) validAgentIds.add(step.state.agentId);
-    if (step.snapshot.outputArtifact) validArtifactIds.add(step.snapshot.outputArtifact.id);
+    if (step.state.status === "succeeded" && step.snapshot.outputArtifact) {
+      validArtifactIds.add(step.snapshot.outputArtifact.id);
+    }
   }
   validateHumanRequestReferences(request.roleIds, validRoleIds, "roleIds", issues);
   validateHumanRequestReferences(request.agentIds, validAgentIds, "agentIds", issues);
@@ -1342,6 +1351,14 @@ function validateSupervisedActiveSteps(
     issues.push({
       path: ["state", "status"],
       message: `Run status ${requiredStepStatus} requires a matching current step`,
+    });
+  }
+  for (const step of activeSteps) {
+    const requiredRunStatus = requiredRunStatusForCurrentStep(step.state.status);
+    if (!requiredRunStatus || run.state.status === requiredRunStatus) continue;
+    issues.push({
+      path: ["steps", run.steps.indexOf(step), "state", "status"],
+      message: `Supervised step status ${step.state.status} requires run status ${requiredRunStatus}`,
     });
   }
   return issues;

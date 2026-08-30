@@ -609,6 +609,103 @@ describe("Team Run contract", () => {
     );
   });
 
+  test("rejects unmaterialized attempt outputs as human-request evidence", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const workerStep = run.steps.findLast((step) => step.snapshot.supervision?.kind === "worker")!;
+    const metadata = workerStep.snapshot.supervision!;
+    if (metadata.kind !== "worker") throw new Error("Expected a worker attempt");
+    workerStep.state = {
+      status: "failed",
+      plannedAgentId: workerStep.state.plannedAgentId!,
+      agentId: workerStep.state.plannedAgentId!,
+      startedAt: timestamp,
+      endedAt: timestamp,
+      error: "Worker failed before materializing output.",
+    };
+    const workItem = run.supervision!.workItems.find((item) => item.id === metadata.workItemId)!;
+    workItem.status = "failed";
+    workItem.acceptedAttemptId = null;
+    const outputArtifactId = workerStep.snapshot.outputArtifact!.id;
+    run.supervision = {
+      ...run.supervision!,
+      phase: "awaiting_human",
+      humanRequest: {
+        id: "human_unmaterialized_evidence",
+        revision: 1,
+        kind: "approval",
+        title: "Review the failed attempt",
+        detail: "Only materialized Artifacts may be cited as evidence.",
+        actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+        roleIds: [],
+        agentIds: [],
+        stepIds: [],
+        artifactIds: [outputArtifactId],
+        createdAt: timestamp,
+      },
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toContainEqual([
+      "supervision",
+      "humanRequest",
+      "artifactIds",
+      0,
+    ]);
+  });
+
+  test.each([
+    [
+      "waiting_for_permission",
+      {
+        status: "waiting_for_permission",
+        plannedAgentId: thirdAgentId,
+        agentId: thirdAgentId,
+        startedAt: timestamp,
+      },
+    ],
+    [
+      "stopping",
+      {
+        status: "stopping",
+        plannedAgentId: thirdAgentId,
+        agentId: thirdAgentId,
+        startedAt: timestamp,
+        stopRequestedAt: timestamp,
+      },
+    ],
+    [
+      "stop_failed",
+      {
+        status: "stop_failed",
+        plannedAgentId: thirdAgentId,
+        agentId: thirdAgentId,
+        startedAt: timestamp,
+        stopRequestedAt: timestamp,
+        error: "Cancellation was refused.",
+      },
+    ],
+  ] as const)("requires outer run state to match supervised step state %s", (status, state) => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const workerStep = run.steps.findLast((step) => step.snapshot.supervision?.kind === "worker")!;
+    const metadata = workerStep.snapshot.supervision!;
+    if (metadata.kind !== "worker") throw new Error("Expected a worker attempt");
+    workerStep.state = state;
+    const workItem = run.supervision!.workItems.find((item) => item.id === metadata.workItemId)!;
+    workItem.status = "active";
+    workItem.acceptedAttemptId = null;
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      `Supervised step status ${status} requires run status ${status}`,
+    );
+  });
+
   test("binds every durable decision to exactly one succeeded supervisor turn", () => {
     const supervised = createSupervisedRunWithDecision();
     const missingTurn = PersistedTeamRunRecordSchema.safeParse({
