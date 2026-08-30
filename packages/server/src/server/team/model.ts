@@ -1103,6 +1103,12 @@ function validateSupervisionWorkItems(run: TeamRunRecordShape): ContractIssue[] 
         message: "Only a succeeded work item may own an accepted attempt",
       });
     }
+    if (workItem.status === "active" && workItem.attemptIds.length === 0) {
+      issues.push({
+        path: ["supervision", "workItems", index, "status"],
+        message: "An active work item must contain a dispatched attempt",
+      });
+    }
   }
   return issues;
 }
@@ -1436,6 +1442,12 @@ function validateSupervisedActiveSteps(
 ): ContractIssue[] {
   const issues: ContractIssue[] = [];
   const activeWorkers = activeSteps.filter((step) => step.snapshot.supervision?.kind === "worker");
+  if (activeWorkers.length > 0 && run.supervision!.phase !== "working") {
+    issues.push({
+      path: ["supervision", "phase"],
+      message: "Active supervised workers require the working phase",
+    });
+  }
   if (activeWorkers.length > run.supervision!.limits.maxActiveWorkers) {
     issues.push({
       path: ["steps"],

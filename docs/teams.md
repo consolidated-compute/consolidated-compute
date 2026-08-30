@@ -63,10 +63,12 @@ queued or running at an idle planning boundary; active work, permission waits, c
 unresolved human requests, and terminal runs reject it. A decision
 may append steps but every preserved run and step state must follow the lifecycle transition graph;
 terminal attempt history cannot be reopened or rewritten. A dispatch atomically appends one new
-`creating` attempt and marks its Work Item active, and an attempt has one dispatch decision. A
-complete decision atomically moves supervision and the outer run to successful terminal states. An
-escalation atomically enters the human-wait phase with an unresolved request. Decisions preserve the
-outer run state payload when its status does not change and retain its start time across transitions.
+`creating` attempt, marks its Work Item active, enters the working phase, and reserves an output
+Artifact ID across stored Team Runs. Active Work Items contain at least one dispatched attempt, and
+an attempt has one dispatch decision. A complete decision atomically moves supervision and the outer
+run to successful terminal states. An escalation atomically enters the human-wait phase with an
+unresolved request. Decisions preserve the outer run state payload when its status does not change
+and retain its start time across transitions.
 Successful terminalization requires `complete` to be the latest decision, and a pending human wait
 requires `escalate` to be the latest decision.
 

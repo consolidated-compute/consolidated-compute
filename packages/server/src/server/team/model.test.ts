@@ -832,6 +832,52 @@ describe("Team Run contract", () => {
     );
   });
 
+  test("requires active work items to contain a dispatched attempt", () => {
+    const run = createSupervisedRunWithDecision();
+    run.supervision!.workItems = [
+      {
+        id: "work_active_without_attempt",
+        templateStepId: run.supervision!.workerTemplates[0]!.stepId,
+        inputArtifactIds: [],
+        attemptIds: [],
+        acceptedAttemptId: null,
+        status: "active",
+      },
+    ];
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "An active work item must contain a dispatched attempt",
+    );
+  });
+
+  test("requires active workers to enter the working phase", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const workerStep = run.steps.findLast((step) => step.snapshot.supervision?.kind === "worker")!;
+    const metadata = workerStep.snapshot.supervision!;
+    if (metadata.kind !== "worker") throw new Error("Expected a worker attempt");
+    workerStep.state = {
+      status: "creating",
+      plannedAgentId: workerStep.state.plannedAgentId!,
+      startedAt: timestamp,
+    };
+    const workItem = run.supervision!.workItems.find((item) => item.id === metadata.workItemId)!;
+    workItem.status = "active";
+    workItem.acceptedAttemptId = null;
+    run.supervision!.phase = "planning";
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Active supervised workers require the working phase",
+    );
+  });
+
   test("requires complete decisions to terminalize supervision atomically", () => {
     const run = createSupervisedRunWithDecision();
     run.supervision!.decisions[0] = {

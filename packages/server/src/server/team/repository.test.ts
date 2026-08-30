@@ -35,6 +35,8 @@ import {
   type CreateAssignmentTeamRunInput,
   type CreateTeamRunInput,
   type TeamRepositoryChange,
+  type TeamRunSupervisionDecision,
+  type TeamRunSupervisionUpdate,
 } from "./repository.js";
 import { toTeamRunDto } from "./wire.js";
 
@@ -195,6 +197,68 @@ function createSucceededSupervisorTurn(
       agentId: run.supervision.supervisor.agentId,
       startedAt: timestamp,
       endedAt: timestamp,
+    },
+  };
+}
+
+function createWorkerDispatchUpdate(
+  run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  decision: Extract<TeamRunSupervisionDecision, { kind: "dispatch" }>,
+  options: {
+    outputArtifactId: string;
+    phase: PersistedTeamRunSupervision["phase"];
+    workItemStatus: PersistedTeamRunSupervision["workItems"][number]["status"];
+  },
+): TeamRunSupervisionUpdate {
+  const template = run.supervision.workerTemplates[0]!;
+  return {
+    state: run.state,
+    steps: [
+      ...run.steps,
+      createSucceededSupervisorTurn(run, decision.id, decision.sequence, secondTimestamp),
+      {
+        snapshot: {
+          ...template,
+          stepId: `worker_${decision.attemptId}`,
+          inputArtifactIds: [],
+          outputArtifact: {
+            id: options.outputArtifactId,
+            kind: "team_step_output",
+            title: `${template.roleName} output`,
+            mediaType: "text/markdown",
+          },
+          supervision: {
+            kind: "worker",
+            workItemId: decision.workItemId,
+            attemptId: decision.attemptId,
+            attemptNumber: 1,
+            templateStepId: template.stepId,
+            revisionParentAttemptId: null,
+          },
+        },
+        state: {
+          status: "creating",
+          plannedAgentId: firstAgentId,
+          startedAt: secondTimestamp,
+        },
+      },
+    ],
+    supervision: {
+      ...run.supervision,
+      revision: run.supervision.revision + 1,
+      phase: options.phase,
+      workItems: [
+        {
+          id: decision.workItemId,
+          templateStepId: template.stepId,
+          inputArtifactIds: [],
+          attemptIds: [decision.attemptId],
+          acceptedAttemptId: null,
+          status: options.workItemStatus,
+        },
+      ],
+      decisions: [...run.supervision.decisions, decision],
+      updatedAt: secondTimestamp,
     },
   };
 }
@@ -807,80 +871,74 @@ describe("TeamRepository runs", () => {
           expectedSupervisionRevision: 2,
           decision: inactiveWorkItemDispatch,
         },
-        (current) => {
-          const template = current.supervision.workerTemplates[0]!;
-          return {
-            state: current.state,
-            steps: [
-              ...current.steps,
-              {
-                snapshot: {
-                  stepId: "supervisor_turn_inactive_dispatch_2",
-                  roleId: current.supervision.supervisor.roleId,
-                  roleName: current.supervision.supervisor.roleName,
-                  roleInstructions: current.supervision.supervisor.roleInstructions,
-                  stepInstructions: null,
-                  resolvedLaunch: current.supervision.supervisor.resolvedLaunch,
-                  supervision: {
-                    kind: "supervisor",
-                    turn: 2,
-                    decisionId: inactiveWorkItemDispatch.id,
-                  },
-                },
-                state: {
-                  status: "succeeded",
-                  plannedAgentId: current.supervision.supervisor.agentId,
-                  agentId: current.supervision.supervisor.agentId,
-                  startedAt: secondTimestamp,
-                  endedAt: secondTimestamp,
-                },
-              },
-              {
-                snapshot: {
-                  ...template,
-                  stepId: "worker_inactive_dispatch_1",
-                  inputArtifactIds: [],
-                  outputArtifact: {
-                    id: "aart_4444444444444444",
-                    kind: "team_step_output",
-                    title: `${template.roleName} output`,
-                    mediaType: "text/markdown",
-                  },
-                  supervision: {
-                    kind: "worker",
-                    workItemId: inactiveWorkItemDispatch.workItemId,
-                    attemptId: inactiveWorkItemDispatch.attemptId,
-                    attemptNumber: 1,
-                    templateStepId: template.stepId,
-                    revisionParentAttemptId: null,
-                  },
-                },
-                state: {
-                  status: "creating",
-                  plannedAgentId: firstAgentId,
-                  startedAt: secondTimestamp,
-                },
-              },
-            ],
-            supervision: {
-              ...current.supervision,
-              revision: 3,
-              phase: "working",
-              workItems: [
-                {
-                  id: inactiveWorkItemDispatch.workItemId,
-                  templateStepId: template.stepId,
-                  inputArtifactIds: [],
-                  attemptIds: [inactiveWorkItemDispatch.attemptId],
-                  acceptedAttemptId: null,
-                  status: "planned",
-                },
-              ],
-              decisions: [...current.supervision.decisions, inactiveWorkItemDispatch],
-              updatedAt: secondTimestamp,
-            },
-          };
+        (current) =>
+          createWorkerDispatchUpdate(current, inactiveWorkItemDispatch, {
+            outputArtifactId: "aart_4444444444444444",
+            phase: "working",
+            workItemStatus: "planned",
+          }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    await expect(repository.getRun(admitted.id)).resolves.toEqual(committed);
+
+    const planningPhaseDispatch = {
+      ...inactiveWorkItemDispatch,
+      id: "decision_dispatch_planning_phase_2",
+      actionId: "action_dispatch_planning_phase_2",
+      workItemId: "work_planning_phase_dispatch",
+      attemptId: "attempt_planning_phase_dispatch",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: planningPhaseDispatch,
         },
+        (current) =>
+          createWorkerDispatchUpdate(current, planningPhaseDispatch, {
+            outputArtifactId: "aart_5555555555555555",
+            phase: "planning",
+            workItemStatus: "active",
+          }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+
+    const artifactOwnerAssignment = await assignments.createAssignment({
+      title: "Reserved supervised output",
+      objective: "Reserve an output Artifact ID in another Team Run.",
+      workItem: null,
+    });
+    const artifactOwnerRun = await repository.createAssignmentRun(
+      createAssignmentRunInput(
+        definition,
+        artifactOwnerAssignment,
+        "reserved-supervised-output",
+        "wks_reserved_output_01",
+      ),
+      assignments,
+    );
+    const reservedOutputArtifactId = artifactOwnerRun.steps[0]!.snapshot.outputArtifact!.id;
+    const collidingOutputDispatch = {
+      ...inactiveWorkItemDispatch,
+      id: "decision_dispatch_reserved_output_2",
+      actionId: "action_dispatch_reserved_output_2",
+      workItemId: "work_reserved_output_dispatch",
+      attemptId: "attempt_reserved_output_dispatch",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: collidingOutputDispatch,
+        },
+        (current) =>
+          createWorkerDispatchUpdate(current, collidingOutputDispatch, {
+            outputArtifactId: reservedOutputArtifactId,
+            phase: "working",
+            workItemStatus: "active",
+          }),
       ),
     ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
     await expect(repository.getRun(admitted.id)).resolves.toEqual(committed);
