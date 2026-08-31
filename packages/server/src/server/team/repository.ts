@@ -29,6 +29,7 @@ import {
   type PersistedTeamRunRecord,
   type PersistedTeamRunSupervision,
   isActiveTeamRunStatus,
+  isActiveTeamRunStepStatus,
   isTerminalTeamRunStepStatus,
   isTeamRunSupervisionDecisionBoundary,
 } from "./model.js";
@@ -1048,7 +1049,8 @@ function decisionProducesRequiredSupervisionEffect(
     update.supervision.phase === "awaiting_human" &&
     request !== null &&
     !request.resolution &&
-    !request.retirement;
+    !request.retirement &&
+    !update.steps.some((step) => isActiveTeamRunStepStatus(step.state.status));
   return (
     (decision.kind === "complete") === completesRun &&
     (decision.kind === "escalate") === createsPendingHumanWait

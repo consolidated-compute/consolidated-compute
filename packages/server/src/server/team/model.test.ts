@@ -1007,6 +1007,52 @@ describe("Team Run contract", () => {
     );
   });
 
+  test.each(["creating", "running"] as const)(
+    "rejects an active %s supervisor turn during a human wait",
+    (status) => {
+      const run = createSupervisedRunWithDecision();
+      const decision = run.supervision!.decisions[0]!;
+      decision.kind = "escalate";
+      const activeTurn = createSupervisorTurn(run, 2, decision.id);
+      activeTurn.state =
+        status === "creating"
+          ? {
+              status,
+              plannedAgentId: run.supervision!.supervisor.agentId,
+              startedAt: timestamp,
+            }
+          : {
+              status,
+              plannedAgentId: run.supervision!.supervisor.agentId,
+              agentId: run.supervision!.supervisor.agentId,
+              startedAt: timestamp,
+            };
+      run.steps.push(activeTurn);
+      run.supervision!.phase = "awaiting_human";
+      run.supervision!.humanRequest = {
+        id: `human_active_supervisor_${status}`,
+        revision: 1,
+        kind: "approval",
+        title: "Choose the next action",
+        detail: "No agent work may continue while the run waits for a human.",
+        actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+        roleIds: [run.supervision!.supervisor.roleId],
+        agentIds: [run.supervision!.supervisor.agentId],
+        stepIds: [],
+        artifactIds: [],
+        createdAt: timestamp,
+      };
+
+      const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error.issues.map((issue) => issue.message)).toContain(
+        "Human-wait supervision cannot contain an active step",
+      );
+    },
+  );
+
   test("keeps resolved escalation history readable", () => {
     const run = createSupervisedRunWithDecision();
     run.supervision!.decisions[0] = {

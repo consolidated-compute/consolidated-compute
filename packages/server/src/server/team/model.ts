@@ -1519,6 +1519,12 @@ function validateSupervisedHumanWait(run: TeamRunRecordShape): ContractIssue[] {
         message: "Human-wait supervision requires a running run and unresolved request",
       });
     }
+    if (run.steps.some((step) => isActiveTeamRunStepStatus(step.state.status))) {
+      issues.push({
+        path: ["steps"],
+        message: "Human-wait supervision cannot contain an active step",
+      });
+    }
   }
   if (isPendingHumanRequest(supervision.humanRequest) && supervision.phase !== "awaiting_human") {
     issues.push({
@@ -2045,6 +2051,10 @@ export function isActiveTeamRunStatus(status: TeamRunStatus): boolean {
 
 export function isTerminalTeamRunStatus(status: TeamRunStatus): boolean {
   return !isActiveTeamRunStatus(status);
+}
+
+export function isActiveTeamRunStepStatus(status: TeamRunStepStatus): boolean {
+  return ACTIVE_STEP_STATUSES.has(status);
 }
 
 export function isTerminalTeamRunStepStatus(status: TeamRunStepStatus): boolean {

@@ -69,7 +69,8 @@ Artifact ID across stored Team Runs. Active Work Items contain at least one disp
 an attempt has one dispatch decision. Existing Work Items keep their identity, inputs, and prior
 attempts across decisions. A complete decision atomically moves supervision and the outer run to
 successful terminal states. An escalation atomically enters the human-wait phase with an unresolved
-request. Once that request is resolved or retired, later decisions preserve it exactly; the current
+request after every active step has settled. Once that request is resolved or retired, later decisions
+preserve it exactly; the current
 single-request ledger cannot overwrite it with another escalation. Decisions preserve the outer run
 state payload when its status does not change and retain its start time across transitions.
 Successful terminalization requires `complete` to be the latest decision, and a pending human wait

@@ -201,6 +201,32 @@ function createSucceededSupervisorTurn(
   };
 }
 
+function createActiveSupervisorTurn(
+  run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  decisionId: string,
+  turn: number,
+  timestamp: string,
+  status: "creating" | "running",
+): PersistedTeamRunRecord["steps"][number] {
+  const succeeded = createSucceededSupervisorTurn(run, decisionId, turn, timestamp);
+  return {
+    ...succeeded,
+    state:
+      status === "creating"
+        ? {
+            status,
+            plannedAgentId: run.supervision.supervisor.agentId,
+            startedAt: timestamp,
+          }
+        : {
+            status,
+            plannedAgentId: run.supervision.supervisor.agentId,
+            agentId: run.supervision.supervisor.agentId,
+            startedAt: timestamp,
+          },
+  };
+}
+
 function createWorkerDispatchUpdate(
   run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
   decision: Extract<TeamRunSupervisionDecision, { kind: "dispatch" }>,
@@ -1148,6 +1174,62 @@ describe("TeamRepository runs", () => {
       kind: "escalate" as const,
       summary: "Ask the human to choose the bounded next action.",
     };
+    for (const status of ["creating", "running"] as const) {
+      const activeSupervisorEscalation = {
+        ...escalationDecision,
+        id: `decision_escalate_active_supervisor_${status}`,
+        actionId: `action_escalate_active_supervisor_${status}`,
+      };
+      await expect(
+        repository.commitSupervisionDecision(
+          {
+            runId: admitted.id,
+            expectedSupervisionRevision: 2,
+            decision: activeSupervisorEscalation,
+          },
+          (current) => ({
+            state: current.state,
+            steps: [
+              ...current.steps,
+              createSucceededSupervisorTurn(
+                current,
+                activeSupervisorEscalation.id,
+                2,
+                secondTimestamp,
+              ),
+              createActiveSupervisorTurn(
+                current,
+                activeSupervisorEscalation.id,
+                3,
+                secondTimestamp,
+                status,
+              ),
+            ],
+            supervision: {
+              ...current.supervision,
+              revision: 3,
+              phase: "awaiting_human",
+              decisions: [...current.supervision.decisions, activeSupervisorEscalation],
+              humanRequest: {
+                id: `human_active_supervisor_${status}`,
+                revision: 1,
+                kind: "approval",
+                title: "Choose the next action",
+                detail: "No agent work may continue while the run waits for a human.",
+                actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+                roleIds: [current.supervision.supervisor.roleId],
+                agentIds: [current.supervision.supervisor.agentId],
+                stepIds: [],
+                artifactIds: [],
+                createdAt: secondTimestamp,
+              },
+              updatedAt: secondTimestamp,
+            },
+          }),
+        ),
+      ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+      await expect(repository.getRun(admitted.id)).resolves.toEqual(committed);
+    }
     const awaitingHuman = await repository.commitSupervisionDecision(
       {
         runId: admitted.id,
