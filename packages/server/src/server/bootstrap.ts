@@ -1163,6 +1163,7 @@ export async function createPaseoDaemon(
   const teamRunService = new TeamRunService({
     repository: teamRepository,
     assignmentRepository,
+    supervisedControlPlaneProtected: Boolean(config.auth?.password),
     workspaceRegistry,
     providerCatalog: providerSnapshotManager,
     daemonConfigStore,

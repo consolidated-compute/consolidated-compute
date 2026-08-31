@@ -92,6 +92,10 @@ Supervised agent authority comes from persisted run membership by exact prealloc
 Correlation labels never grant access. Persist the identity before provider launch so its first tool
 catalog is already restricted. Each agent's injected MCP credential is bound to that identity, and
 passwordless daemons reject identity-less MCP sessions instead of exposing the top-level catalog.
+Supervised admission also requires daemon password authentication because a passwordless WebSocket
+treats loopback reachability as full operator authority. Provider launches never inherit
+`PASEO_PASSWORD`, so a restricted agent cannot bypass its MCP catalog through the WebSocket control
+plane.
 Every handler resolves the current run membership again before acting. Workers receive no Paseo
 control-plane tools. A supervisor can inspect only agents, activity, and permission requests in its
 run, and can answer only those requests. Ordinary agents keep the existing tool catalog.

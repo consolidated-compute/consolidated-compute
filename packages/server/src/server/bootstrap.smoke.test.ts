@@ -65,11 +65,7 @@ describe("paseo daemon bootstrap", () => {
       },
     });
     try {
-      const response = await fetch(`http://127.0.0.1:${daemonHandle.port}/api/health`, {
-        headers: daemonHandle.agentMcpAuthHeader
-          ? { Authorization: daemonHandle.agentMcpAuthHeader }
-          : undefined,
-      });
+      const response = await fetch(`http://127.0.0.1:${daemonHandle.port}/api/health`);
       expect(response.ok).toBe(true);
       const payload = await response.json();
       expect(payload.status).toBe("ok");
@@ -222,8 +218,13 @@ describe("paseo daemon bootstrap", () => {
       expect(beforeCors.headers.get("access-control-allow-origin")).toBe(
         "https://before.example.test",
       );
+      const mcpCapabilityToken = daemon.agentManager.getMcpAuthToken();
+      if (!mcpCapabilityToken) throw new Error("Expected Agent MCP root capability");
       const beforeMcp = await fetch(`http://127.0.0.1:${target.port}/mcp/agents`, {
         method: "POST",
+        headers: {
+          Authorization: `Bearer ${mcpCapabilityToken}`,
+        },
       });
       expect(beforeMcp.status).toBe(406);
       const beforeProxyReload = await httpGetWithHost(target.port, proxyHost, "/", {
@@ -732,10 +733,12 @@ export default function contribute(plugin: unknown) {
     });
 
     try {
+      const capabilityToken = daemonHandle.daemon.agentManager.getMcpAuthToken();
+      if (!capabilityToken) throw new Error("Expected Agent MCP root capability");
       const response = await fetch(`http://127.0.0.1:${daemonHandle.port}/mcp/agents`, {
         method: "POST",
         headers: {
-          Authorization: "Bearer secret-debug-token",
+          Authorization: `Bearer ${capabilityToken}`,
           Accept: "application/json, text/event-stream",
           "Content-Type": "application/json",
         },
@@ -755,7 +758,7 @@ export default function contribute(plugin: unknown) {
       expect(logs).toContain("[redacted]");
       expect(logs).toContain('"method":"tools/call"');
       expect(logs).toContain('"hasParams":true');
-      expect(logs).not.toContain("secret-debug-token");
+      expect(logs).not.toContain(capabilityToken);
       expect(logs).not.toContain("secret-body-token");
       expect(logs).not.toContain("apiKey");
     } finally {
