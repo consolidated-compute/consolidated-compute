@@ -771,14 +771,14 @@ describe("TeamRepository runs", () => {
           revision: 2,
           phase: "planning",
           decisions: [decision],
-          updatedAt: secondTimestamp,
         },
       }),
     );
 
     expect(committed).toMatchObject({
       state: { status: "running" },
-      supervision: { revision: 2, decisions: [decision] },
+      supervision: { revision: 2, decisions: [decision], updatedAt: secondTimestamp },
+      updatedAt: secondTimestamp,
     });
     const repeated = await repository.commitSupervisionDecision(
       {

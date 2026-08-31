@@ -724,12 +724,13 @@ export class TeamRepository {
         throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
       }
 
+      const updatedAt = this.now().toISOString();
       const run = PersistedTeamRunRecordSchema.parse({
         ...preserved,
         steps: update.steps,
         state: update.state,
-        supervision: update.supervision,
-        updatedAt: this.now().toISOString(),
+        supervision: { ...update.supervision, updatedAt },
+        updatedAt,
       });
       await this.writeJson(this.runPath(run.id), run);
       this.publish({ type: "run_updated", run });

@@ -72,7 +72,8 @@ request. Once that request is resolved or retired, later decisions preserve it e
 single-request ledger cannot overwrite it with another escalation. Decisions preserve the outer run
 state payload when its status does not change and retain its start time across transitions.
 Successful terminalization requires `complete` to be the latest decision, and a pending human wait
-requires `escalate` to be the latest decision.
+requires `escalate` to be the latest decision. The repository stamps the supervision ledger and the
+outer run with the same decision commit time; updater-supplied timestamps are not authoritative.
 
 The wire projection exposes only a compact optional supervision summary. Existing Team Run and
 step lifecycle values do not change. The daemon does not advertise supervised execution until the
