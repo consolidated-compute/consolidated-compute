@@ -91,7 +91,7 @@ export interface AdmitSupervisedAssignmentTeamRunInput extends StartAssignmentTe
 export interface TeamRunServiceOptions {
   repository: TeamRepository;
   assignmentRepository?: AssignmentRepository;
-  supervisedControlPlaneProtected: boolean;
+  supervisedControlPlaneProtection: TeamSupervisedControlPlaneProtection;
   workspaceRegistry: TeamRunWorkspaceRegistry;
   providerCatalog: TeamProviderCatalog;
   daemonConfigStore: TeamAgentProfileConfigStore;
@@ -102,6 +102,11 @@ export interface TeamRunServiceOptions {
   now?: () => Date;
   createAgentId?: () => string;
 }
+
+export type TeamSupervisedControlPlaneProtection =
+  | "authenticated"
+  | "passwordless"
+  | "environment_password";
 
 export class TeamRunServiceShuttingDownError extends Error {
   readonly code = "team_run_service_shutting_down";
@@ -139,6 +144,17 @@ export class TeamSupervisedRunAuthenticationRequiredError extends Error {
   }
 }
 
+export class TeamSupervisedRunEnvironmentPasswordUnsupportedError extends Error {
+  readonly code = "team_supervised_run_environment_password_unsupported";
+
+  constructor() {
+    super(
+      "Supervised Team Runs require a persisted daemon password; PASEO_PASSWORD is readable by same-user provider processes",
+    );
+    this.name = "TeamSupervisedRunEnvironmentPasswordUnsupportedError";
+  }
+}
+
 interface ActiveStep {
   index: number;
   step: TeamRunStep;
@@ -169,7 +185,7 @@ interface WorkspaceTerminationFence {
 export class TeamRunService {
   private readonly repository: TeamRepository;
   private readonly assignmentRepository: AssignmentRepository | null;
-  private readonly supervisedControlPlaneProtected: boolean;
+  private readonly supervisedControlPlaneProtection: TeamSupervisedControlPlaneProtection;
   private readonly workspaceRegistry: TeamRunWorkspaceRegistry;
   private readonly providerCatalog: TeamProviderCatalog;
   private readonly daemonConfigStore: TeamAgentProfileConfigStore;
@@ -195,7 +211,7 @@ export class TeamRunService {
   constructor(options: TeamRunServiceOptions) {
     this.repository = options.repository;
     this.assignmentRepository = options.assignmentRepository ?? null;
-    this.supervisedControlPlaneProtected = options.supervisedControlPlaneProtected;
+    this.supervisedControlPlaneProtection = options.supervisedControlPlaneProtection;
     this.workspaceRegistry = options.workspaceRegistry;
     this.providerCatalog = options.providerCatalog;
     this.daemonConfigStore = options.daemonConfigStore;
@@ -323,7 +339,10 @@ export class TeamRunService {
   ): Promise<PersistedTeamRunRecord> {
     const assignments = this.assignmentRepository;
     if (!assignments) throw new TeamAssignmentRepositoryUnavailableError();
-    if (!this.supervisedControlPlaneProtected) {
+    if (this.supervisedControlPlaneProtection === "environment_password") {
+      throw new TeamSupervisedRunEnvironmentPasswordUnsupportedError();
+    }
+    if (this.supervisedControlPlaneProtection === "passwordless") {
       throw new TeamSupervisedRunAuthenticationRequiredError();
     }
     const identity = {

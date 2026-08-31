@@ -201,8 +201,9 @@ export function migrateProviderSettings(
 }
 
 // Daemon-owned or parent-session environment must not reach provider processes.
-// Parent Claude markers break nested launches, while PASEO_PASSWORD would hand
-// an agent the daemon's administrative credential and bypass caller-scoped tools.
+// Parent Claude markers break nested launches. PASEO_PASSWORD is stripped to
+// prevent direct inheritance; supervised admission also rejects env-backed auth
+// because same-user processes may read the daemon ancestor's environment.
 const PROVIDER_BLOCKED_ENV_VARS = [
   "CLAUDECODE",
   "CLAUDE_CODE_ENTRYPOINT",

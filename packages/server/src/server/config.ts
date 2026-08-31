@@ -474,14 +474,21 @@ function resolveListenAddress(
 function resolveAuthConfig(
   env: NodeJS.ProcessEnv,
   persisted: ReturnType<typeof loadPersistedConfig>,
-): PaseoDaemonConfig["auth"] {
+): Pick<PaseoDaemonConfig, "auth" | "authPasswordSource"> {
   const envPassword = env.PASEO_PASSWORD?.trim();
   if (envPassword) {
-    return { password: hashDaemonPassword(envPassword) };
+    return {
+      auth: { password: hashDaemonPassword(envPassword) },
+      authPasswordSource: "environment",
+    };
   }
-  return persisted.daemon?.auth?.password
-    ? { password: persisted.daemon.auth.password }
-    : undefined;
+  if (persisted.daemon?.auth?.password) {
+    return {
+      auth: { password: persisted.daemon.auth.password },
+      authPasswordSource: "persisted",
+    };
+  }
+  return {};
 }
 
 function resolveWorktreesRoot(
@@ -595,6 +602,7 @@ export function resolveConfigFromPersisted(
   );
 
   const overrideControlledPaths = resolveOverrideControlledPaths(env, cli, speech.providers);
+  const auth = resolveAuthConfig(env, persisted);
 
   return {
     listen,
@@ -630,7 +638,7 @@ export function resolveConfigFromPersisted(
     serviceProxy,
     webUi,
     appBaseUrl,
-    auth: resolveAuthConfig(env, persisted),
+    ...auth,
     openai,
     speech,
     voiceLlmProvider: voiceLlm.provider,

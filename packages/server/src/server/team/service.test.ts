@@ -34,6 +34,7 @@ import {
   TeamSecurityPreviewStaleError,
   TeamRunService,
   TeamRunServiceShuttingDownError,
+  type TeamSupervisedControlPlaneProtection,
   type TeamRunWorkspaceRegistry,
 } from "./service.js";
 import { TeamSupervisorRoleInvalidError } from "./supervision.js";
@@ -437,7 +438,7 @@ describe("TeamRunService", () => {
     workspace?: PersistedWorkspaceRecord;
     repository?: TeamRepository;
     assignmentRepository?: AssignmentRepository;
-    supervisedControlPlaneProtected?: boolean;
+    supervisedControlPlaneProtection?: TeamSupervisedControlPlaneProtection;
     initialize?: boolean;
   }): Promise<Harness> {
     const repository =
@@ -460,7 +461,8 @@ describe("TeamRunService", () => {
     const service = new TeamRunService({
       repository,
       assignmentRepository: assignments,
-      supervisedControlPlaneProtected: options?.supervisedControlPlaneProtected ?? true,
+      supervisedControlPlaneProtection:
+        options?.supervisedControlPlaneProtection ?? "authenticated",
       workspaceRegistry,
       providerCatalog,
       daemonConfigStore,
@@ -636,8 +638,17 @@ describe("TeamRunService", () => {
     ).rejects.toBeInstanceOf(TeamSupervisorRoleInvalidError);
   });
 
-  test("rejects supervised admission on a passwordless control plane", async () => {
-    const harness = await createHarness({ supervisedControlPlaneProtected: false });
+  test.each([
+    {
+      protection: "passwordless" as const,
+      code: "team_supervised_run_authentication_required",
+    },
+    {
+      protection: "environment_password" as const,
+      code: "team_supervised_run_environment_password_unsupported",
+    },
+  ])("rejects supervised admission with $protection protection", async ({ protection, code }) => {
+    const harness = await createHarness({ supervisedControlPlaneProtection: protection });
     harness.daemonConfigStore.agentProfiles.push({
       id: "profile_supervisor",
       name: "Supervisor",
@@ -676,7 +687,7 @@ describe("TeamRunService", () => {
         workspaceId: "wks_team_service",
         supervisorRoleId: "role_supervisor",
       }),
-    ).rejects.toMatchObject({ code: "team_supervised_run_authentication_required" });
+    ).rejects.toMatchObject({ code });
     expect(harness.runtime.creations).toEqual([]);
     await expect(harness.repository.listRuns()).resolves.toMatchObject({ runs: [] });
   });

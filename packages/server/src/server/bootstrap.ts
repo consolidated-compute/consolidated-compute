@@ -229,7 +229,7 @@ import { DaemonExecutions } from "./hub/daemon-executions.js";
 import { PluginService } from "./plugins/index.js";
 import { AssignmentRepository } from "./assignment/repository.js";
 import { TeamRepository } from "./team/repository.js";
-import { TeamRunService } from "./team/service.js";
+import { TeamRunService, type TeamSupervisedControlPlaneProtection } from "./team/service.js";
 
 const MAX_MCP_DEBUG_BATCH_ITEMS = 10;
 const REDACTED_LOG_VALUE = "[redacted]";
@@ -436,6 +436,7 @@ export interface PaseoDaemonConfig {
   };
   appBaseUrl?: string;
   auth?: DaemonAuthConfig;
+  authPasswordSource?: "environment" | "persisted";
   openai?: PaseoOpenAIConfig;
   speech?: PaseoSpeechConfig;
   voiceLlmProvider?: AgentProvider | null;
@@ -491,6 +492,14 @@ export interface PaseoDaemonDependencies {
     daemonStatusRpc?: boolean;
     relayConfig?: boolean;
   };
+}
+
+function resolveTeamSupervisedControlPlaneProtection(
+  config: Pick<PaseoDaemonConfig, "auth" | "authPasswordSource">,
+): TeamSupervisedControlPlaneProtection {
+  if (!config.auth?.password) return "passwordless";
+  if (config.authPasswordSource === "environment") return "environment_password";
+  return "authenticated";
 }
 
 function createBootstrapManagedProcessRegistry(
@@ -1163,7 +1172,7 @@ export async function createPaseoDaemon(
   const teamRunService = new TeamRunService({
     repository: teamRepository,
     assignmentRepository,
-    supervisedControlPlaneProtected: Boolean(config.auth?.password),
+    supervisedControlPlaneProtection: resolveTeamSupervisedControlPlaneProtection(config),
     workspaceRegistry,
     providerCatalog: providerSnapshotManager,
     daemonConfigStore,

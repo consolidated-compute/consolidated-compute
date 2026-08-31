@@ -94,10 +94,10 @@ catalog is already restricted. Deliver that catalog through the provider's nativ
 when available. Claude uses an in-process SDK MCP server so no reusable agent credential enters the
 provider process or its arguments. Other injected MCP credentials are bound to the agent identity,
 and passwordless daemons reject identity-less MCP sessions instead of exposing the top-level catalog.
-Supervised admission also requires daemon password authentication because a passwordless WebSocket
-treats loopback reachability as full operator authority. Provider launches never inherit
-`PASEO_PASSWORD`, so a restricted agent cannot bypass its MCP catalog through the WebSocket control
-plane.
+Supervised admission also requires a persisted daemon password because a passwordless WebSocket
+treats loopback reachability as full operator authority. `PASEO_PASSWORD` does not qualify: a
+same-user provider process may read the daemon ancestor's startup environment even when the variable
+is removed from its child environment.
 Every handler resolves the current run membership again before acting. Workers receive no Paseo
 control-plane tools. A supervisor can inspect only agents, activity, and permission requests in its
 run, and can answer only those requests. Ordinary agents keep the existing tool catalog.
