@@ -1448,9 +1448,9 @@ export async function createPaseoDaemon(
         callerAgentId = callerAgentIdRaw[0];
       }
       // This route is exempt from the global daemon-password middleware, so it
-      // authenticates here using the injected capability token (or a valid
-      // daemon password). Without this, a password-protected daemon would be
-      // wide open on its agent control plane.
+      // authenticates every request here. Agent-scoped sessions use an
+      // identity-bound capability. Internal identity-less sessions use the root
+      // capability, while external identity-less callers need the daemon password.
       if (
         !(await isAgentMcpRequestAuthorized({
           password: config.auth?.password,
@@ -1458,7 +1458,6 @@ export async function createPaseoDaemon(
             ? createAgentMcpCapabilityToken(agentMcpAuthToken, callerAgentId)
             : agentMcpAuthToken,
           authorizationHeader: req.header("authorization"),
-          requireCapabilityToken: callerAgentId !== undefined,
         }))
       ) {
         res.status(401).json({ error: "Unauthorized" });

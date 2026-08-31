@@ -302,7 +302,10 @@ beforeAll(async () => {
     agentClients: createRecordingAgentClients(),
     agentProfiles: [seededAgentProfile],
   });
-  topLevelClient = await createMcpClient(`http://127.0.0.1:${daemonHandle.port}/mcp/agents`);
+  topLevelClient = await createMcpClient(
+    `http://127.0.0.1:${daemonHandle.port}/mcp/agents`,
+    z.string().parse(daemonHandle.daemon.agentManager.getMcpAuthToken()),
+  );
 
   const parentPayload = await callToolStructured(topLevelClient, "create_agent", {
     relationship: { kind: "detached" },

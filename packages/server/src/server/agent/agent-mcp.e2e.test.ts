@@ -166,6 +166,56 @@ async function assertAgentNotRunning(options: {
 }
 
 describe("agent MCP end-to-end (offline)", () => {
+  test("passwordless daemon rejects anonymous identity-less sessions", async () => {
+    const paseoHome = await mkdtemp(path.join(os.tmpdir(), "paseo-home-"));
+    const staticDir = await mkdtemp(path.join(os.tmpdir(), "paseo-static-"));
+    const port = await getAvailablePort();
+
+    const daemon = await createPaseoDaemon(
+      {
+        listen: `127.0.0.1:${port}`,
+        paseoHome,
+        corsAllowedOrigins: [],
+        hostnames: true,
+        mcpEnabled: true,
+        staticDir,
+        mcpDebug: false,
+        agentClients: createTestAgentClients(),
+        agentStoragePath: path.join(paseoHome, "agents"),
+      },
+      pino({ level: "silent" }),
+    );
+    await daemon.start();
+
+    try {
+      const mcpUrl = `http://127.0.0.1:${port}/mcp/agents`;
+      const response = await fetch(mcpUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      expect(response.status).toBe(401);
+
+      const identityBoundToken = createAgentMcpCapabilityToken(
+        daemon.agentManager.getMcpAuthToken()!,
+        "agent-1",
+      );
+      const omittedIdentity = await fetch(mcpUrl, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${identityBoundToken}`,
+          "content-type": "application/json",
+        },
+        body: "{}",
+      });
+      expect(omittedIdentity.status).toBe(401);
+    } finally {
+      await daemon.stop();
+      await rm(paseoHome, { recursive: true, force: true });
+      await rm(staticDir, { recursive: true, force: true });
+    }
+  });
+
   test("create_agent runs initial prompt and affects filesystem", async () => {
     const paseoHome = await mkdtemp(path.join(os.tmpdir(), "paseo-home-"));
     const staticDir = await mkdtemp(path.join(os.tmpdir(), "paseo-static-"));
@@ -187,7 +237,10 @@ describe("agent MCP end-to-end (offline)", () => {
     const daemon = await createPaseoDaemon(daemonConfig, pino({ level: "silent" }));
     await daemon.start();
 
-    const client = await createMcpClient(`http://127.0.0.1:${port}/mcp/agents`);
+    const client = await createMcpClient(
+      `http://127.0.0.1:${port}/mcp/agents`,
+      daemon.agentManager.getMcpAuthToken()!,
+    );
 
     let agentId: string | null = null;
     try {
@@ -328,7 +381,10 @@ describe("agent MCP end-to-end (offline)", () => {
     const daemon = await createPaseoDaemon(daemonConfig, pino({ level: "silent" }));
     await daemon.start();
 
-    const client = await createMcpClient(`http://127.0.0.1:${port}/mcp/agents`);
+    const client = await createMcpClient(
+      `http://127.0.0.1:${port}/mcp/agents`,
+      daemon.agentManager.getMcpAuthToken()!,
+    );
 
     const disabledPaseoHome = await mkdtemp(path.join(os.tmpdir(), "paseo-home-disabled-"));
     const disabledStaticDir = await mkdtemp(path.join(os.tmpdir(), "paseo-static-disabled-"));
@@ -350,7 +406,10 @@ describe("agent MCP end-to-end (offline)", () => {
     const disabledDaemon = await createPaseoDaemon(disabledDaemonConfig, pino({ level: "silent" }));
     await disabledDaemon.start();
 
-    const disabledClient = await createMcpClient(`http://127.0.0.1:${disabledPort}/mcp/agents`);
+    const disabledClient = await createMcpClient(
+      `http://127.0.0.1:${disabledPort}/mcp/agents`,
+      disabledDaemon.agentManager.getMcpAuthToken()!,
+    );
 
     let agentId: string | null = null;
     let disabledAgentId: string | null = null;
@@ -451,7 +510,10 @@ describe("agent MCP end-to-end (offline)", () => {
     const daemon = await createPaseoDaemon(daemonConfig, pino({ level: "silent" }));
     await daemon.start();
 
-    const client = await createMcpClient(`http://127.0.0.1:${port}/mcp/agents`);
+    const client = await createMcpClient(
+      `http://127.0.0.1:${port}/mcp/agents`,
+      daemon.agentManager.getMcpAuthToken()!,
+    );
 
     let agentId: string | null = null;
     try {
@@ -520,7 +582,10 @@ describe("agent MCP end-to-end (offline)", () => {
     const daemon = await createPaseoDaemon(daemonConfig, pino({ level: "silent" }));
     await daemon.start();
 
-    const client = await createMcpClient(`http://127.0.0.1:${port}/mcp/agents`);
+    const client = await createMcpClient(
+      `http://127.0.0.1:${port}/mcp/agents`,
+      daemon.agentManager.getMcpAuthToken()!,
+    );
 
     let agentId: string | null = null;
     try {
@@ -701,7 +766,10 @@ describe("agent MCP end-to-end (offline)", () => {
     const daemon = await createPaseoDaemon(daemonConfig, pino({ level: "silent" }));
     await daemon.start();
 
-    const client = await createMcpClient(`http://127.0.0.1:${port}/mcp/agents`);
+    const client = await createMcpClient(
+      `http://127.0.0.1:${port}/mcp/agents`,
+      daemon.agentManager.getMcpAuthToken()!,
+    );
 
     let agentId: string | null = null;
     try {
@@ -765,7 +833,10 @@ describe("agent MCP end-to-end (offline)", () => {
     const daemon = await createPaseoDaemon(daemonConfig, pino({ level: "silent" }));
     await daemon.start();
 
-    const client = await createMcpClient(`http://127.0.0.1:${port}/mcp/agents`);
+    const client = await createMcpClient(
+      `http://127.0.0.1:${port}/mcp/agents`,
+      daemon.agentManager.getMcpAuthToken()!,
+    );
 
     let agentId: string | null = null;
     try {

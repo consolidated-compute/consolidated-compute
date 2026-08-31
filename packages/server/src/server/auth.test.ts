@@ -75,23 +75,12 @@ describe("daemon bearer validator", () => {
 describe("agent MCP request authorizer", () => {
   const CAPABILITY_TOKEN = "cap-token-abc123";
 
-  test("allows any request when no daemon password is configured", async () => {
+  test("requires the daemon capability when no daemon password is configured", async () => {
     expect(
       await isAgentMcpRequestAuthorized({
         password: undefined,
         capabilityToken: CAPABILITY_TOKEN,
         authorizationHeader: undefined,
-      }),
-    ).toBe(true);
-  });
-
-  test("requires an agent-bound capability even when no daemon password is configured", async () => {
-    expect(
-      await isAgentMcpRequestAuthorized({
-        password: undefined,
-        capabilityToken: CAPABILITY_TOKEN,
-        authorizationHeader: undefined,
-        requireCapabilityToken: true,
       }),
     ).toBe(false);
     expect(
@@ -99,7 +88,6 @@ describe("agent MCP request authorizer", () => {
         password: undefined,
         capabilityToken: CAPABILITY_TOKEN,
         authorizationHeader: `Bearer ${CAPABILITY_TOKEN}`,
-        requireCapabilityToken: true,
       }),
     ).toBe(true);
   });
@@ -112,7 +100,6 @@ describe("agent MCP request authorizer", () => {
         password: undefined,
         capabilityToken: createAgentMcpCapabilityToken(CAPABILITY_TOKEN, "agent-2"),
         authorizationHeader: `Bearer ${firstAgentToken}`,
-        requireCapabilityToken: true,
       }),
     ).toBe(false);
     expect(
@@ -120,7 +107,6 @@ describe("agent MCP request authorizer", () => {
         password: undefined,
         capabilityToken: CAPABILITY_TOKEN,
         authorizationHeader: `Bearer ${firstAgentToken}`,
-        requireCapabilityToken: true,
       }),
     ).toBe(false);
   });

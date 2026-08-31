@@ -16,6 +16,12 @@ Depending on the provider, Paseo delivers the catalog through its native tool in
 
 The MCP server itself is controlled by `daemon.mcp.enabled`. Existing agents may need a reload.
 
+The HTTP endpoint does not accept anonymous sessions. Paseo injects an identity-bound credential
+into each agent it launches. A direct top-level MCP client must send the configured
+[daemon password](/docs/configuration#password-authentication) as a Bearer token; a passwordless
+daemon accepts only credentials issued by that daemon process. Paseo does not pass the daemon
+password to provider processes.
+
 ## Mental model
 
 Workspaces decide where work happens; agent parentage decides who owns the work.

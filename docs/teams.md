@@ -91,7 +91,8 @@ sequential runs.
 Supervised agent authority comes from persisted run membership by exact preallocated agent ID.
 Correlation labels never grant access. Persist the identity before provider launch so its first tool
 catalog is already restricted. Each agent's injected MCP credential is bound to that identity, and
-every handler resolves the current run membership again before acting. Workers receive no Paseo
+passwordless daemons reject identity-less MCP sessions instead of exposing the top-level catalog.
+Every handler resolves the current run membership again before acting. Workers receive no Paseo
 control-plane tools. A supervisor can inspect only agents, activity, and permission requests in its
 run, and can answer only those requests. Ordinary agents keep the existing tool catalog.
 

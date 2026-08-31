@@ -154,16 +154,15 @@ export function shouldBypassBearerAuth(method: string, path: string): boolean {
  * Authorizes a request to the Agent MCP endpoint (/mcp/agents), which is exempt
  * from the global daemon-password middleware. Accepts either the per-daemon-run
  * capability token the daemon derives for one agent identity and injects into
- * that agent's config, or a valid daemon-password bearer (so existing
- * password-authenticated callers keep working). Top-level requests remain open
- * when no daemon password is configured; agent-identified requests require the
- * identity-bound capability.
+ * that agent's config, the daemon's root capability for an internal identity-less
+ * session, or a valid daemon-password bearer for an external identity-less
+ * caller. Anonymous sessions are rejected even on passwordless daemons so an
+ * agent cannot omit callerAgentId to regain the top-level tool catalog.
  */
 export async function isAgentMcpRequestAuthorized(input: {
   password: string | undefined;
   capabilityToken: string | null;
   authorizationHeader: string | undefined;
-  requireCapabilityToken?: boolean;
 }): Promise<boolean> {
   const token = extractHttpBearerToken(input.authorizationHeader);
   if (input.capabilityToken !== null && token !== null) {
@@ -175,7 +174,6 @@ export async function isAgentMcpRequestAuthorized(input: {
       return true;
     }
   }
-  if (input.requireCapabilityToken && !input.password) return false;
-  if (!input.password) return true;
+  if (!input.password) return false;
   return isBearerTokenValidAsync({ password: input.password, token });
 }
