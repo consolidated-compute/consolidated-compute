@@ -870,6 +870,12 @@ function validateSupervisorStep(
       message: "Supervisor steps must use the frozen supervisor agent ID",
     });
   }
+  if (step.snapshot.outputArtifact) {
+    context.issues.push({
+      path: ["steps", index, "snapshot", "outputArtifact"],
+      message: "Supervisor turns cannot own output Artifacts",
+    });
+  }
   if (step.state.status === "succeeded" && !context.decisions.has(metadata.decisionId)) {
     context.issues.push({
       path: ["steps", index, "snapshot", "supervision", "decisionId"],

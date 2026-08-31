@@ -539,6 +539,24 @@ describe("Team Run contract", () => {
     );
   });
 
+  test("forbids output Artifacts on supervisor turns", () => {
+    const run = createSupervisedRunWithDecision();
+    run.steps[0]!.snapshot.outputArtifact = {
+      id: "aart_aaaaaaaaaaaaaaaa",
+      kind: "team_step_output",
+      title: "Supervisor output",
+      mediaType: "text/markdown",
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Supervisor turns cannot own output Artifacts",
+    );
+  });
+
   test("requires worker attempts to retain frozen template instructions", () => {
     const run = createSupervisedRunWithWorkerAttempts();
     const workerStep = run.steps.findLast((step) => step.snapshot.supervision?.kind === "worker")!;
