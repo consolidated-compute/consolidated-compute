@@ -140,6 +140,8 @@ import { withTimeout } from "../../../../utils/promise-timeout.js";
 import { terminateWithTreeKill } from "../../../../utils/tree-kill.js";
 import { execCommand } from "../../../../utils/spawn.js";
 import { composeSystemPromptParts } from "../../system-prompt.js";
+import { createPaseoToolMcpServer } from "../../tools/paseo-tool-mcp-server.js";
+import type { PaseoToolCatalog } from "../../tools/types.js";
 
 const fsPromises = promises;
 const CLAUDE_SETTING_SOURCES: NonNullable<ClaudeOptions["settingSources"]> = [
@@ -307,6 +309,7 @@ const CLAUDE_CAPABILITIES: AgentCapabilityFlags = {
   supportsSessionListing: true,
   supportsDynamicModes: true,
   supportsMcpServers: true,
+  supportsNativePaseoTools: true,
   supportsReasoningStream: true,
   supportsToolInvocations: true,
   supportsRewindConversation: true,
@@ -408,6 +411,7 @@ interface ClaudeAgentSessionOptions {
   handle?: AgentPersistenceHandle;
   agentId?: string;
   launchEnv?: Record<string, string>;
+  paseoTools?: PaseoToolCatalog;
   persistSession?: boolean;
   logger: Logger;
   queryFactory?: ClaudeQueryFactory;
@@ -1512,6 +1516,7 @@ export class ClaudeAgentClient implements AgentClient {
       runtimeSettings: this.runtimeSettings,
       agentId: launchContext?.agentId,
       launchEnv: launchContext?.env,
+      paseoTools: launchContext?.paseoTools,
       persistSession: options?.persistSession,
       logger: this.logger,
       queryFactory: this.queryFactory,
@@ -1541,6 +1546,7 @@ export class ClaudeAgentClient implements AgentClient {
       handle,
       agentId: launchContext?.agentId,
       launchEnv: launchContext?.env,
+      paseoTools: launchContext?.paseoTools,
       logger: this.logger,
       queryFactory: this.queryFactory,
       resolveBinary: this.resolveBinary,
@@ -2015,6 +2021,7 @@ class ClaudeAgentSession implements AgentSession {
 
   private readonly config: ClaudeAgentConfig;
   private readonly launchEnv?: Record<string, string>;
+  private readonly paseoTools?: PaseoToolCatalog;
   private readonly agentId?: string;
   private readonly defaults?: { agents?: Record<string, AgentDefinition> };
   private readonly runtimeSettings?: ProviderRuntimeSettings;
@@ -2093,6 +2100,7 @@ class ClaudeAgentSession implements AgentSession {
     this.config = config;
     assertClaudeThinkingOptionSupported(config.model, config.thinkingOptionId);
     this.launchEnv = options.launchEnv;
+    this.paseoTools = options.paseoTools;
     this.agentId = options.agentId;
     this.defaults = options.defaults;
     this.runtimeSettings = options.runtimeSettings;
@@ -3294,9 +3302,7 @@ class ClaudeAgentSession implements AgentSession {
       env: sdkEnv,
     };
 
-    if (this.config.mcpServers) {
-      base.mcpServers = this.normalizeMcpServers(this.config.mcpServers);
-    }
+    Object.assign(base, this.buildMcpServerOptions());
 
     if (this.config.model) {
       base.model = this.config.model;
@@ -3328,6 +3334,22 @@ class ClaudeAgentSession implements AgentSession {
         ...(input.ultracode ? { ultracode: true } : {}),
       }),
     };
+  }
+
+  private buildMcpServerOptions(): Pick<ClaudeOptions, "mcpServers"> | Record<string, never> {
+    const mcpServers = this.config.mcpServers
+      ? this.normalizeMcpServers(this.config.mcpServers)
+      : {};
+    if (this.paseoTools && !mcpServers.paseo) {
+      // Claude serializes HTTP MCP headers into --mcp-config. Keep the internal
+      // identity-scoped catalog in the daemon through the SDK's live server path.
+      mcpServers.paseo = {
+        type: "sdk",
+        name: "paseo",
+        instance: createPaseoToolMcpServer(this.paseoTools),
+      };
+    }
+    return Object.keys(mcpServers).length > 0 ? { mcpServers } : {};
   }
 
   private resolveFastModeSetting(): boolean | null {

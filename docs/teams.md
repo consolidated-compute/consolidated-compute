@@ -90,8 +90,10 @@ sequential runs.
 
 Supervised agent authority comes from persisted run membership by exact preallocated agent ID.
 Correlation labels never grant access. Persist the identity before provider launch so its first tool
-catalog is already restricted. Each agent's injected MCP credential is bound to that identity, and
-passwordless daemons reject identity-less MCP sessions instead of exposing the top-level catalog.
+catalog is already restricted. Deliver that catalog through the provider's native host interface
+when available. Claude uses an in-process SDK MCP server so no reusable agent credential enters the
+provider process or its arguments. Other injected MCP credentials are bound to the agent identity,
+and passwordless daemons reject identity-less MCP sessions instead of exposing the top-level catalog.
 Supervised admission also requires daemon password authentication because a passwordless WebSocket
 treats loopback reachability as full operator authority. Provider launches never inherit
 `PASEO_PASSWORD`, so a restricted agent cannot bypass its MCP catalog through the WebSocket control
