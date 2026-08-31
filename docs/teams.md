@@ -48,6 +48,40 @@ The posture records facts derived from the frozen launch configuration. It does 
 
 Only one Team Run may own a Workspace at a time. The lock covers active, permission-waiting, stopping, and stop-failed runs. It does not isolate the Workspace from people or ordinary Paseo agents.
 
+Supervised execution uses the same Team Run record rather than a second coordinator store. Its
+admission snapshot is Assignment-only and freezes an unused Team role as supervisor, the existing
+workflow as worker templates, every resolved launch, the planned supervisor agent ID, and bounded
+work, attempt, action, fan-out, and delegation limits. Dynamic worker attempts belong in the run
+step ledger and preserve their template's role, launch, and step instructions. Normalized decisions
+and exact Artifact references belong in the optional supervision ledger. Work Item inputs contain
+unique accepted Artifact IDs. Human requests may cite only created agents and output Artifacts from
+succeeded steps; planned agent IDs and preallocated output IDs are not evidence. Every durable decision
+belongs to exactly one succeeded supervisor turn. Supervisor turns own decisions, never output
+Artifact descriptors. Repository commands append decisions with revision and action idempotency
+checks before an executor performs external work. Dispatch and revision decisions name one exact work
+item and attempt. A fresh decision is accepted only while the run is queued or running at an idle
+planning boundary; active work, permission waits, cancellation, unresolved human requests, and
+terminal runs reject it. A decision
+may append steps but every preserved run and step state must follow the lifecycle transition graph;
+terminal attempt history cannot be reopened or rewritten. A dispatch atomically appends one new
+`creating` attempt, marks its Work Item active, enters the working phase, and reserves an output
+Artifact ID across stored Team Runs. Active Work Items contain at least one dispatched attempt, and
+an attempt has one dispatch decision. Existing Work Items keep their identity, inputs, and prior
+attempts across decisions. A complete decision atomically moves supervision and the outer run to
+successful terminal states. An escalation atomically enters the human-wait phase with an unresolved
+request after every active step has settled. Once that request is resolved or retired, later decisions
+preserve it exactly; the current
+single-request ledger cannot overwrite it with another escalation. Decisions preserve the outer run
+state payload when its status does not change and retain its start time across transitions.
+Successful terminalization requires `complete` to be the latest decision, and a pending human wait
+requires `escalate` to be the latest decision. The repository stamps the supervision ledger and the
+outer run with the same decision commit time; updater-supplied timestamps are not authoritative.
+
+The wire projection exposes only a compact optional supervision summary. Existing Team Run and
+step lifecycle values do not change. The daemon does not advertise supervised execution until the
+executor and its server-enforced agent authority are available; the current app continues to start
+sequential runs.
+
 ## Execution
 
 The daemon service coordinates root Paseo agents. Each reached workflow step creates one agent in the selected Workspace from the frozen launch values; execution never resolves the Agent Profile again. Correlation labels identify the Team, run, role, and step. Do not set `paseo.parent-agent-id`; that label means an agent-created child and carries cascade and archive behavior.
@@ -70,14 +104,23 @@ The Artifact handoff is not a security or context-isolation boundary. Provider-n
 
 One foreground stream owns a step from prompt admission through completion, failure, or cancellation. A permission request is an intermediate checkpoint. Persist `waiting_for_permission`, hold the Workspace lock, surface the ordinary agent permission UI, and resume the same turn after the response. A denied permission is not itself a failed step; classify the eventual terminal event.
 
+The active step and outer run use the same `waiting_for_permission`, `stopping`, or `stop_failed`
+checkpoint. Never persist one side without the other.
+
 Cancellation uses the ordinary agent cancellation path and drains the stream to a terminal event. A refused cancellation is `stop_failed`, remains nonterminal, and retains the Workspace lock.
 
 Workspace archive or removal wins over the Team Run. Stop the current step and create no later agents. Keep the preexisting Workspace and every created agent.
 
 Shutdown fences new starts before agents close. Mark in-flight runs interrupted and cancel or settle them best-effort. On startup, mark every leftover active run interrupted. Never replay a prompt whose effects are uncertain.
 
+A terminal supervision phase must match the outer Team Run status. That transition retires any
+unresolved human request and settles every unfinished work item in the same atomic run write. The
+request remains historical evidence, but it no longer keeps the run or its Workspace and Assignment
+locks active. Duplicate supervisor-action retries remain readable after terminalization; new actions
+are rejected, and late callbacks cannot rewrite a terminal record.
+
 ## Roadmap boundary
 
 Stored v0.2 runs remain objective-only: their Objective is not a durable Assignment and their bounded inline handoff is not an Artifact. [Assignments and Artifacts](assignments.md) own the v0.3 path; stored runs and older clients keep the legacy behavior.
 
-Teams still add no generic policy engine, sandbox, supervisor, conditional revision loop, retry, fan-out, new scheduler, or Team-owned Workspace creation. The frozen security posture reports provider behavior already selected by the Agent Profile; it does not create a new boundary.
+Teams still add no generic policy engine, sandbox, public supervisor flow, conditional revision loop, retry, fan-out, new scheduler, or Team-owned Workspace creation. The frozen security posture reports provider behavior already selected by the Agent Profile; it does not create a new boundary.

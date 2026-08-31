@@ -10,9 +10,12 @@ import {
   generateTeamRunId,
   generateTeamWorkflowStepId,
   isActiveTeamRunStatus,
+  isTeamRunSupervisionDecisionBoundary,
   isTerminalTeamRunStatus,
   PersistedTeamDefinitionSchema,
   PersistedTeamRunRecordSchema,
+  PersistedTeamRunSupervisionDecisionSchema,
+  PersistedTeamRunSupervisionWorkItemSchema,
   PersistedTeamResolvedLaunchSchema,
   PersistedTeamRunStateSchema,
   PersistedTeamRunStepStateSchema,
@@ -24,6 +27,7 @@ import {
 const timestamp = "2026-08-25T12:00:00.000Z";
 const agentId = "9f44cd43-89a5-4371-af49-679bfbf8d1d7";
 const secondAgentId = "d65fc288-0a1b-45a9-b0c8-8346cd1721b3";
+const thirdAgentId = "d5c82f35-5235-48fd-b3ba-425b377d20ab";
 
 function createTeam(): PersistedTeamDefinition {
   return {
@@ -43,6 +47,12 @@ function createTeam(): PersistedTeamDefinition {
         name: "Implementer",
         instructions: "Implement the accepted plan and verify the change.",
         profileId: "profile_builder",
+      },
+      {
+        id: "role_supervisor",
+        name: "Supervisor",
+        instructions: "Coordinate bounded work and escalate explicit exceptions.",
+        profileId: "profile_supervisor",
       },
     ],
     workflow: [
@@ -156,6 +166,238 @@ function createAssignmentRun() {
   };
 }
 
+function createSupervisedAssignmentRun(): PersistedTeamRunRecord {
+  const source = createAssignmentRun();
+  const supervisorRole = source.teamSnapshot.roles.find((role) => role.id === "role_supervisor")!;
+  const workerTemplates = source.steps.map((step) => {
+    const {
+      inputArtifactIds: _inputArtifactIds,
+      outputArtifact: _outputArtifact,
+      supervision: _supervision,
+      ...snapshot
+    } = step.snapshot;
+    return snapshot;
+  });
+  return PersistedTeamRunRecordSchema.parse({
+    ...source,
+    steps: [],
+    state: { status: "queued" },
+    supervision: {
+      revision: 1,
+      phase: "queued",
+      supervisor: {
+        roleId: supervisorRole.id,
+        roleName: supervisorRole.name,
+        roleInstructions: supervisorRole.instructions,
+        resolvedLaunch: {
+          profileId: supervisorRole.profileId,
+          provider: "codex",
+          model: "gpt-5.6",
+          modeId: "workspace-write",
+          thinkingOptionId: "high",
+          featureValues: {},
+        },
+        agentId: "6cc64262-085a-47ab-8ca7-77ccad4bd505",
+      },
+      workerTemplates,
+      limits: {
+        maxWorkItems: 24,
+        maxActiveWorkers: 1,
+        maxAttemptsPerWorkItem: 4,
+        maxSupervisorActions: 128,
+        maxDelegationDepth: 1,
+      },
+      workItems: [],
+      decisions: [],
+      humanRequest: null,
+      updatedAt: timestamp,
+    },
+  });
+}
+
+function createSupervisedRunWithDecision(): PersistedTeamRunRecord {
+  const run = createSupervisedAssignmentRun();
+  const decision = {
+    id: "decision_plan_1",
+    sequence: 1,
+    actionId: "action_plan_1",
+    kind: "plan" as const,
+    summary: "Accept the bounded workflow templates.",
+    workItemId: null,
+    attemptId: null,
+    createdAt: timestamp,
+  };
+  return PersistedTeamRunRecordSchema.parse({
+    ...run,
+    steps: [
+      {
+        snapshot: {
+          stepId: "supervisor_turn_1",
+          roleId: run.supervision!.supervisor.roleId,
+          roleName: run.supervision!.supervisor.roleName,
+          roleInstructions: run.supervision!.supervisor.roleInstructions,
+          stepInstructions: null,
+          resolvedLaunch: run.supervision!.supervisor.resolvedLaunch,
+          supervision: { kind: "supervisor", turn: 1, decisionId: decision.id },
+        },
+        state: {
+          status: "succeeded",
+          plannedAgentId: run.supervision!.supervisor.agentId,
+          agentId: run.supervision!.supervisor.agentId,
+          startedAt: timestamp,
+          endedAt: timestamp,
+        },
+      },
+    ],
+    state: { status: "running", startedAt: timestamp },
+    supervision: {
+      ...run.supervision!,
+      revision: 2,
+      phase: "planning",
+      decisions: [decision],
+    },
+  });
+}
+
+function createSupervisorTurn(
+  run: PersistedTeamRunRecord,
+  turn: number,
+  decisionId: string,
+): PersistedTeamRunRecord["steps"][number] {
+  const firstTurn = run.steps[0]!;
+  return {
+    ...firstTurn,
+    snapshot: {
+      ...firstTurn.snapshot,
+      stepId: `supervisor_turn_${turn}`,
+      supervision: {
+        kind: "supervisor",
+        turn,
+        decisionId,
+      },
+    },
+  };
+}
+
+function createSupervisedRunWithWorkerAttempts(): PersistedTeamRunRecord {
+  const run = createSupervisedRunWithDecision();
+  const [plannerTemplate, builderTemplate] = run.supervision!.workerTemplates;
+  const firstArtifactId = "aart_1111111111111111";
+  const secondArtifactId = "aart_2222222222222222";
+  const firstWorkItemId = "work_plan";
+  const secondWorkItemId = "work_build";
+  const firstAttemptId = "attempt_plan_1";
+  const secondAttemptId = "attempt_build_1";
+  const dispatchPlan = {
+    id: "decision_dispatch_plan",
+    sequence: 2,
+    actionId: "action_dispatch_plan",
+    kind: "dispatch" as const,
+    summary: "Dispatch the planning work item.",
+    workItemId: firstWorkItemId,
+    attemptId: firstAttemptId,
+    createdAt: timestamp,
+  };
+  const dispatchBuild = {
+    id: "decision_dispatch_build",
+    sequence: 3,
+    actionId: "action_dispatch_build",
+    kind: "dispatch" as const,
+    summary: "Dispatch the build work item.",
+    workItemId: secondWorkItemId,
+    attemptId: secondAttemptId,
+    createdAt: timestamp,
+  };
+  return PersistedTeamRunRecordSchema.parse({
+    ...run,
+    steps: [
+      ...run.steps,
+      createSupervisorTurn(run, 2, dispatchPlan.id),
+      {
+        snapshot: {
+          ...plannerTemplate!,
+          stepId: "supervised_step_plan_1",
+          inputArtifactIds: [],
+          outputArtifact: {
+            id: firstArtifactId,
+            kind: "team_step_output",
+            title: "Planner output",
+            mediaType: "text/markdown",
+          },
+          supervision: {
+            kind: "worker",
+            workItemId: firstWorkItemId,
+            attemptId: firstAttemptId,
+            attemptNumber: 1,
+            templateStepId: plannerTemplate!.stepId,
+            revisionParentAttemptId: null,
+          },
+        },
+        state: {
+          status: "succeeded",
+          plannedAgentId: secondAgentId,
+          agentId: secondAgentId,
+          startedAt: timestamp,
+          endedAt: timestamp,
+        },
+      },
+      createSupervisorTurn(run, 3, dispatchBuild.id),
+      {
+        snapshot: {
+          ...builderTemplate!,
+          stepId: "supervised_step_build_1",
+          inputArtifactIds: [firstArtifactId],
+          outputArtifact: {
+            id: secondArtifactId,
+            kind: "team_step_output",
+            title: "Implementer output",
+            mediaType: "text/markdown",
+          },
+          supervision: {
+            kind: "worker",
+            workItemId: secondWorkItemId,
+            attemptId: secondAttemptId,
+            attemptNumber: 1,
+            templateStepId: builderTemplate!.stepId,
+            revisionParentAttemptId: null,
+          },
+        },
+        state: {
+          status: "succeeded",
+          plannedAgentId: thirdAgentId,
+          agentId: thirdAgentId,
+          startedAt: timestamp,
+          endedAt: timestamp,
+        },
+      },
+    ],
+    supervision: {
+      ...run.supervision!,
+      revision: 4,
+      phase: "working",
+      workItems: [
+        {
+          id: firstWorkItemId,
+          templateStepId: plannerTemplate!.stepId,
+          inputArtifactIds: [],
+          attemptIds: [firstAttemptId],
+          acceptedAttemptId: firstAttemptId,
+          status: "succeeded",
+        },
+        {
+          id: secondWorkItemId,
+          templateStepId: builderTemplate!.stepId,
+          inputArtifactIds: [firstArtifactId],
+          attemptIds: [secondAttemptId],
+          acceptedAttemptId: secondAttemptId,
+          status: "succeeded",
+        },
+      ],
+      decisions: [...run.supervision!.decisions, dispatchPlan, dispatchBuild],
+    },
+  });
+}
+
 describe("Team definition contract", () => {
   test("accepts stable roles and an explicit sequential workflow", () => {
     expect(PersistedTeamDefinitionSchema.parse(createTeam())).toEqual(createTeam());
@@ -262,6 +504,767 @@ describe("Team Run contract", () => {
     const run = createAssignmentRun();
 
     expect(PersistedTeamRunRecordSchema.parse(run)).toEqual(run);
+  });
+
+  test("accepts a bounded supervised Assignment admission snapshot", () => {
+    const run = createSupervisedAssignmentRun();
+
+    expect(PersistedTeamRunRecordSchema.parse(run)).toEqual(run);
+    expect(run.steps).toEqual([]);
+    expect(run.supervision).toMatchObject({
+      revision: 1,
+      phase: "queued",
+      supervisor: { roleId: "role_supervisor" },
+      limits: { maxActiveWorkers: 1, maxDelegationDepth: 1 },
+      workItems: [],
+      decisions: [],
+    });
+  });
+
+  test("requires supervised steps to retain the complete frozen launch", () => {
+    const run = createSupervisedRunWithDecision();
+    run.steps[0]!.snapshot.resolvedLaunch = {
+      ...run.steps[0]!.snapshot.resolvedLaunch,
+      provider: "claude",
+      model: null,
+      providerOptions: { permission: { edit: "allow" } },
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Supervisor step must match the frozen supervisor role",
+    );
+  });
+
+  test("forbids output Artifacts on supervisor turns", () => {
+    const run = createSupervisedRunWithDecision();
+    run.steps[0]!.snapshot.outputArtifact = {
+      id: "aart_aaaaaaaaaaaaaaaa",
+      kind: "team_step_output",
+      title: "Supervisor output",
+      mediaType: "text/markdown",
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Supervisor turns cannot own output Artifacts",
+    );
+  });
+
+  test("requires worker attempts to retain frozen template instructions", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const workerStep = run.steps.findLast((step) => step.snapshot.supervision?.kind === "worker")!;
+    workerStep.snapshot.stepInstructions = "Replace the admitted workflow instructions.";
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Worker step must match its frozen workflow template",
+    );
+  });
+
+  test("binds every decision attempt to its named supervised work item", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    run.supervision!.decisions[2] = {
+      ...run.supervision!.decisions[2]!,
+      workItemId: "work_plan",
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Supervisor decision attempt must belong to its named work item",
+    );
+  });
+
+  test("reserves the frozen supervisor agent ID from worker attempts", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const supervisorAgentId = run.supervision!.supervisor.agentId;
+    const workerStep = run.steps.find((step) => step.snapshot.supervision?.kind === "worker")!;
+    workerStep.state = {
+      status: "succeeded",
+      plannedAgentId: supervisorAgentId,
+      agentId: supervisorAgentId,
+      startedAt: timestamp,
+      endedAt: timestamp,
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Each supervised worker attempt must own a distinct agent ID",
+    );
+  });
+
+  test("requires human requests to reference run-local evidence", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    run.supervision = {
+      ...run.supervision!,
+      phase: "awaiting_human",
+      humanRequest: {
+        id: "human_invalid_evidence",
+        revision: 1,
+        kind: "approval",
+        title: "Review the evidence",
+        detail: "Every reference must resolve inside this frozen Team Run.",
+        actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+        roleIds: ["role_missing"],
+        agentIds: ["3ceaf5a8-ee7a-48bb-a01f-b591fe5d7bc5"],
+        stepIds: ["step_missing"],
+        artifactIds: ["aart_ffffffffffffffff"],
+        createdAt: timestamp,
+      },
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toEqual(
+      expect.arrayContaining([
+        ["supervision", "humanRequest", "roleIds", 0],
+        ["supervision", "humanRequest", "agentIds", 0],
+        ["supervision", "humanRequest", "stepIds", 0],
+        ["supervision", "humanRequest", "artifactIds", 0],
+      ]),
+    );
+  });
+
+  test("rejects uncreated planned agents as human-request evidence", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const workerStep = run.steps.findLast((step) => step.snapshot.supervision?.kind === "worker")!;
+    const metadata = workerStep.snapshot.supervision!;
+    if (metadata.kind !== "worker") throw new Error("Expected a worker attempt");
+    const plannedAgentId = workerStep.state.plannedAgentId!;
+    workerStep.state = {
+      status: "interrupted",
+      plannedAgentId,
+      agentId: null,
+      startedAt: timestamp,
+      endedAt: timestamp,
+      error: "Daemon stopped before agent creation.",
+    };
+    const workItem = run.supervision!.workItems.find((item) => item.id === metadata.workItemId)!;
+    workItem.status = "failed";
+    workItem.acceptedAttemptId = null;
+    const escalation = {
+      id: "decision_escalate_uncreated_agent",
+      sequence: 4,
+      actionId: "action_escalate_uncreated_agent",
+      kind: "escalate" as const,
+      summary: "Report the interrupted creation attempt.",
+      workItemId: null,
+      attemptId: null,
+      createdAt: timestamp,
+    };
+    run.steps.push(createSupervisorTurn(run, 4, escalation.id));
+    run.supervision = {
+      ...run.supervision!,
+      revision: 5,
+      phase: "awaiting_human",
+      decisions: [...run.supervision!.decisions, escalation],
+      humanRequest: {
+        id: "human_uncreated_agent_evidence",
+        revision: 1,
+        kind: "approval",
+        title: "Review the interrupted attempt",
+        detail: "Only an agent that was actually created may be cited as evidence.",
+        actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+        roleIds: [],
+        agentIds: [plannedAgentId],
+        stepIds: [],
+        artifactIds: [],
+        createdAt: timestamp,
+      },
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toContainEqual([
+      "supervision",
+      "humanRequest",
+      "agentIds",
+      0,
+    ]);
+
+    run.supervision.humanRequest!.agentIds = [run.supervision.supervisor.agentId];
+    expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
+  });
+
+  test("rejects unmaterialized attempt outputs as human-request evidence", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const workerStep = run.steps.findLast((step) => step.snapshot.supervision?.kind === "worker")!;
+    const metadata = workerStep.snapshot.supervision!;
+    if (metadata.kind !== "worker") throw new Error("Expected a worker attempt");
+    workerStep.state = {
+      status: "failed",
+      plannedAgentId: workerStep.state.plannedAgentId!,
+      agentId: workerStep.state.plannedAgentId!,
+      startedAt: timestamp,
+      endedAt: timestamp,
+      error: "Worker failed before materializing output.",
+    };
+    const workItem = run.supervision!.workItems.find((item) => item.id === metadata.workItemId)!;
+    workItem.status = "failed";
+    workItem.acceptedAttemptId = null;
+    const outputArtifactId = workerStep.snapshot.outputArtifact!.id;
+    run.supervision = {
+      ...run.supervision!,
+      phase: "awaiting_human",
+      humanRequest: {
+        id: "human_unmaterialized_evidence",
+        revision: 1,
+        kind: "approval",
+        title: "Review the failed attempt",
+        detail: "Only materialized Artifacts may be cited as evidence.",
+        actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+        roleIds: [],
+        agentIds: [],
+        stepIds: [],
+        artifactIds: [outputArtifactId],
+        createdAt: timestamp,
+      },
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toContainEqual([
+      "supervision",
+      "humanRequest",
+      "artifactIds",
+      0,
+    ]);
+  });
+
+  test.each([
+    [
+      "waiting_for_permission",
+      {
+        status: "waiting_for_permission",
+        plannedAgentId: thirdAgentId,
+        agentId: thirdAgentId,
+        startedAt: timestamp,
+      },
+    ],
+    [
+      "stopping",
+      {
+        status: "stopping",
+        plannedAgentId: thirdAgentId,
+        agentId: thirdAgentId,
+        startedAt: timestamp,
+        stopRequestedAt: timestamp,
+      },
+    ],
+    [
+      "stop_failed",
+      {
+        status: "stop_failed",
+        plannedAgentId: thirdAgentId,
+        agentId: thirdAgentId,
+        startedAt: timestamp,
+        stopRequestedAt: timestamp,
+        error: "Cancellation was refused.",
+      },
+    ],
+  ] as const)("requires outer run state to match supervised step state %s", (status, state) => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const workerStep = run.steps.findLast((step) => step.snapshot.supervision?.kind === "worker")!;
+    const metadata = workerStep.snapshot.supervision!;
+    if (metadata.kind !== "worker") throw new Error("Expected a worker attempt");
+    workerStep.state = state;
+    const workItem = run.supervision!.workItems.find((item) => item.id === metadata.workItemId)!;
+    workItem.status = "active";
+    workItem.acceptedAttemptId = null;
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      `Supervised step status ${status} requires run status ${status}`,
+    );
+  });
+
+  test("binds every durable decision to exactly one succeeded supervisor turn", () => {
+    const supervised = createSupervisedRunWithDecision();
+    const missingTurn = PersistedTeamRunRecordSchema.safeParse({
+      ...supervised,
+      steps: [],
+    });
+    const duplicateTurn = PersistedTeamRunRecordSchema.safeParse({
+      ...supervised,
+      steps: [
+        ...supervised.steps,
+        createSupervisorTurn(supervised, 2, supervised.supervision!.decisions[0]!.id),
+      ],
+    });
+
+    expect(missingTurn.success).toBe(false);
+    expect(duplicateTurn.success).toBe(false);
+    if (!missingTurn.success) {
+      expect(missingTurn.error.issues.map((issue) => issue.message)).toContain(
+        "A durable supervisor decision must belong to exactly one succeeded turn",
+      );
+    }
+    if (!duplicateTurn.success) {
+      expect(duplicateTurn.error.issues.map((issue) => issue.message)).toContain(
+        "A durable supervisor decision must belong to exactly one succeeded turn",
+      );
+    }
+  });
+
+  test.each(["dispatch", "request_revision"] as const)(
+    "requires exact work and attempt targets for %s decisions",
+    (kind) => {
+      const result = PersistedTeamRunSupervisionDecisionSchema.safeParse({
+        id: `decision_${kind}`,
+        sequence: 1,
+        actionId: `action_${kind}`,
+        kind,
+        summary: "Act on one exact supervised attempt.",
+        workItemId: null,
+        attemptId: null,
+        createdAt: timestamp,
+      });
+
+      expect(result.success).toBe(false);
+    },
+  );
+
+  test("rejects duplicate Artifact inputs in supervised work items", () => {
+    const artifactId = "aart_0123456789abcdef";
+    const result = PersistedTeamRunSupervisionWorkItemSchema.safeParse({
+      id: "work_duplicate_inputs",
+      templateStepId: "step_plan",
+      inputArtifactIds: [artifactId, artifactId],
+      attemptIds: [],
+      acceptedAttemptId: null,
+      status: "planned",
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      `Duplicate supervised input Artifact ID: ${artifactId}`,
+    );
+  });
+
+  test("rejects duplicate dispatch decisions for one worker attempt", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const firstDispatch = run.supervision!.decisions.find(
+      (decision) => decision.kind === "dispatch",
+    )!;
+    const duplicateDispatch = {
+      ...firstDispatch,
+      id: "decision_dispatch_duplicate",
+      sequence: run.supervision!.decisions.length + 1,
+      actionId: "action_dispatch_duplicate",
+    };
+    run.steps.push(createSupervisorTurn(run, 4, duplicateDispatch.id));
+    run.supervision!.decisions.push(duplicateDispatch);
+    run.supervision!.revision += 1;
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      `Supervised attempt may be dispatched only once: ${firstDispatch.attemptId}`,
+    );
+  });
+
+  test("requires active worker attempts to activate their work item", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const workerStep = run.steps.findLast((step) => step.snapshot.supervision?.kind === "worker")!;
+    const metadata = workerStep.snapshot.supervision!;
+    if (metadata.kind !== "worker") throw new Error("Expected a worker attempt");
+    workerStep.state = {
+      status: "creating",
+      plannedAgentId: workerStep.state.plannedAgentId!,
+      startedAt: timestamp,
+    };
+    const workItem = run.supervision!.workItems.find((item) => item.id === metadata.workItemId)!;
+    workItem.status = "planned";
+    workItem.acceptedAttemptId = null;
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "An active worker attempt requires an active supervised work item",
+    );
+  });
+
+  test("requires active work items to contain a dispatched attempt", () => {
+    const run = createSupervisedRunWithDecision();
+    run.supervision!.workItems = [
+      {
+        id: "work_active_without_attempt",
+        templateStepId: run.supervision!.workerTemplates[0]!.stepId,
+        inputArtifactIds: [],
+        attemptIds: [],
+        acceptedAttemptId: null,
+        status: "active",
+      },
+    ];
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "An active work item must contain a dispatched attempt",
+    );
+  });
+
+  test("requires active workers to enter the working phase", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const workerStep = run.steps.findLast((step) => step.snapshot.supervision?.kind === "worker")!;
+    const metadata = workerStep.snapshot.supervision!;
+    if (metadata.kind !== "worker") throw new Error("Expected a worker attempt");
+    workerStep.state = {
+      status: "creating",
+      plannedAgentId: workerStep.state.plannedAgentId!,
+      startedAt: timestamp,
+    };
+    const workItem = run.supervision!.workItems.find((item) => item.id === metadata.workItemId)!;
+    workItem.status = "active";
+    workItem.acceptedAttemptId = null;
+    run.supervision!.phase = "planning";
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Active supervised workers require the working phase",
+    );
+  });
+
+  test("requires complete decisions to terminalize supervision atomically", () => {
+    const run = createSupervisedRunWithDecision();
+    run.supervision!.decisions[0] = {
+      ...run.supervision!.decisions[0]!,
+      kind: "complete",
+      workItemId: null,
+      attemptId: null,
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "A complete supervisor decision must atomically complete the Team Run",
+    );
+  });
+
+  test("requires successful supervision to end with a complete decision", () => {
+    const run = createSupervisedRunWithDecision();
+    run.state = { status: "succeeded", startedAt: timestamp, endedAt: timestamp };
+    run.supervision!.phase = "completed";
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "A succeeded supervised run must end with a complete supervisor decision",
+    );
+  });
+
+  test("requires escalation decisions to create a durable human request", () => {
+    const run = createSupervisedRunWithDecision();
+    run.supervision!.decisions[0] = {
+      ...run.supervision!.decisions[0]!,
+      kind: "escalate",
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "An escalation decision must create a durable human request",
+    );
+  });
+
+  test.each(["creating", "running"] as const)(
+    "rejects an active %s supervisor turn during a human wait",
+    (status) => {
+      const run = createSupervisedRunWithDecision();
+      const decision = run.supervision!.decisions[0]!;
+      decision.kind = "escalate";
+      const activeTurn = createSupervisorTurn(run, 2, decision.id);
+      activeTurn.state =
+        status === "creating"
+          ? {
+              status,
+              plannedAgentId: run.supervision!.supervisor.agentId,
+              startedAt: timestamp,
+            }
+          : {
+              status,
+              plannedAgentId: run.supervision!.supervisor.agentId,
+              agentId: run.supervision!.supervisor.agentId,
+              startedAt: timestamp,
+            };
+      run.steps.push(activeTurn);
+      run.supervision!.phase = "awaiting_human";
+      run.supervision!.humanRequest = {
+        id: `human_active_supervisor_${status}`,
+        revision: 1,
+        kind: "approval",
+        title: "Choose the next action",
+        detail: "No agent work may continue while the run waits for a human.",
+        actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+        roleIds: [run.supervision!.supervisor.roleId],
+        agentIds: [run.supervision!.supervisor.agentId],
+        stepIds: [],
+        artifactIds: [],
+        createdAt: timestamp,
+      };
+
+      const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error.issues.map((issue) => issue.message)).toContain(
+        "Human-wait supervision cannot contain an active step",
+      );
+    },
+  );
+
+  test("keeps resolved escalation history readable", () => {
+    const run = createSupervisedRunWithDecision();
+    run.supervision!.decisions[0] = {
+      ...run.supervision!.decisions[0]!,
+      kind: "escalate",
+    };
+    run.supervision!.humanRequest = {
+      id: "human_resolved_escalation",
+      revision: 1,
+      kind: "approval",
+      title: "Choose the next action",
+      detail: "Resume with the selected bounded action.",
+      actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+      roleIds: [run.supervision!.supervisor.roleId],
+      agentIds: [run.supervision!.supervisor.agentId],
+      stepIds: [],
+      artifactIds: [],
+      createdAt: timestamp,
+      resolution: {
+        actionId: "continue",
+        note: null,
+        idempotencyKey: "resolve-escalation-1",
+        resolvedAt: timestamp,
+      },
+    };
+
+    expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
+  });
+
+  test("requires pending human waits to follow an escalation decision", () => {
+    const run = createSupervisedRunWithDecision();
+    run.supervision!.phase = "awaiting_human";
+    run.supervision!.humanRequest = {
+      id: "human_unauthorized_wait",
+      revision: 1,
+      kind: "approval",
+      title: "Choose the next action",
+      detail: "Resume with the selected bounded action.",
+      actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+      roleIds: [run.supervision!.supervisor.roleId],
+      agentIds: [run.supervision!.supervisor.agentId],
+      stepIds: [],
+      artifactIds: [],
+      createdAt: timestamp,
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "A pending human wait must follow the latest escalation decision",
+    );
+  });
+
+  test("admits supervisor decisions only at idle execution boundaries", () => {
+    const queued = createSupervisedAssignmentRun();
+    const planning = createSupervisedRunWithDecision();
+    const activeWorker = createSupervisedRunWithWorkerAttempts();
+    const workerStep = activeWorker.steps.find(
+      (step) => step.snapshot.supervision?.kind === "worker",
+    )!;
+    workerStep.state = {
+      status: "running",
+      plannedAgentId: workerStep.state.plannedAgentId!,
+      agentId: workerStep.state.plannedAgentId!,
+      startedAt: timestamp,
+    };
+    const awaitingHuman = createSupervisedRunWithDecision();
+    awaitingHuman.supervision!.phase = "awaiting_human";
+    const stopping = createSupervisedRunWithDecision();
+    stopping.state = {
+      status: "stopping",
+      startedAt: timestamp,
+      stopRequestedAt: timestamp,
+    };
+
+    expect(isTeamRunSupervisionDecisionBoundary(queued)).toBe(true);
+    expect(isTeamRunSupervisionDecisionBoundary(planning)).toBe(true);
+    expect(isTeamRunSupervisionDecisionBoundary(activeWorker)).toBe(false);
+    expect(isTeamRunSupervisionDecisionBoundary(awaitingHuman)).toBe(false);
+    expect(isTeamRunSupervisionDecisionBoundary(stopping)).toBe(false);
+  });
+
+  test("rejects supervised runs without an Assignment or with a worker as supervisor", () => {
+    const supervised = createSupervisedAssignmentRun();
+    const withoutAssignment = {
+      ...supervised,
+      assignmentId: undefined,
+      assignmentRevision: undefined,
+      assignmentSnapshot: undefined,
+    };
+    const workerSupervisor = {
+      ...supervised,
+      supervision: {
+        ...supervised.supervision!,
+        supervisor: {
+          ...supervised.supervision!.supervisor,
+          roleId: "role_planner",
+          roleName: "Planner",
+          roleInstructions: "Inspect the objective and produce a bounded plan.",
+          resolvedLaunch: supervised.supervision!.workerTemplates[0]!.resolvedLaunch,
+        },
+      },
+    };
+
+    const missingResult = PersistedTeamRunRecordSchema.safeParse(withoutAssignment);
+    const workerResult = PersistedTeamRunRecordSchema.safeParse(workerSupervisor);
+    expect(missingResult.success).toBe(false);
+    expect(workerResult.success).toBe(false);
+    if (!missingResult.success) {
+      expect(missingResult.error.issues.map((issue) => issue.message)).toContain(
+        "Supervised Team Runs must be backed by an Assignment",
+      );
+    }
+    if (!workerResult.success) {
+      expect(workerResult.error.issues.map((issue) => issue.message)).toContain(
+        "The supervisor role cannot also be a worker workflow role",
+      );
+    }
+  });
+
+  test("enforces frozen supervision limits and unique durable IDs", () => {
+    const supervised = createSupervisedAssignmentRun();
+    const workItem = {
+      id: "work_build",
+      templateStepId: "step_plan",
+      inputArtifactIds: [] as string[],
+      attemptIds: ["attempt_1", "attempt_1"],
+      acceptedAttemptId: null,
+      status: "planned" as const,
+    };
+    const result = PersistedTeamRunRecordSchema.safeParse({
+      ...supervised,
+      state: { status: "running", startedAt: timestamp },
+      supervision: {
+        ...supervised.supervision!,
+        phase: "planning",
+        limits: { ...supervised.supervision!.limits, maxWorkItems: 1 },
+        workItems: [workItem, { ...workItem }],
+      },
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toEqual(
+      expect.arrayContaining([
+        "Supervised work exceeds the frozen work-item limit",
+        "Duplicate supervised work item ID: work_build",
+        "Duplicate supervised attempt ID: attempt_1",
+      ]),
+    );
+  });
+
+  test("rejects terminal success while a human request remains unresolved", () => {
+    const supervised = createSupervisedAssignmentRun();
+    const result = PersistedTeamRunRecordSchema.safeParse({
+      ...supervised,
+      state: { status: "succeeded", startedAt: timestamp, endedAt: timestamp },
+      supervision: {
+        ...supervised.supervision!,
+        phase: "completed",
+        humanRequest: {
+          id: "human_review",
+          revision: 1,
+          kind: "approval",
+          title: "Approve completion",
+          detail: "Confirm the bounded result.",
+          actions: [
+            { id: "approve", label: "Approve", requiresNote: false },
+            { id: "reject", label: "Reject", requiresNote: true },
+          ],
+          roleIds: ["role_supervisor"],
+          agentIds: [supervised.supervision!.supervisor.agentId],
+          stepIds: [],
+          artifactIds: [],
+          createdAt: timestamp,
+        },
+      },
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toEqual(
+      expect.arrayContaining([
+        "An unresolved human request must keep supervision awaiting the human",
+        "A succeeded supervised run cannot retain an unresolved human request",
+      ]),
+    );
+  });
+
+  test.each([
+    ["completed", "succeeded"],
+    ["failed", "failed"],
+    ["canceled", "canceled"],
+    ["interrupted", "interrupted"],
+  ] as const)("requires supervision phase %s to terminalize the run as %s", (phase, status) => {
+    const supervised = createSupervisedAssignmentRun();
+    const result = PersistedTeamRunRecordSchema.safeParse({
+      ...supervised,
+      state: { status: "running", startedAt: timestamp },
+      supervision: {
+        ...supervised.supervision!,
+        phase,
+      },
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      `Supervision phase ${phase} requires run status ${status}`,
+    );
   });
 
   test("requires Assignment identity, revision, and snapshot together", () => {

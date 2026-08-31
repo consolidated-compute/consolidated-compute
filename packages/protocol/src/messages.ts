@@ -3522,6 +3522,8 @@ export const ServerInfoStatusPayloadSchema = z
         teamSecurity: z.boolean().optional(),
         // COMPAT(teamRunPreview): added in v0.6.2, remove gate after 2027-02-28.
         teamRunPreview: z.boolean().optional(),
+        // COMPAT(teamSupervision): added in v0.7.0, remove gate after 2027-03-01.
+        teamSupervision: z.boolean().optional(),
         // COMPAT(assignments): added in v0.6.x, remove gate after 2027-02-27.
         assignments: z.boolean().optional(),
         // COMPAT(agentConfigApply): added in v0.3.2, remove gate after 2027-02-11.

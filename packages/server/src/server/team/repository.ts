@@ -2,6 +2,7 @@ import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { z } from "zod";
+import equal from "fast-deep-equal";
 
 import { writeJsonFileAtomic } from "../atomic-file.js";
 import { generateAssignmentArtifactId } from "../assignment/model.js";
@@ -17,6 +18,8 @@ import {
   serializeHostPersistenceMutation,
 } from "../persistence-mutation.js";
 import {
+  canTransitionTeamRun,
+  canTransitionTeamRunStep,
   generateTeamId,
   generateTeamRunId,
   PersistedTeamDefinitionSchema,
@@ -24,7 +27,11 @@ import {
   PersistedTeamRunRecordSchema,
   type PersistedTeamDefinition,
   type PersistedTeamRunRecord,
+  type PersistedTeamRunSupervision,
   isActiveTeamRunStatus,
+  isActiveTeamRunStepStatus,
+  isTerminalTeamRunStepStatus,
+  isTeamRunSupervisionDecisionBoundary,
 } from "./model.js";
 
 export const TEAM_RUN_PAGE_DEFAULT_LIMIT = 50;
@@ -64,6 +71,13 @@ export interface CreateAssignmentTeamRunInput extends Pick<
   expectedAssignmentRevision: number;
 }
 
+export interface CreateSupervisedAssignmentTeamRunInput extends Omit<
+  CreateAssignmentTeamRunInput,
+  "steps"
+> {
+  supervision: PersistedTeamRunSupervision;
+}
+
 export type TeamRunAdmissionIdentity =
   | {
       kind: "objective";
@@ -81,12 +95,27 @@ export type TeamRunAdmissionIdentity =
       assignmentId: string;
       expectedAssignmentRevision: number;
       workspaceId: string;
+      supervisorRoleId?: string;
     };
 
 export type TeamRunUpdate = Pick<PersistedTeamRunRecord, "steps" | "state">;
 export type TeamRunUpdater = (
   run: PersistedTeamRunRecord,
 ) => TeamRunUpdate | Promise<TeamRunUpdate>;
+
+export type TeamRunSupervisionDecision = PersistedTeamRunSupervision["decisions"][number];
+export interface CommitTeamRunSupervisionDecisionInput {
+  runId: string;
+  expectedSupervisionRevision: number;
+  decision: TeamRunSupervisionDecision;
+}
+export type TeamRunSupervisionUpdate = Pick<
+  PersistedTeamRunRecord,
+  "steps" | "state" | "supervision"
+> & { supervision: PersistedTeamRunSupervision };
+export type TeamRunSupervisionUpdater = (
+  run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+) => TeamRunSupervisionUpdate | Promise<TeamRunSupervisionUpdate>;
 
 export interface ListTeamRunsInput {
   teamId?: string;
@@ -227,6 +256,42 @@ export class TeamRunNotFoundError extends Error {
   constructor(readonly runId: string) {
     super(`Team Run not found: ${runId}`);
     this.name = "TeamRunNotFoundError";
+  }
+}
+
+export class TeamRunNotSupervisedError extends Error {
+  readonly code = "team_run_not_supervised";
+
+  constructor(readonly runId: string) {
+    super(`Team Run is not supervised: ${runId}`);
+    this.name = "TeamRunNotSupervisedError";
+  }
+}
+
+export class TeamRunSupervisionRevisionConflictError extends Error {
+  readonly code = "team_run_supervision_revision_conflict";
+
+  constructor(
+    readonly runId: string,
+    readonly expectedRevision: number,
+    readonly actualRevision: number,
+  ) {
+    super(
+      `Team Run supervision revision conflict for ${runId}: expected ${expectedRevision}, found ${actualRevision}`,
+    );
+    this.name = "TeamRunSupervisionRevisionConflictError";
+  }
+}
+
+export class TeamRunSupervisionActionConflictError extends Error {
+  readonly code = "team_run_supervision_action_conflict";
+
+  constructor(
+    readonly runId: string,
+    readonly actionId: string,
+  ) {
+    super(`Supervisor action ${actionId} for Team Run ${runId} conflicts with durable state`);
+    this.name = "TeamRunSupervisionActionConflictError";
   }
 }
 
@@ -471,6 +536,20 @@ export class TeamRepository {
     input: CreateAssignmentTeamRunInput,
     assignments: AssignmentRepository,
   ): Promise<PersistedTeamRunRecord> {
+    return this.createAssignmentRunRecord(input, assignments);
+  }
+
+  async createSupervisedAssignmentRun(
+    input: CreateSupervisedAssignmentTeamRunInput,
+    assignments: AssignmentRepository,
+  ): Promise<PersistedTeamRunRecord> {
+    return this.createAssignmentRunRecord({ ...input, steps: [] }, assignments);
+  }
+
+  private async createAssignmentRunRecord(
+    input: CreateAssignmentTeamRunInput & { supervision?: PersistedTeamRunSupervision },
+    assignments: AssignmentRepository,
+  ): Promise<PersistedTeamRunRecord> {
     if (assignments.persistenceBoundaryKey !== this.persistenceBoundaryKey) {
       throw new AssignmentPersistenceBoundaryError();
     }
@@ -483,6 +562,7 @@ export class TeamRepository {
         assignmentId: input.assignmentId,
         expectedAssignmentRevision: input.expectedAssignmentRevision,
         workspaceId: input.workspace.workspaceId,
+        ...(input.supervision ? { supervisorRoleId: input.supervision.supervisor.roleId } : {}),
       };
       const collection = await this.readRuns();
       const existing = collection.records.find(
@@ -529,8 +609,13 @@ export class TeamRepository {
       while (existingRunIds.has(runId)) {
         runId = generateTeamRunId();
       }
-      const steps = this.createAssignmentArtifactPlan(input.steps, collection.records);
+      const steps = input.supervision
+        ? []
+        : this.createAssignmentArtifactPlan(input.steps, collection.records);
       const timestamp = this.now().toISOString();
+      const supervision = input.supervision
+        ? { ...input.supervision, updatedAt: timestamp }
+        : undefined;
       const run = PersistedTeamRunRecordSchema.parse({
         id: runId,
         teamId: input.teamId,
@@ -543,6 +628,7 @@ export class TeamRepository {
         assignmentSnapshot: assignment,
         workspace: input.workspace,
         steps,
+        ...(supervision ? { supervision } : {}),
         state: { status: "queued" },
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -558,6 +644,20 @@ export class TeamRepository {
       const current = await this.requireRun(runId);
       const preserved = PersistedTeamRunRecordSchema.parse(current);
       const update = await updater(current);
+      const mutableStateChanged =
+        !equal(update.state, preserved.state) ||
+        !equal(
+          update.steps.map((step) => step.state),
+          preserved.steps.map((step) => step.state),
+        );
+      if (!mutableStateChanged) return preserved;
+
+      const updatedAt = this.now().toISOString();
+      const supervisionPhase = terminalSupervisionPhase(update.state.status);
+      const supervision =
+        preserved.supervision && isActiveTeamRunStatus(preserved.state.status) && supervisionPhase
+          ? terminalizeSupervision(preserved.supervision, supervisionPhase, updatedAt)
+          : preserved.supervision;
       const run = PersistedTeamRunRecordSchema.parse({
         ...preserved,
         ...update,
@@ -572,8 +672,66 @@ export class TeamRepository {
           snapshot: preserved.steps[index]?.snapshot,
           state: step.state,
         })),
+        ...(supervision ? { supervision } : {}),
         createdAt: preserved.createdAt,
-        updatedAt: this.now().toISOString(),
+        updatedAt,
+      });
+      await this.writeJson(this.runPath(run.id), run);
+      this.publish({ type: "run_updated", run });
+      return run;
+    });
+  }
+
+  async commitSupervisionDecision(
+    input: CommitTeamRunSupervisionDecisionInput,
+    updater: TeamRunSupervisionUpdater,
+  ): Promise<PersistedTeamRunRecord> {
+    return this.serializeMutation(async () => {
+      const current = await this.requireRun(input.runId);
+      if (!current.supervision) throw new TeamRunNotSupervisedError(input.runId);
+      const existingDecision = current.supervision.decisions.find(
+        (decision) => decision.actionId === input.decision.actionId,
+      );
+      if (existingDecision) {
+        if (equal(existingDecision, input.decision)) return current;
+        throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
+      }
+      if (!isTeamRunSupervisionDecisionBoundary(current)) {
+        throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
+      }
+      if (current.supervision.revision !== input.expectedSupervisionRevision) {
+        throw new TeamRunSupervisionRevisionConflictError(
+          input.runId,
+          input.expectedSupervisionRevision,
+          current.supervision.revision,
+        );
+      }
+
+      const preserved = PersistedTeamRunRecordSchema.parse(current);
+      const supervisedCurrent = PersistedTeamRunRecordSchema.parse(
+        current,
+      ) as PersistedTeamRunRecord & {
+        supervision: PersistedTeamRunSupervision;
+      };
+      const reservedArtifactIds =
+        input.decision.kind === "dispatch"
+          ? await this.readReservedTeamRunArtifactIds()
+          : new Set<string>();
+      const update = await updater(supervisedCurrent);
+      if (!supervisionDecisionUpdateMatches(preserved, update, input, reservedArtifactIds)) {
+        throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
+      }
+      if (!preservedStepsFollowDecisionTransitions(preserved, update)) {
+        throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
+      }
+
+      const updatedAt = this.now().toISOString();
+      const run = PersistedTeamRunRecordSchema.parse({
+        ...preserved,
+        steps: update.steps,
+        state: update.state,
+        supervision: { ...update.supervision, updatedAt },
+        updatedAt,
       });
       await this.writeJson(this.runPath(run.id), run);
       this.publish({ type: "run_updated", run });
@@ -604,13 +762,7 @@ export class TeamRepository {
     steps: PersistedTeamRunRecord["steps"],
     existingRuns: PersistedTeamRunRecord[],
   ): PersistedTeamRunRecord["steps"] {
-    const reservedArtifactIds = new Set(
-      existingRuns.flatMap((run) =>
-        run.steps.flatMap((step) =>
-          step.snapshot.outputArtifact ? [step.snapshot.outputArtifact.id] : [],
-        ),
-      ),
-    );
+    const reservedArtifactIds = collectTeamRunOutputArtifactIds(existingRuns);
     let precedingOutputId: string | null = null;
     return steps.map((step) => {
       let outputArtifactId = this.generateArtifactId();
@@ -647,7 +799,8 @@ export class TeamRepository {
       identity.kind === "objective"
         ? run.assignmentId === undefined && run.objective === identity.objective
         : run.assignmentId === identity.assignmentId &&
-          run.assignmentRevision === identity.expectedAssignmentRevision;
+          run.assignmentRevision === identity.expectedAssignmentRevision &&
+          run.supervision?.supervisor.roleId === identity.supervisorRoleId;
     if (commonMatches && kindMatches) return;
     throw new TeamRunIdempotencyConflictError(identity.teamId, identity.idempotencyKey, run.id);
   }
@@ -664,6 +817,12 @@ export class TeamRepository {
 
   private readRuns(): Promise<CollectionRead<PersistedTeamRunRecord>> {
     return this.readCollection(this.runsDir, "runs", PersistedTeamRunRecordSchema);
+  }
+
+  private async readReservedTeamRunArtifactIds(): Promise<Set<string>> {
+    const collection = await this.readRuns();
+    this.requireHealthyCollection(collection.issues);
+    return collectTeamRunOutputArtifactIds(collection.records);
   }
 
   private async requireDefinition(teamId: string): Promise<PersistedTeamDefinition> {
@@ -788,6 +947,191 @@ function compareDefinitionsNewestFirst(
 ): number {
   const createdAtOrder = Date.parse(right.createdAt) - Date.parse(left.createdAt);
   return createdAtOrder || right.id.localeCompare(left.id);
+}
+
+function terminalSupervisionPhase(
+  status: PersistedTeamRunRecord["state"]["status"],
+): PersistedTeamRunSupervision["phase"] | null {
+  if (status === "succeeded") return "completed";
+  if (status === "failed") return "failed";
+  if (status === "canceled") return "canceled";
+  if (status === "interrupted") return "interrupted";
+  return null;
+}
+
+function supervisionDecisionUpdateMatches(
+  preserved: PersistedTeamRunRecord,
+  update: TeamRunSupervisionUpdate,
+  input: CommitTeamRunSupervisionDecisionInput,
+  reservedArtifactIds: ReadonlySet<string>,
+): boolean {
+  const expectedDecisions = [...preserved.supervision!.decisions, input.decision];
+  const immutableSnapshotMatches =
+    equal(update.supervision.supervisor, preserved.supervision!.supervisor) &&
+    equal(update.supervision.workerTemplates, preserved.supervision!.workerTemplates) &&
+    equal(update.supervision.limits, preserved.supervision!.limits);
+  return (
+    immutableSnapshotMatches &&
+    decisionPreservesWorkItemLedger(preserved, update) &&
+    decisionPreservesHumanRequest(preserved, update, input.decision) &&
+    equal(update.supervision.decisions, expectedDecisions) &&
+    update.supervision.revision === input.expectedSupervisionRevision + 1 &&
+    canTransitionTeamRun(preserved.state.status, update.state.status) &&
+    decisionPreservesRunStateProvenance(preserved.state, update.state) &&
+    decisionProducesRequiredSupervisionEffect(update, input.decision) &&
+    decisionAppendsExpectedWorkerAttempt(preserved, update, input.decision, reservedArtifactIds)
+  );
+}
+
+function decisionPreservesWorkItemLedger(
+  preserved: PersistedTeamRunRecord,
+  update: TeamRunSupervisionUpdate,
+): boolean {
+  const preservedWorkItems = preserved.supervision!.workItems;
+  if (update.supervision.workItems.length < preservedWorkItems.length) return false;
+  return preservedWorkItems.every((workItem, index) => {
+    const updatedWorkItem = update.supervision.workItems[index];
+    if (!updatedWorkItem) return false;
+    const identityMatches =
+      updatedWorkItem.id === workItem.id &&
+      updatedWorkItem.templateStepId === workItem.templateStepId &&
+      equal(updatedWorkItem.inputArtifactIds, workItem.inputArtifactIds);
+    const attemptHistoryMatches = workItem.attemptIds.every(
+      (attemptId, attemptIndex) => updatedWorkItem.attemptIds[attemptIndex] === attemptId,
+    );
+    const acceptedAttemptMatches =
+      workItem.acceptedAttemptId === null ||
+      updatedWorkItem.acceptedAttemptId === workItem.acceptedAttemptId;
+    return identityMatches && attemptHistoryMatches && acceptedAttemptMatches;
+  });
+}
+
+function decisionPreservesHumanRequest(
+  preserved: PersistedTeamRunRecord,
+  update: TeamRunSupervisionUpdate,
+  decision: TeamRunSupervisionDecision,
+): boolean {
+  const preservedRequest = preserved.supervision!.humanRequest;
+  if (decision.kind === "escalate" && preservedRequest === null) return true;
+  return equal(update.supervision.humanRequest, preservedRequest);
+}
+
+function preservedStepsFollowDecisionTransitions(
+  preserved: PersistedTeamRunRecord,
+  update: TeamRunSupervisionUpdate,
+): boolean {
+  return preserved.steps.every((step, index) => {
+    const updatedStep = update.steps[index];
+    if (!updatedStep || !equal(step.snapshot, updatedStep.snapshot)) return false;
+    if (!canTransitionTeamRunStep(step.state.status, updatedStep.state.status)) return false;
+    return !isTerminalTeamRunStepStatus(step.state.status) || equal(step.state, updatedStep.state);
+  });
+}
+
+function decisionPreservesRunStateProvenance(
+  preserved: PersistedTeamRunRecord["state"],
+  update: PersistedTeamRunRecord["state"],
+): boolean {
+  if (preserved.status === update.status) return equal(preserved, update);
+  if (!("startedAt" in preserved)) return true;
+  return "startedAt" in update && update.startedAt === preserved.startedAt;
+}
+
+function decisionProducesRequiredSupervisionEffect(
+  update: TeamRunSupervisionUpdate,
+  decision: TeamRunSupervisionDecision,
+): boolean {
+  const request = update.supervision.humanRequest;
+  const completesRun =
+    update.state.status === "succeeded" && update.supervision.phase === "completed";
+  const createsPendingHumanWait =
+    update.state.status === "running" &&
+    update.supervision.phase === "awaiting_human" &&
+    request !== null &&
+    !request.resolution &&
+    !request.retirement &&
+    !update.steps.some((step) => isActiveTeamRunStepStatus(step.state.status));
+  return (
+    (decision.kind === "complete") === completesRun &&
+    (decision.kind === "escalate") === createsPendingHumanWait
+  );
+}
+
+function decisionAppendsExpectedWorkerAttempt(
+  preserved: PersistedTeamRunRecord,
+  update: TeamRunSupervisionUpdate,
+  decision: TeamRunSupervisionDecision,
+  reservedArtifactIds: ReadonlySet<string>,
+): boolean {
+  const appendedWorkers: PersistedTeamRunRecord["steps"] = [];
+  for (const step of update.steps.slice(preserved.steps.length)) {
+    if (step.snapshot.supervision?.kind === "worker") appendedWorkers.push(step);
+  }
+  if (decision.kind !== "dispatch") return appendedWorkers.length === 0;
+  const attemptAlreadyExists = preserved.steps.some(
+    (step) =>
+      step.snapshot.supervision?.kind === "worker" &&
+      step.snapshot.supervision.attemptId === decision.attemptId,
+  );
+  if (attemptAlreadyExists || appendedWorkers.length !== 1) return false;
+  const worker = appendedWorkers[0]!;
+  const metadata = worker.snapshot.supervision;
+  const workItem = update.supervision.workItems.find(
+    (candidate) => candidate.id === decision.workItemId,
+  );
+  return (
+    metadata?.kind === "worker" &&
+    metadata.workItemId === decision.workItemId &&
+    metadata.attemptId === decision.attemptId &&
+    worker.state.status === "creating" &&
+    workItem?.status === "active" &&
+    update.supervision.phase === "working" &&
+    worker.snapshot.outputArtifact !== undefined &&
+    !reservedArtifactIds.has(worker.snapshot.outputArtifact.id)
+  );
+}
+
+function collectTeamRunOutputArtifactIds(runs: readonly PersistedTeamRunRecord[]): Set<string> {
+  return new Set(
+    runs.flatMap((run) =>
+      run.steps.flatMap((step) =>
+        step.snapshot.outputArtifact ? [step.snapshot.outputArtifact.id] : [],
+      ),
+    ),
+  );
+}
+
+function terminalizeSupervision(
+  supervision: PersistedTeamRunSupervision,
+  phase: PersistedTeamRunSupervision["phase"],
+  updatedAt: string,
+): PersistedTeamRunSupervision {
+  const humanRequest = supervision.humanRequest;
+  const isPendingRequest = humanRequest && !humanRequest.resolution && !humanRequest.retirement;
+  const retirementReason =
+    phase === "failed" || phase === "canceled" || phase === "interrupted" ? phase : null;
+  const workItems = retirementReason
+    ? supervision.workItems.map((workItem) =>
+        workItem.status === "planned" || workItem.status === "active"
+          ? { ...workItem, status: retirementReason }
+          : workItem,
+      )
+    : supervision.workItems;
+  return {
+    ...supervision,
+    revision: supervision.revision + 1,
+    phase,
+    workItems,
+    ...(isPendingRequest && retirementReason
+      ? {
+          humanRequest: {
+            ...humanRequest,
+            retirement: { reason: retirementReason, retiredAt: updatedAt },
+          },
+        }
+      : {}),
+    updatedAt,
+  };
 }
 
 function compareRunsNewestFirst(

@@ -9,6 +9,8 @@ export const TEAM_MAX_ROLES = 12;
 export const TEAM_MAX_WORKFLOW_STEPS = 24;
 export const TEAM_OBJECTIVE_MAX_CHARS = 32_000;
 export const TEAM_SECURITY_SUMMARY_MAX_CHARS = 240;
+export const TEAM_SUPERVISION_STATUS_MAX_CHARS = 64;
+export const TEAM_SUPERVISION_HUMAN_REQUEST_TITLE_MAX_CHARS = 256;
 
 export const TeamSecurityFactDtoSchema = z.object({
   status: z.enum(["enforced", "policy_only", "unavailable"]),
@@ -91,6 +93,27 @@ export const TeamRunPreviewDtoSchema = z.object({
   workspace: TeamRunWorkspaceDtoSchema,
   roles: z.array(TeamRunPreviewRoleDtoSchema),
   fingerprint: TeamRunPreviewFingerprintSchema,
+});
+
+export const TeamRunSupervisionStartDtoSchema = z.object({
+  supervisorRoleId: z.string(),
+});
+
+export const TeamRunSupervisionSummaryDtoSchema = z.object({
+  status: z.string().min(1).max(TEAM_SUPERVISION_STATUS_MAX_CHARS),
+  supervisorRoleId: z.string(),
+  supervisorAgentId: z.string(),
+  completedWorkItems: z.number().int().nonnegative(),
+  totalWorkItems: z.number().int().nonnegative(),
+  pendingHumanRequest: z
+    .object({
+      id: z.string(),
+      kind: z.string(),
+      title: z.string().min(1).max(TEAM_SUPERVISION_HUMAN_REQUEST_TITLE_MAX_CHARS),
+      revision: z.number().int().positive(),
+    })
+    .optional(),
+  updatedAt: z.string(),
 });
 
 export const TeamRunStepSnapshotDtoSchema = z.object({
@@ -260,6 +283,7 @@ export const TeamRunDtoSchema = z.object({
   assignmentSnapshot: AssignmentDtoSchema.optional(),
   workspace: TeamRunWorkspaceDtoSchema,
   steps: z.array(TeamRunStepDtoSchema),
+  supervision: TeamRunSupervisionSummaryDtoSchema.optional(),
   state: TeamRunStateDtoSchema,
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -268,6 +292,8 @@ export const TeamRunDtoSchema = z.object({
 export type TeamResolvedLaunchDto = z.infer<typeof TeamResolvedLaunchDtoSchema>;
 export type TeamRunPreviewDto = z.infer<typeof TeamRunPreviewDtoSchema>;
 export type TeamRunPreviewRoleDto = z.infer<typeof TeamRunPreviewRoleDtoSchema>;
+export type TeamRunSupervisionStartDto = z.infer<typeof TeamRunSupervisionStartDtoSchema>;
+export type TeamRunSupervisionSummaryDto = z.infer<typeof TeamRunSupervisionSummaryDtoSchema>;
 export type TeamSecurityFactDto = z.infer<typeof TeamSecurityFactDtoSchema>;
 export type TeamSecurityPostureDto = z.infer<typeof TeamSecurityPostureDtoSchema>;
 export type TeamRoleDto = z.infer<typeof TeamRoleDtoSchema>;

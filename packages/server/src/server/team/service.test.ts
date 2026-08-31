@@ -36,6 +36,8 @@ import {
   TeamRunServiceShuttingDownError,
   type TeamRunWorkspaceRegistry,
 } from "./service.js";
+import { TeamSupervisorRoleInvalidError } from "./supervision.js";
+import { toTeamRunDto } from "./wire.js";
 
 const timestamp = "2026-08-25T12:00:00.000Z";
 const firstAgentId = "00000000-0000-4000-8000-000000000401";
@@ -523,6 +525,98 @@ describe("TeamRunService", () => {
       workspaceId: "wks_team_service",
     });
   }
+
+  test("admits a dark supervised snapshot without launching the sequential executor", async () => {
+    const harness = await createHarness();
+    harness.daemonConfigStore.agentProfiles.push({
+      id: "profile_supervisor",
+      name: "Supervisor",
+      provider: "codex",
+      model: "gpt-5.6",
+      modeId: "workspace-write",
+      providerOptions: { sandbox_mode: "workspace-write", approval_policy: "never" },
+    });
+    const definition = await harness.repository.updateDefinition({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      patch: {
+        roles: [
+          ...harness.definition.roles,
+          {
+            id: "role_supervisor",
+            name: "Supervisor",
+            instructions: "Coordinate bounded work and escalate exceptions.",
+            profileId: "profile_supervisor",
+          },
+        ],
+      },
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Supervised service admission",
+      objective: "Freeze all launch facts before execution exists.",
+      workItem: null,
+    });
+    const input = {
+      teamId: definition.id,
+      expectedRevision: definition.revision,
+      idempotencyKey: "supervised-start-1",
+      assignmentId: assignment.id,
+      expectedAssignmentRevision: assignment.revision,
+      workspaceId: "wks_team_service",
+      supervisorRoleId: "role_supervisor",
+    };
+
+    const run = await harness.service.admitSupervisedAssignmentRun(input);
+
+    expect(run).toMatchObject({
+      steps: [],
+      state: { status: "queued" },
+      supervision: {
+        revision: 1,
+        phase: "queued",
+        supervisor: {
+          roleId: "role_supervisor",
+          agentId: firstAgentId,
+          resolvedLaunch: {
+            profileId: "profile_supervisor",
+            providerOptions: { sandbox_mode: "workspace-write", approval_policy: "never" },
+          },
+        },
+      },
+    });
+    expect(harness.runtime.creations).toEqual([]);
+    expect(toTeamRunDto(run).supervision).toEqual({
+      status: "queued",
+      supervisorRoleId: "role_supervisor",
+      supervisorAgentId: firstAgentId,
+      completedWorkItems: 0,
+      totalWorkItems: 0,
+      updatedAt: timestamp,
+    });
+    expect(JSON.stringify(toTeamRunDto(run))).not.toContain("sandbox_mode");
+    await expect(harness.service.admitSupervisedAssignmentRun(input)).resolves.toEqual(run);
+    await expect(
+      harness.service.admitSupervisedAssignmentRun({
+        ...input,
+        supervisorRoleId: "role_builder",
+      }),
+    ).rejects.toMatchObject({ code: "team_run_idempotency_conflict" });
+
+    const secondAssignment = await harness.assignments.createAssignment({
+      title: "Invalid supervisor role",
+      objective: "Do not let a worker role become the supervisor.",
+      workItem: null,
+    });
+    await expect(
+      harness.service.admitSupervisedAssignmentRun({
+        ...input,
+        idempotencyKey: "supervised-start-2",
+        assignmentId: secondAssignment.id,
+        expectedAssignmentRevision: secondAssignment.revision,
+        supervisorRoleId: "role_builder",
+      }),
+    ).rejects.toBeInstanceOf(TeamSupervisorRoleInvalidError);
+  });
 
   test("previews every role without exposing provider options and rejects stale admission", async () => {
     const harness = await createHarness();

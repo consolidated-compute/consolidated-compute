@@ -12,7 +12,12 @@ import {
   AssignmentRevisionConflictError,
   AssignmentStateConflictError,
 } from "../assignment/repository.js";
-import type { PersistedTeamDefinition, PersistedTeamRunRecord } from "./model.js";
+import {
+  PersistedTeamRunRecordSchema,
+  type PersistedTeamDefinition,
+  type PersistedTeamRunRecord,
+  type PersistedTeamRunSupervision,
+} from "./model.js";
 import {
   TEAM_RUN_PAGE_MAX_LIMIT,
   TeamRepository,
@@ -21,6 +26,8 @@ import {
   TeamRepositoryIdError,
   TeamRevisionConflictError,
   TeamRunIdempotencyConflictError,
+  TeamRunSupervisionActionConflictError,
+  TeamRunSupervisionRevisionConflictError,
   TeamRunPageError,
   TeamStorageCorruptError,
   TeamWorkspaceHasActiveRunError,
@@ -28,7 +35,10 @@ import {
   type CreateAssignmentTeamRunInput,
   type CreateTeamRunInput,
   type TeamRepositoryChange,
+  type TeamRunSupervisionDecision,
+  type TeamRunSupervisionUpdate,
 } from "./repository.js";
+import { toTeamRunDto } from "./wire.js";
 
 const firstTimestamp = "2026-08-25T12:00:00.000Z";
 const secondTimestamp = "2026-08-25T12:01:00.000Z";
@@ -51,6 +61,12 @@ function createDefinitionInput(): CreateTeamDefinitionInput {
         name: "Reviewer",
         instructions: "Review the implementation for correctness.",
         profileId: "profile_reviewer",
+      },
+      {
+        id: "role_supervisor",
+        name: "Supervisor",
+        instructions: "Coordinate bounded work and escalate exceptions.",
+        profileId: "profile_supervisor",
       },
     ],
     workflow: [
@@ -117,6 +133,159 @@ function createAssignmentRunInput(
     ...runInput,
     assignmentId: assignment.id,
     expectedAssignmentRevision: assignment.revision,
+  };
+}
+
+function createSupervision(definition: PersistedTeamDefinition): PersistedTeamRunSupervision {
+  const runInput = createRunInput(definition);
+  const supervisor = definition.roles.find((role) => role.id === "role_supervisor")!;
+  return {
+    revision: 1,
+    phase: "queued",
+    supervisor: {
+      roleId: supervisor.id,
+      roleName: supervisor.name,
+      roleInstructions: supervisor.instructions,
+      resolvedLaunch: {
+        profileId: supervisor.profileId,
+        provider: "codex",
+        model: "gpt-5.6",
+        modeId: "workspace-write",
+        thinkingOptionId: "high",
+        featureValues: {},
+      },
+      agentId: "0c783b8c-1bd7-4d79-863e-63a311742eef",
+    },
+    workerTemplates: runInput.steps.map((step) => step.snapshot),
+    limits: {
+      maxWorkItems: 24,
+      maxActiveWorkers: 1,
+      maxAttemptsPerWorkItem: 4,
+      maxSupervisorActions: 128,
+      maxDelegationDepth: 1,
+    },
+    workItems: [],
+    decisions: [],
+    humanRequest: null,
+    updatedAt: firstTimestamp,
+  };
+}
+
+function createSucceededSupervisorTurn(
+  run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  decisionId: string,
+  turn: number,
+  timestamp: string,
+): PersistedTeamRunRecord["steps"][number] {
+  return {
+    snapshot: {
+      stepId: `supervisor_turn_${turn}`,
+      roleId: run.supervision.supervisor.roleId,
+      roleName: run.supervision.supervisor.roleName,
+      roleInstructions: run.supervision.supervisor.roleInstructions,
+      stepInstructions: null,
+      resolvedLaunch: run.supervision.supervisor.resolvedLaunch,
+      supervision: {
+        kind: "supervisor",
+        turn,
+        decisionId,
+      },
+    },
+    state: {
+      status: "succeeded",
+      plannedAgentId: run.supervision.supervisor.agentId,
+      agentId: run.supervision.supervisor.agentId,
+      startedAt: timestamp,
+      endedAt: timestamp,
+    },
+  };
+}
+
+function createActiveSupervisorTurn(
+  run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  decisionId: string,
+  turn: number,
+  timestamp: string,
+  status: "creating" | "running",
+): PersistedTeamRunRecord["steps"][number] {
+  const succeeded = createSucceededSupervisorTurn(run, decisionId, turn, timestamp);
+  return {
+    ...succeeded,
+    state:
+      status === "creating"
+        ? {
+            status,
+            plannedAgentId: run.supervision.supervisor.agentId,
+            startedAt: timestamp,
+          }
+        : {
+            status,
+            plannedAgentId: run.supervision.supervisor.agentId,
+            agentId: run.supervision.supervisor.agentId,
+            startedAt: timestamp,
+          },
+  };
+}
+
+function createWorkerDispatchUpdate(
+  run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  decision: Extract<TeamRunSupervisionDecision, { kind: "dispatch" }>,
+  options: {
+    outputArtifactId: string;
+    phase: PersistedTeamRunSupervision["phase"];
+    workItemStatus: PersistedTeamRunSupervision["workItems"][number]["status"];
+  },
+): TeamRunSupervisionUpdate {
+  const template = run.supervision.workerTemplates[0]!;
+  return {
+    state: run.state,
+    steps: [
+      ...run.steps,
+      createSucceededSupervisorTurn(run, decision.id, decision.sequence, secondTimestamp),
+      {
+        snapshot: {
+          ...template,
+          stepId: `worker_${decision.attemptId}`,
+          inputArtifactIds: [],
+          outputArtifact: {
+            id: options.outputArtifactId,
+            kind: "team_step_output",
+            title: `${template.roleName} output`,
+            mediaType: "text/markdown",
+          },
+          supervision: {
+            kind: "worker",
+            workItemId: decision.workItemId,
+            attemptId: decision.attemptId,
+            attemptNumber: 1,
+            templateStepId: template.stepId,
+            revisionParentAttemptId: null,
+          },
+        },
+        state: {
+          status: "creating",
+          plannedAgentId: firstAgentId,
+          startedAt: secondTimestamp,
+        },
+      },
+    ],
+    supervision: {
+      ...run.supervision,
+      revision: run.supervision.revision + 1,
+      phase: options.phase,
+      workItems: [
+        {
+          id: decision.workItemId,
+          templateStepId: template.stepId,
+          inputArtifactIds: [],
+          attemptIds: [decision.attemptId],
+          acceptedAttemptId: null,
+          status: options.workItemStatus,
+        },
+      ],
+      decisions: [...run.supervision.decisions, decision],
+      updatedAt: secondTimestamp,
+    },
   };
 }
 
@@ -522,6 +691,1137 @@ describe("TeamRepository runs", () => {
       patch: { name: "Edited Team" },
     });
     await expect(repository.getRun(run.id)).resolves.toEqual(run);
+  });
+
+  test("durably admits a supervised Assignment without exposing it to the sequential executor", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const assignment = await assignments.createAssignment({
+      title: "Supervised Assignment",
+      objective: "Freeze supervised execution before any agent starts.",
+      workItem: null,
+    });
+    const sequentialInput = createAssignmentRunInput(definition, assignment);
+    const { steps: _steps, ...admission } = sequentialInput;
+    const run = await repository.createSupervisedAssignmentRun(
+      { ...admission, supervision: createSupervision(definition) },
+      assignments,
+    );
+
+    expect(run).toMatchObject({
+      assignmentId: assignment.id,
+      steps: [],
+      state: { status: "queued" },
+      supervision: {
+        revision: 1,
+        phase: "queued",
+        supervisor: {
+          roleId: "role_supervisor",
+          agentId: "0c783b8c-1bd7-4d79-863e-63a311742eef",
+        },
+        workItems: [],
+        decisions: [],
+      },
+    });
+    await expect(new TeamRepository({ paseoHome }).getRun(run.id)).resolves.toEqual(run);
+    await expect(
+      repository.createAssignmentRun(sequentialInput, assignments),
+    ).rejects.toBeInstanceOf(TeamRunIdempotencyConflictError);
+  });
+
+  test("commits supervisor decisions atomically with revision and action idempotency", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const assignment = await assignments.createAssignment({
+      title: "Durable supervisor decision",
+      objective: "Persist the decision before any later external effect.",
+      workItem: null,
+    });
+    const sequentialInput = createAssignmentRunInput(definition, assignment);
+    const { steps: _steps, ...admission } = sequentialInput;
+    const admitted = await repository.createSupervisedAssignmentRun(
+      { ...admission, supervision: createSupervision(definition) },
+      assignments,
+    );
+    currentTimestamp = secondTimestamp;
+    const decision = {
+      id: "decision_plan_1",
+      sequence: 1,
+      actionId: "action_plan_1",
+      kind: "plan" as const,
+      summary: "Accept the bounded workflow templates.",
+      workItemId: null,
+      attemptId: null,
+      createdAt: secondTimestamp,
+    };
+    const committed = await repository.commitSupervisionDecision(
+      {
+        runId: admitted.id,
+        expectedSupervisionRevision: 1,
+        decision,
+      },
+      (current) => ({
+        state: { status: "running", startedAt: secondTimestamp },
+        steps: [
+          {
+            snapshot: {
+              stepId: "supervisor_turn_1",
+              roleId: current.supervision.supervisor.roleId,
+              roleName: current.supervision.supervisor.roleName,
+              roleInstructions: current.supervision.supervisor.roleInstructions,
+              stepInstructions: null,
+              resolvedLaunch: current.supervision.supervisor.resolvedLaunch,
+              supervision: {
+                kind: "supervisor",
+                turn: 1,
+                decisionId: decision.id,
+              },
+            },
+            state: {
+              status: "succeeded",
+              plannedAgentId: current.supervision.supervisor.agentId,
+              agentId: current.supervision.supervisor.agentId,
+              startedAt: secondTimestamp,
+              endedAt: secondTimestamp,
+            },
+          },
+        ],
+        supervision: {
+          ...current.supervision,
+          revision: 2,
+          phase: "planning",
+          decisions: [decision],
+        },
+      }),
+    );
+
+    expect(committed).toMatchObject({
+      state: { status: "running" },
+      supervision: { revision: 2, decisions: [decision], updatedAt: secondTimestamp },
+      updatedAt: secondTimestamp,
+    });
+    const repeated = await repository.commitSupervisionDecision(
+      {
+        runId: admitted.id,
+        expectedSupervisionRevision: 1,
+        decision,
+      },
+      () => {
+        throw new Error("Idempotent retry must not invoke the updater");
+      },
+    );
+    expect(repeated).toEqual(committed);
+
+    const mutationDecision = {
+      ...decision,
+      id: "decision_dispatch_2",
+      sequence: 2,
+      actionId: "action_dispatch_2",
+      kind: "plan" as const,
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: mutationDecision,
+        },
+        (current) => {
+          current.supervision.supervisor.roleName = "Mutated supervisor";
+          return {
+            state: current.state,
+            steps: current.steps,
+            supervision: {
+              ...current.supervision,
+              revision: 3,
+              decisions: [...current.supervision.decisions, mutationDecision],
+              updatedAt: secondTimestamp,
+            },
+          };
+        },
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    await expect(repository.getRun(admitted.id)).resolves.toEqual(committed);
+
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: { ...decision, summary: "Conflicting action payload." },
+        },
+        () => {
+          throw new Error("Conflicting action must not invoke the updater");
+        },
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 1,
+          decision: {
+            ...decision,
+            id: "decision_dispatch_2",
+            sequence: 2,
+            actionId: "action_dispatch_2",
+            kind: "plan",
+          },
+        },
+        () => {
+          throw new Error("Stale revision must not invoke the updater");
+        },
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionRevisionConflictError);
+
+    const inactiveWorkItemDispatch = {
+      ...decision,
+      id: "decision_dispatch_inactive_work_2",
+      sequence: 2,
+      actionId: "action_dispatch_inactive_work_2",
+      kind: "dispatch" as const,
+      summary: "Dispatch one bounded worker attempt.",
+      workItemId: "work_inactive_dispatch",
+      attemptId: "attempt_inactive_dispatch",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: inactiveWorkItemDispatch,
+        },
+        (current) =>
+          createWorkerDispatchUpdate(current, inactiveWorkItemDispatch, {
+            outputArtifactId: "aart_4444444444444444",
+            phase: "working",
+            workItemStatus: "planned",
+          }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    await expect(repository.getRun(admitted.id)).resolves.toEqual(committed);
+
+    const planningPhaseDispatch = {
+      ...inactiveWorkItemDispatch,
+      id: "decision_dispatch_planning_phase_2",
+      actionId: "action_dispatch_planning_phase_2",
+      workItemId: "work_planning_phase_dispatch",
+      attemptId: "attempt_planning_phase_dispatch",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: planningPhaseDispatch,
+        },
+        (current) =>
+          createWorkerDispatchUpdate(current, planningPhaseDispatch, {
+            outputArtifactId: "aart_5555555555555555",
+            phase: "planning",
+            workItemStatus: "active",
+          }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+
+    const artifactOwnerAssignment = await assignments.createAssignment({
+      title: "Reserved supervised output",
+      objective: "Reserve an output Artifact ID in another Team Run.",
+      workItem: null,
+    });
+    const artifactOwnerRun = await repository.createAssignmentRun(
+      createAssignmentRunInput(
+        definition,
+        artifactOwnerAssignment,
+        "reserved-supervised-output",
+        "wks_reserved_output_01",
+      ),
+      assignments,
+    );
+    const reservedOutputArtifactId = artifactOwnerRun.steps[0]!.snapshot.outputArtifact!.id;
+    const collidingOutputDispatch = {
+      ...inactiveWorkItemDispatch,
+      id: "decision_dispatch_reserved_output_2",
+      actionId: "action_dispatch_reserved_output_2",
+      workItemId: "work_reserved_output_dispatch",
+      attemptId: "attempt_reserved_output_dispatch",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: collidingOutputDispatch,
+        },
+        (current) =>
+          createWorkerDispatchUpdate(current, collidingOutputDispatch, {
+            outputArtifactId: reservedOutputArtifactId,
+            phase: "working",
+            workItemStatus: "active",
+          }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    await expect(repository.getRun(admitted.id)).resolves.toEqual(committed);
+
+    const stateRewriteDecision = {
+      ...decision,
+      id: "decision_rewrite_run_state_2",
+      sequence: 2,
+      actionId: "action_rewrite_run_state_2",
+      summary: "Preserve the existing outer run provenance.",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: stateRewriteDecision,
+        },
+        (current) => ({
+          state: { status: "running", startedAt: firstTimestamp },
+          steps: [
+            ...current.steps,
+            createSucceededSupervisorTurn(current, stateRewriteDecision.id, 2, secondTimestamp),
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 3,
+            decisions: [...current.supervision.decisions, stateRewriteDecision],
+            updatedAt: secondTimestamp,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+
+    const transitionRewriteDecision = {
+      ...decision,
+      id: "decision_rewrite_run_transition_2",
+      sequence: 2,
+      actionId: "action_rewrite_run_transition_2",
+      kind: "complete" as const,
+      summary: "Complete without rewriting the run start time.",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: transitionRewriteDecision,
+        },
+        (current) => ({
+          state: {
+            status: "succeeded",
+            startedAt: firstTimestamp,
+            endedAt: secondTimestamp,
+          },
+          steps: [
+            ...current.steps,
+            createSucceededSupervisorTurn(
+              current,
+              transitionRewriteDecision.id,
+              2,
+              secondTimestamp,
+            ),
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 3,
+            phase: "completed",
+            decisions: [...current.supervision.decisions, transitionRewriteDecision],
+            updatedAt: secondTimestamp,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+
+    const unauthorizedCompletionDecision = {
+      ...decision,
+      id: "decision_unauthorized_completion_2",
+      sequence: 2,
+      actionId: "action_unauthorized_completion_2",
+      summary: "A plan must not authorize successful terminalization.",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: unauthorizedCompletionDecision,
+        },
+        (current) => ({
+          state: {
+            status: "succeeded",
+            startedAt: secondTimestamp,
+            endedAt: secondTimestamp,
+          },
+          steps: [
+            ...current.steps,
+            createSucceededSupervisorTurn(
+              current,
+              unauthorizedCompletionDecision.id,
+              2,
+              secondTimestamp,
+            ),
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 3,
+            phase: "completed",
+            decisions: [...current.supervision.decisions, unauthorizedCompletionDecision],
+            updatedAt: secondTimestamp,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+
+    const incompleteEscalationDecision = {
+      ...decision,
+      id: "decision_incomplete_escalation_2",
+      sequence: 2,
+      actionId: "action_incomplete_escalation_2",
+      kind: "escalate" as const,
+      summary: "Request a human decision.",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: incompleteEscalationDecision,
+        },
+        (current) => ({
+          state: current.state,
+          steps: [
+            ...current.steps,
+            createSucceededSupervisorTurn(
+              current,
+              incompleteEscalationDecision.id,
+              2,
+              secondTimestamp,
+            ),
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 3,
+            decisions: [...current.supervision.decisions, incompleteEscalationDecision],
+            updatedAt: secondTimestamp,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+
+    const unauthorizedHumanWaitDecision = {
+      ...decision,
+      id: "decision_unauthorized_human_wait_2",
+      sequence: 2,
+      actionId: "action_unauthorized_human_wait_2",
+      summary: "A plan must not create a pending human wait.",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: unauthorizedHumanWaitDecision,
+        },
+        (current) => ({
+          state: current.state,
+          steps: [
+            ...current.steps,
+            createSucceededSupervisorTurn(
+              current,
+              unauthorizedHumanWaitDecision.id,
+              2,
+              secondTimestamp,
+            ),
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 3,
+            phase: "awaiting_human",
+            decisions: [...current.supervision.decisions, unauthorizedHumanWaitDecision],
+            humanRequest: {
+              id: "human_unauthorized_wait",
+              revision: 1,
+              kind: "approval",
+              title: "Choose the next action",
+              detail: "Resume with the selected bounded action.",
+              actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+              roleIds: [current.supervision.supervisor.roleId],
+              agentIds: [current.supervision.supervisor.agentId],
+              stepIds: [],
+              artifactIds: [],
+              createdAt: secondTimestamp,
+            },
+            updatedAt: secondTimestamp,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    await expect(repository.getRun(admitted.id)).resolves.toEqual(committed);
+
+    const escalationDecision = {
+      ...decision,
+      id: "decision_escalate_2",
+      sequence: 2,
+      actionId: "action_escalate_2",
+      kind: "escalate" as const,
+      summary: "Ask the human to choose the bounded next action.",
+    };
+    for (const status of ["creating", "running"] as const) {
+      const activeSupervisorEscalation = {
+        ...escalationDecision,
+        id: `decision_escalate_active_supervisor_${status}`,
+        actionId: `action_escalate_active_supervisor_${status}`,
+      };
+      await expect(
+        repository.commitSupervisionDecision(
+          {
+            runId: admitted.id,
+            expectedSupervisionRevision: 2,
+            decision: activeSupervisorEscalation,
+          },
+          (current) => ({
+            state: current.state,
+            steps: [
+              ...current.steps,
+              createSucceededSupervisorTurn(
+                current,
+                activeSupervisorEscalation.id,
+                2,
+                secondTimestamp,
+              ),
+              createActiveSupervisorTurn(
+                current,
+                activeSupervisorEscalation.id,
+                3,
+                secondTimestamp,
+                status,
+              ),
+            ],
+            supervision: {
+              ...current.supervision,
+              revision: 3,
+              phase: "awaiting_human",
+              decisions: [...current.supervision.decisions, activeSupervisorEscalation],
+              humanRequest: {
+                id: `human_active_supervisor_${status}`,
+                revision: 1,
+                kind: "approval",
+                title: "Choose the next action",
+                detail: "No agent work may continue while the run waits for a human.",
+                actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+                roleIds: [current.supervision.supervisor.roleId],
+                agentIds: [current.supervision.supervisor.agentId],
+                stepIds: [],
+                artifactIds: [],
+                createdAt: secondTimestamp,
+              },
+              updatedAt: secondTimestamp,
+            },
+          }),
+        ),
+      ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+      await expect(repository.getRun(admitted.id)).resolves.toEqual(committed);
+    }
+    const awaitingHuman = await repository.commitSupervisionDecision(
+      {
+        runId: admitted.id,
+        expectedSupervisionRevision: 2,
+        decision: escalationDecision,
+      },
+      (current) => ({
+        state: current.state,
+        steps: [
+          ...current.steps,
+          {
+            snapshot: {
+              stepId: "supervisor_turn_2",
+              roleId: current.supervision.supervisor.roleId,
+              roleName: current.supervision.supervisor.roleName,
+              roleInstructions: current.supervision.supervisor.roleInstructions,
+              stepInstructions: null,
+              resolvedLaunch: current.supervision.supervisor.resolvedLaunch,
+              supervision: {
+                kind: "supervisor",
+                turn: 2,
+                decisionId: escalationDecision.id,
+              },
+            },
+            state: {
+              status: "succeeded",
+              plannedAgentId: current.supervision.supervisor.agentId,
+              agentId: current.supervision.supervisor.agentId,
+              startedAt: secondTimestamp,
+              endedAt: secondTimestamp,
+            },
+          },
+        ],
+        supervision: {
+          ...current.supervision,
+          revision: 3,
+          phase: "awaiting_human",
+          decisions: [...current.supervision.decisions, escalationDecision],
+          workItems: [
+            {
+              id: "work_pending_review",
+              templateStepId: current.supervision.workerTemplates[0]!.stepId,
+              inputArtifactIds: [],
+              attemptIds: [],
+              acceptedAttemptId: null,
+              status: "planned",
+            },
+          ],
+          humanRequest: {
+            id: "human_review_1",
+            revision: 1,
+            kind: "approval",
+            title: "Choose the next action",
+            detail: "Select one frozen action before the run continues.",
+            actions: [
+              { id: "continue", label: "Continue", requiresNote: false },
+              { id: "cancel", label: "Cancel", requiresNote: false },
+            ],
+            roleIds: [current.supervision.supervisor.roleId],
+            agentIds: [current.supervision.supervisor.agentId],
+            stepIds: [],
+            artifactIds: [],
+            createdAt: secondTimestamp,
+          },
+          updatedAt: secondTimestamp,
+        },
+      }),
+    );
+    expect(awaitingHuman.supervision?.phase).toBe("awaiting_human");
+    expect(awaitingHuman.supervision?.humanRequest).not.toHaveProperty("retirement");
+
+    const decisionDuringHumanWait = {
+      ...decision,
+      id: "decision_during_human_wait",
+      sequence: 3,
+      actionId: "action_during_human_wait",
+      summary: "This action must wait for the human response.",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: awaitingHuman.supervision!.revision,
+          decision: decisionDuringHumanWait,
+        },
+        () => {
+          throw new Error("A human-waiting run must not invoke the updater for a new action");
+        },
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+
+    const canceled = await repository.updateRun(admitted.id, (current) => ({
+      steps: current.steps,
+      state: {
+        status: "canceled",
+        startedAt: secondTimestamp,
+        endedAt: secondTimestamp,
+      },
+    }));
+
+    expect(canceled.supervision).toMatchObject({
+      revision: 4,
+      phase: "canceled",
+      workItems: [{ id: "work_pending_review", status: "canceled" }],
+      humanRequest: {
+        id: "human_review_1",
+        retirement: { reason: "canceled", retiredAt: secondTimestamp },
+      },
+    });
+    expect(toTeamRunDto(canceled).supervision).not.toHaveProperty("pendingHumanRequest");
+    await expect(repository.getActiveRunForAssignment(assignment.id)).resolves.toBeNull();
+
+    const postTerminalChanges: TeamRepositoryChange[] = [];
+    const unsubscribe = repository.subscribe((change) => postTerminalChanges.push(change));
+    currentTimestamp = "2026-08-25T12:02:00.000Z";
+    const unchangedAfterCancellation = await repository.updateRun(admitted.id, (current) => ({
+      steps: current.steps,
+      state: current.state,
+    }));
+    unsubscribe();
+    expect(unchangedAfterCancellation).toEqual(canceled);
+    expect(postTerminalChanges).toEqual([]);
+
+    const repeatedAfterCancellation = await repository.commitSupervisionDecision(
+      {
+        runId: admitted.id,
+        expectedSupervisionRevision: 2,
+        decision: escalationDecision,
+      },
+      () => {
+        throw new Error("A terminal idempotent retry must not invoke the updater");
+      },
+    );
+    expect(repeatedAfterCancellation).toEqual(canceled);
+
+    const postCancellationDecision = {
+      ...decision,
+      id: "decision_dispatch_after_cancel",
+      sequence: 3,
+      actionId: "action_dispatch_after_cancel",
+      kind: "plan" as const,
+      summary: "This action must not be committed after cancellation.",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: canceled.supervision!.revision,
+          decision: postCancellationDecision,
+        },
+        () => {
+          throw new Error("A terminal run must not invoke the updater for a new action");
+        },
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    await expect(repository.getRun(admitted.id)).resolves.toEqual(canceled);
+  });
+
+  test("preserves planned work and settled human evidence across decisions", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const assignment = await assignments.createAssignment({
+      title: "Durable supervision evidence",
+      objective: "Keep planned work and human decisions in the run ledger.",
+      workItem: null,
+    });
+    const sequentialInput = createAssignmentRunInput(
+      definition,
+      assignment,
+      "durable-supervision-evidence",
+    );
+    const { steps: _steps, ...admission } = sequentialInput;
+    const admitted = await repository.createSupervisedAssignmentRun(
+      { ...admission, supervision: createSupervision(definition) },
+      assignments,
+    );
+    currentTimestamp = secondTimestamp;
+    const plannedWorkItemId = "work_preserved_plan";
+    const escalationDecision = {
+      id: "decision_preserve_evidence_1",
+      sequence: 1,
+      actionId: "action_preserve_evidence_1",
+      kind: "escalate" as const,
+      summary: "Ask the human before continuing planned work.",
+      workItemId: plannedWorkItemId,
+      attemptId: null,
+      createdAt: secondTimestamp,
+    };
+    const awaitingHuman = await repository.commitSupervisionDecision(
+      {
+        runId: admitted.id,
+        expectedSupervisionRevision: 1,
+        decision: escalationDecision,
+      },
+      (current) => ({
+        state: { status: "running", startedAt: secondTimestamp },
+        steps: [createSucceededSupervisorTurn(current, escalationDecision.id, 1, secondTimestamp)],
+        supervision: {
+          ...current.supervision,
+          revision: 2,
+          phase: "awaiting_human",
+          workItems: [
+            {
+              id: plannedWorkItemId,
+              templateStepId: current.supervision.workerTemplates[0]!.stepId,
+              inputArtifactIds: [],
+              attemptIds: [],
+              acceptedAttemptId: null,
+              status: "planned",
+            },
+          ],
+          decisions: [escalationDecision],
+          humanRequest: {
+            id: "human_preserved_evidence",
+            revision: 1,
+            kind: "approval",
+            title: "Choose the next action",
+            detail: "Resume with the selected bounded action.",
+            actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+            roleIds: [current.supervision.supervisor.roleId],
+            agentIds: [current.supervision.supervisor.agentId],
+            stepIds: [],
+            artifactIds: [],
+            createdAt: secondTimestamp,
+          },
+          updatedAt: secondTimestamp,
+        },
+      }),
+    );
+    const resolved = PersistedTeamRunRecordSchema.parse({
+      ...awaitingHuman,
+      supervision: {
+        ...awaitingHuman.supervision!,
+        revision: 3,
+        phase: "planning",
+        humanRequest: {
+          ...awaitingHuman.supervision!.humanRequest!,
+          resolution: {
+            actionId: "continue",
+            note: null,
+            idempotencyKey: "resolve-preserved-evidence",
+            resolvedAt: secondTimestamp,
+          },
+        },
+        updatedAt: secondTimestamp,
+      },
+    });
+    await writeJsonFileAtomic(join(paseoHome, "teams", "runs", `${admitted.id}.json`), resolved);
+
+    const eraseWorkDecision = {
+      id: "decision_erase_work_2",
+      sequence: 2,
+      actionId: "action_erase_work_2",
+      kind: "complete" as const,
+      summary: "This must not erase unfinished planned work.",
+      workItemId: null,
+      attemptId: null,
+      createdAt: secondTimestamp,
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 3,
+          decision: eraseWorkDecision,
+        },
+        (current) => ({
+          state: {
+            status: "succeeded",
+            startedAt: secondTimestamp,
+            endedAt: secondTimestamp,
+          },
+          steps: [
+            ...current.steps,
+            createSucceededSupervisorTurn(current, eraseWorkDecision.id, 2, secondTimestamp),
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 4,
+            phase: "completed",
+            workItems: [],
+            decisions: [...current.supervision.decisions, eraseWorkDecision],
+            updatedAt: secondTimestamp,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+
+    const eraseHumanDecision = {
+      id: "decision_erase_human_2",
+      sequence: 2,
+      actionId: "action_erase_human_2",
+      kind: "plan" as const,
+      summary: "This must not erase settled human evidence.",
+      workItemId: null,
+      attemptId: null,
+      createdAt: secondTimestamp,
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 3,
+          decision: eraseHumanDecision,
+        },
+        (current) => ({
+          state: current.state,
+          steps: [
+            ...current.steps,
+            createSucceededSupervisorTurn(current, eraseHumanDecision.id, 2, secondTimestamp),
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 4,
+            humanRequest: null,
+            decisions: [...current.supervision.decisions, eraseHumanDecision],
+            updatedAt: secondTimestamp,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    await expect(repository.getRun(admitted.id)).resolves.toEqual(resolved);
+  });
+
+  test("rejects replay or rewrite of terminal worker history during a decision", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const assignment = await assignments.createAssignment({
+      title: "Terminal worker history",
+      objective: "Never reopen a completed attempt.",
+      workItem: null,
+    });
+    const sequentialInput = createAssignmentRunInput(
+      definition,
+      assignment,
+      "terminal-worker-history",
+    );
+    const { steps: _steps, ...admission } = sequentialInput;
+    const admitted = await repository.createSupervisedAssignmentRun(
+      { ...admission, supervision: createSupervision(definition) },
+      assignments,
+    );
+    const workItemId = "work_terminal_attempt";
+    const attemptId = "attempt_terminal_1";
+    const dispatchDecision = {
+      id: "decision_dispatch_terminal",
+      sequence: 1,
+      actionId: "action_dispatch_terminal",
+      kind: "dispatch" as const,
+      summary: "Dispatch the bounded worker attempt.",
+      workItemId,
+      attemptId,
+      createdAt: secondTimestamp,
+    };
+    currentTimestamp = secondTimestamp;
+    const creating = await repository.commitSupervisionDecision(
+      {
+        runId: admitted.id,
+        expectedSupervisionRevision: 1,
+        decision: dispatchDecision,
+      },
+      (current) => {
+        const template = current.supervision.workerTemplates[0]!;
+        return {
+          state: { status: "running", startedAt: secondTimestamp },
+          steps: [
+            {
+              snapshot: {
+                stepId: "supervisor_turn_terminal_1",
+                roleId: current.supervision.supervisor.roleId,
+                roleName: current.supervision.supervisor.roleName,
+                roleInstructions: current.supervision.supervisor.roleInstructions,
+                stepInstructions: null,
+                resolvedLaunch: current.supervision.supervisor.resolvedLaunch,
+                supervision: {
+                  kind: "supervisor",
+                  turn: 1,
+                  decisionId: dispatchDecision.id,
+                },
+              },
+              state: {
+                status: "succeeded",
+                plannedAgentId: current.supervision.supervisor.agentId,
+                agentId: current.supervision.supervisor.agentId,
+                startedAt: secondTimestamp,
+                endedAt: secondTimestamp,
+              },
+            },
+            {
+              snapshot: {
+                ...template,
+                stepId: "worker_terminal_attempt_1",
+                inputArtifactIds: [],
+                outputArtifact: {
+                  id: "aart_3333333333333333",
+                  kind: "team_step_output",
+                  title: `${template.roleName} output`,
+                  mediaType: "text/markdown",
+                },
+                supervision: {
+                  kind: "worker",
+                  workItemId,
+                  attemptId,
+                  attemptNumber: 1,
+                  templateStepId: template.stepId,
+                  revisionParentAttemptId: null,
+                },
+              },
+              state: {
+                status: "creating",
+                plannedAgentId: firstAgentId,
+                startedAt: secondTimestamp,
+              },
+            },
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 2,
+            phase: "working",
+            workItems: [
+              {
+                id: workItemId,
+                templateStepId: template.stepId,
+                inputArtifactIds: [],
+                attemptIds: [attemptId],
+                acceptedAttemptId: null,
+                status: "active",
+              },
+            ],
+            decisions: [dispatchDecision],
+            updatedAt: secondTimestamp,
+          },
+        };
+      },
+    );
+    const failedSteps: PersistedTeamRunRecord["steps"] = [];
+    for (const step of creating.steps) {
+      failedSteps.push(
+        step.snapshot.supervision?.kind === "worker"
+          ? {
+              ...step,
+              state: {
+                status: "failed",
+                plannedAgentId: firstAgentId,
+                agentId: firstAgentId,
+                startedAt: secondTimestamp,
+                endedAt: secondTimestamp,
+                error: "Worker failed.",
+              },
+            }
+          : step,
+      );
+    }
+    const failedWorkItems: PersistedTeamRunSupervision["workItems"] = [];
+    for (const workItem of creating.supervision!.workItems) {
+      failedWorkItems.push({ ...workItem, status: "failed" });
+    }
+    const failed = PersistedTeamRunRecordSchema.parse({
+      ...creating,
+      steps: failedSteps,
+      supervision: {
+        ...creating.supervision!,
+        workItems: failedWorkItems,
+      },
+    });
+    await writeJsonFileAtomic(join(paseoHome, "teams", "runs", `${admitted.id}.json`), failed);
+    const redispatchDecision = {
+      ...dispatchDecision,
+      id: "decision_redispatch_terminal",
+      sequence: 2,
+      actionId: "action_redispatch_terminal",
+      summary: "This decision must not redispatch a terminal attempt.",
+    };
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: redispatchDecision,
+        },
+        (current) => ({
+          state: current.state,
+          steps: [
+            ...current.steps,
+            {
+              snapshot: {
+                stepId: "supervisor_turn_redispatch_2",
+                roleId: current.supervision.supervisor.roleId,
+                roleName: current.supervision.supervisor.roleName,
+                roleInstructions: current.supervision.supervisor.roleInstructions,
+                stepInstructions: null,
+                resolvedLaunch: current.supervision.supervisor.resolvedLaunch,
+                supervision: {
+                  kind: "supervisor",
+                  turn: 2,
+                  decisionId: redispatchDecision.id,
+                },
+              },
+              state: {
+                status: "succeeded",
+                plannedAgentId: current.supervision.supervisor.agentId,
+                agentId: current.supervision.supervisor.agentId,
+                startedAt: secondTimestamp,
+                endedAt: secondTimestamp,
+              },
+            },
+          ],
+          supervision: {
+            ...current.supervision,
+            revision: 3,
+            decisions: [...current.supervision.decisions, redispatchDecision],
+            updatedAt: secondTimestamp,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+
+    const replayDecision = {
+      id: "decision_replay_terminal",
+      sequence: 2,
+      actionId: "action_replay_terminal",
+      kind: "plan" as const,
+      summary: "This decision must not reopen terminal history.",
+      workItemId: null,
+      attemptId: null,
+      createdAt: secondTimestamp,
+    };
+
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: 2,
+          decision: replayDecision,
+        },
+        (current) => {
+          const replayedSteps: PersistedTeamRunRecord["steps"] = [];
+          for (const step of current.steps) {
+            replayedSteps.push(
+              step.snapshot.supervision?.kind === "worker" && step.state.status === "failed"
+                ? {
+                    ...step,
+                    state: {
+                      ...step.state,
+                      error: "Rewritten worker failure.",
+                    },
+                  }
+                : step,
+            );
+          }
+          replayedSteps.push({
+            snapshot: {
+              stepId: "supervisor_turn_terminal_2",
+              roleId: current.supervision.supervisor.roleId,
+              roleName: current.supervision.supervisor.roleName,
+              roleInstructions: current.supervision.supervisor.roleInstructions,
+              stepInstructions: null,
+              resolvedLaunch: current.supervision.supervisor.resolvedLaunch,
+              supervision: {
+                kind: "supervisor",
+                turn: 2,
+                decisionId: replayDecision.id,
+              },
+            },
+            state: {
+              status: "succeeded",
+              plannedAgentId: current.supervision.supervisor.agentId,
+              agentId: current.supervision.supervisor.agentId,
+              startedAt: secondTimestamp,
+              endedAt: secondTimestamp,
+            },
+          });
+          return {
+            state: current.state,
+            steps: replayedSteps,
+            supervision: {
+              ...current.supervision,
+              revision: 3,
+              decisions: [...current.supervision.decisions, replayDecision],
+              updatedAt: secondTimestamp,
+            },
+          };
+        },
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    await expect(repository.getRun(admitted.id)).resolves.toEqual(failed);
   });
 
   test("rejects missing, stale, and terminal Assignments before creating a run", async () => {
