@@ -642,6 +642,69 @@ describe("Team Run contract", () => {
     );
   });
 
+  test("rejects uncreated planned agents as human-request evidence", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const workerStep = run.steps.findLast((step) => step.snapshot.supervision?.kind === "worker")!;
+    const metadata = workerStep.snapshot.supervision!;
+    if (metadata.kind !== "worker") throw new Error("Expected a worker attempt");
+    const plannedAgentId = workerStep.state.plannedAgentId!;
+    workerStep.state = {
+      status: "interrupted",
+      plannedAgentId,
+      agentId: null,
+      startedAt: timestamp,
+      endedAt: timestamp,
+      error: "Daemon stopped before agent creation.",
+    };
+    const workItem = run.supervision!.workItems.find((item) => item.id === metadata.workItemId)!;
+    workItem.status = "failed";
+    workItem.acceptedAttemptId = null;
+    const escalation = {
+      id: "decision_escalate_uncreated_agent",
+      sequence: 4,
+      actionId: "action_escalate_uncreated_agent",
+      kind: "escalate" as const,
+      summary: "Report the interrupted creation attempt.",
+      workItemId: null,
+      attemptId: null,
+      createdAt: timestamp,
+    };
+    run.steps.push(createSupervisorTurn(run, 4, escalation.id));
+    run.supervision = {
+      ...run.supervision!,
+      revision: 5,
+      phase: "awaiting_human",
+      decisions: [...run.supervision!.decisions, escalation],
+      humanRequest: {
+        id: "human_uncreated_agent_evidence",
+        revision: 1,
+        kind: "approval",
+        title: "Review the interrupted attempt",
+        detail: "Only an agent that was actually created may be cited as evidence.",
+        actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+        roleIds: [],
+        agentIds: [plannedAgentId],
+        stepIds: [],
+        artifactIds: [],
+        createdAt: timestamp,
+      },
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path)).toContainEqual([
+      "supervision",
+      "humanRequest",
+      "agentIds",
+      0,
+    ]);
+
+    run.supervision.humanRequest!.agentIds = [run.supervision.supervisor.agentId];
+    expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
+  });
+
   test("rejects unmaterialized attempt outputs as human-request evidence", () => {
     const run = createSupervisedRunWithWorkerAttempts();
     const workerStep = run.steps.findLast((step) => step.snapshot.supervision?.kind === "worker")!;

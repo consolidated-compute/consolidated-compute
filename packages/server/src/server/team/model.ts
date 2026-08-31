@@ -1289,7 +1289,6 @@ function validateSupervisionHumanRequest(run: TeamRunRecordShape): ContractIssue
   const validArtifactIds = new Set<string>();
   for (const step of run.steps) {
     validStepIds.add(step.snapshot.stepId);
-    if ("plannedAgentId" in step.state) validAgentIds.add(step.state.plannedAgentId);
     if ("agentId" in step.state && step.state.agentId) validAgentIds.add(step.state.agentId);
     if (step.state.status === "succeeded" && step.snapshot.outputArtifact) {
       validArtifactIds.add(step.snapshot.outputArtifact.id);

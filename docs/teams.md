@@ -54,8 +54,8 @@ workflow as worker templates, every resolved launch, the planned supervisor agen
 work, attempt, action, fan-out, and delegation limits. Dynamic worker attempts belong in the run
 step ledger and preserve their template's role, launch, and step instructions. Normalized decisions
 and exact Artifact references belong in the optional supervision ledger. Work Item inputs contain
-unique accepted Artifact IDs. Human requests may cite only output
-Artifacts from succeeded steps; a preallocated output ID is not evidence. Every durable decision
+unique accepted Artifact IDs. Human requests may cite only created agents and output Artifacts from
+succeeded steps; planned agent IDs and preallocated output IDs are not evidence. Every durable decision
 belongs to exactly one succeeded supervisor turn. Supervisor turns own decisions, never output
 Artifact descriptors. Repository commands append decisions with revision and action idempotency
 checks before an executor performs external work. Dispatch and revision decisions name one exact work
