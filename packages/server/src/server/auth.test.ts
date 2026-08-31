@@ -10,6 +10,7 @@ import {
   isBearerTokenValid,
   shouldBypassBearerAuth,
 } from "./auth.js";
+import { createAgentMcpCapabilityToken } from "./agent/runtime-mcp-config.js";
 
 const CORRECT_PASSWORD_HASH = "$2b$12$OLxyuuP9uLK30Uzc4wQX0O6liuU/Q1t5P2b0Ebf36mULvpVK3DRZW";
 
@@ -82,6 +83,46 @@ describe("agent MCP request authorizer", () => {
         authorizationHeader: undefined,
       }),
     ).toBe(true);
+  });
+
+  test("requires an agent-bound capability even when no daemon password is configured", async () => {
+    expect(
+      await isAgentMcpRequestAuthorized({
+        password: undefined,
+        capabilityToken: CAPABILITY_TOKEN,
+        authorizationHeader: undefined,
+        requireCapabilityToken: true,
+      }),
+    ).toBe(false);
+    expect(
+      await isAgentMcpRequestAuthorized({
+        password: undefined,
+        capabilityToken: CAPABILITY_TOKEN,
+        authorizationHeader: `Bearer ${CAPABILITY_TOKEN}`,
+        requireCapabilityToken: true,
+      }),
+    ).toBe(true);
+  });
+
+  test("rejects an agent capability presented for another or missing caller identity", async () => {
+    const firstAgentToken = createAgentMcpCapabilityToken(CAPABILITY_TOKEN, "agent-1");
+
+    expect(
+      await isAgentMcpRequestAuthorized({
+        password: undefined,
+        capabilityToken: createAgentMcpCapabilityToken(CAPABILITY_TOKEN, "agent-2"),
+        authorizationHeader: `Bearer ${firstAgentToken}`,
+        requireCapabilityToken: true,
+      }),
+    ).toBe(false);
+    expect(
+      await isAgentMcpRequestAuthorized({
+        password: undefined,
+        capabilityToken: CAPABILITY_TOKEN,
+        authorizationHeader: `Bearer ${firstAgentToken}`,
+        requireCapabilityToken: true,
+      }),
+    ).toBe(false);
   });
 
   test("accepts the injected capability token", async () => {

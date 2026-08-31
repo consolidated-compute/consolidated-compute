@@ -33,7 +33,7 @@ describe("Codex Agent Profile security controls", () => {
         exclude_tmpdir_env_var: true,
       },
       web_search: "disabled",
-      features: { network_proxy: false },
+      features: { network_proxy: false, multi_agent_v2: false },
     });
   });
 });

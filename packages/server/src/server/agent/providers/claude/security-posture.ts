@@ -4,6 +4,7 @@ import type {
   ProviderSecurityPosture,
   ProviderSecurityPostureInput,
 } from "../../provider-security-posture.js";
+import { ClaudeProviderOptionsSchema } from "./options.js";
 
 const FILESYSTEM_UNAVAILABLE: TeamSecurityFactDto = {
   status: "unavailable",
@@ -24,11 +25,27 @@ const TOOL_POLICY_SUMMARIES: Record<string, string> = {
 export function projectClaudeSecurityPosture(
   input: ProviderSecurityPostureInput,
 ): ProviderSecurityPosture {
+  const options = ClaudeProviderOptionsSchema.parse(input.providerOptions ?? {});
   return {
     source: { provider: input.provider },
     filesystemWrite: FILESYSTEM_UNAVAILABLE,
     networkAccess: NETWORK_UNAVAILABLE,
     toolShell: projectToolShell(input.modeId),
+    nativeDelegation: projectNativeDelegation(options.disallowedTools ?? []),
+  };
+}
+
+function projectNativeDelegation(disallowedTools: string[]): TeamSecurityFactDto {
+  const denied = new Set(disallowedTools);
+  if (["Task", "Agent", "Workflow"].every((tool) => denied.has(tool))) {
+    return {
+      status: "enforced",
+      summary: "Claude native Task, Agent, and Workflow delegation tools are disabled.",
+    };
+  }
+  return {
+    status: "unavailable",
+    summary: "Claude native delegation tools were not all explicitly disabled.",
   };
 }
 

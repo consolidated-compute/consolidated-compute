@@ -28,6 +28,20 @@ export class TeamSupervisorRoleInvalidError extends Error {
   }
 }
 
+export class TeamNativeDelegationUnenforcedError extends Error {
+  readonly code = "team_native_delegation_unenforced";
+
+  constructor(
+    readonly roleId: string,
+    readonly provider: string,
+  ) {
+    super(
+      `Team role ${roleId} cannot join a supervised run because provider '${provider}' does not prove native delegation is disabled`,
+    );
+    this.name = "TeamNativeDelegationUnenforcedError";
+  }
+}
+
 export function createInitialTeamRunSupervision(
   input: CreateTeamRunSupervisionInput,
 ): PersistedTeamRunSupervision {
@@ -46,6 +60,11 @@ export function createInitialTeamRunSupervision(
       input.supervisorRoleId,
       "The supervisor role cannot also be a worker workflow role",
     );
+  }
+
+  requireLaunchNativeDelegationDisabled(role.id, acceptedRole.resolvedLaunch);
+  for (const step of input.accepted.steps) {
+    requireLaunchNativeDelegationDisabled(step.snapshot.roleId, step.snapshot.resolvedLaunch);
   }
 
   return PersistedTeamRunSupervisionSchema.parse({
@@ -79,4 +98,24 @@ export function createInitialTeamRunSupervision(
     humanRequest: null,
     updatedAt: input.timestamp,
   });
+}
+
+export function requireSupervisionNativeDelegationDisabled(
+  supervision: PersistedTeamRunSupervision,
+): void {
+  requireLaunchNativeDelegationDisabled(
+    supervision.supervisor.roleId,
+    supervision.supervisor.resolvedLaunch,
+  );
+  for (const template of supervision.workerTemplates) {
+    requireLaunchNativeDelegationDisabled(template.roleId, template.resolvedLaunch);
+  }
+}
+
+function requireLaunchNativeDelegationDisabled(
+  roleId: string,
+  launch: PersistedTeamRunSupervision["supervisor"]["resolvedLaunch"],
+): void {
+  if (launch.securityPosture?.nativeDelegation?.status === "enforced") return;
+  throw new TeamNativeDelegationUnenforcedError(roleId, launch.provider);
 }

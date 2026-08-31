@@ -15,6 +15,7 @@ export const ProviderSecurityPostureSchema = z
     filesystemWrite: SecurityFactSchema,
     networkAccess: SecurityFactSchema,
     toolShell: SecurityFactSchema,
+    nativeDelegation: SecurityFactSchema.optional(),
   })
   .strict();
 
@@ -42,6 +43,10 @@ export function projectUnavailableProviderSecurityPosture(
     toolShell: {
       status: "unavailable",
       summary: "No tool or shell enforcement mapping is available for this provider.",
+    },
+    nativeDelegation: {
+      status: "unavailable",
+      summary: "No native delegation enforcement mapping is available for this provider.",
     },
   };
 }

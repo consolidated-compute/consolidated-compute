@@ -33,6 +33,11 @@ import {
   isTerminalTeamRunStepStatus,
   isTeamRunSupervisionDecisionBoundary,
 } from "./model.js";
+import { requireSupervisionNativeDelegationDisabled } from "./supervision.js";
+import {
+  resolveSupervisedTeamAgentAuthority,
+  type SupervisedTeamAgentAuthority,
+} from "./agent-authority.js";
 
 export const TEAM_RUN_PAGE_DEFAULT_LIMIT = 50;
 export const TEAM_RUN_PAGE_MAX_LIMIT = 100;
@@ -546,6 +551,14 @@ export class TeamRepository {
     return this.createAssignmentRunRecord({ ...input, steps: [] }, assignments);
   }
 
+  async resolveSupervisedAgentAuthority(
+    agentId: string,
+  ): Promise<SupervisedTeamAgentAuthority | null> {
+    const collection = await this.readRuns();
+    this.requireHealthyCollection(collection.issues);
+    return resolveSupervisedTeamAgentAuthority(collection.records, agentId);
+  }
+
   private async createAssignmentRunRecord(
     input: CreateAssignmentTeamRunInput & { supervision?: PersistedTeamRunSupervision },
     assignments: AssignmentRepository,
@@ -570,9 +583,15 @@ export class TeamRepository {
       );
       if (existing) {
         this.requireMatchingAdmissionIdentity(existing, identity);
+        if (existing.supervision) {
+          requireSupervisionNativeDelegationDisabled(existing.supervision);
+        }
         return existing;
       }
       this.requireHealthyCollection(collection.issues);
+      if (input.supervision) {
+        requireSupervisionNativeDelegationDisabled(input.supervision);
+      }
 
       const workspaceRun = collection.records.find(
         (run) =>

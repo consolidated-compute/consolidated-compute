@@ -22,6 +22,7 @@ export const TeamSecurityPostureDtoSchema = z.object({
   filesystemWrite: TeamSecurityFactDtoSchema,
   networkAccess: TeamSecurityFactDtoSchema,
   toolShell: TeamSecurityFactDtoSchema,
+  nativeDelegation: TeamSecurityFactDtoSchema.optional(),
 });
 
 export const TeamResolvedLaunchDtoSchema = z.object({

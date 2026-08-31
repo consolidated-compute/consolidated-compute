@@ -228,6 +228,7 @@ class MemoryWorkspaceRegistry implements TeamRunWorkspaceRegistry {
 
 class MemoryProviderCatalog implements TeamProviderCatalog {
   models = [{ provider: "codex", id: "gpt-5.6", label: "GPT-5.6" }];
+  nativeDelegationStatus: "enforced" | "unavailable" = "enforced";
   blockRefresh = false;
   private releaseRefresh: (() => void) | null = null;
   private readonly refreshWaiters = new Set<() => void>();
@@ -271,6 +272,13 @@ class MemoryProviderCatalog implements TeamProviderCatalog {
       filesystemWrite: { status: "enforced" as const, summary: "Filesystem policy enforced." },
       networkAccess: { status: "unavailable" as const, summary: "Network proof unavailable." },
       toolShell: { status: "policy_only" as const, summary: "Tool policy configured." },
+      nativeDelegation: {
+        status: this.nativeDelegationStatus,
+        summary:
+          this.nativeDelegationStatus === "enforced"
+            ? "Provider-native delegation is disabled."
+            : "Provider-native delegation was not disabled.",
+      },
     };
   }
 }
@@ -534,7 +542,11 @@ describe("TeamRunService", () => {
       provider: "codex",
       model: "gpt-5.6",
       modeId: "workspace-write",
-      providerOptions: { sandbox_mode: "workspace-write", approval_policy: "never" },
+      providerOptions: {
+        sandbox_mode: "workspace-write",
+        approval_policy: "never",
+        features: { multi_agent_v2: false },
+      },
     });
     const definition = await harness.repository.updateDefinition({
       teamId: harness.definition.id,
@@ -579,7 +591,11 @@ describe("TeamRunService", () => {
           agentId: firstAgentId,
           resolvedLaunch: {
             profileId: "profile_supervisor",
-            providerOptions: { sandbox_mode: "workspace-write", approval_policy: "never" },
+            providerOptions: {
+              sandbox_mode: "workspace-write",
+              approval_policy: "never",
+              features: { multi_agent_v2: false },
+            },
           },
         },
       },
@@ -616,6 +632,55 @@ describe("TeamRunService", () => {
         supervisorRoleId: "role_builder",
       }),
     ).rejects.toBeInstanceOf(TeamSupervisorRoleInvalidError);
+  });
+
+  test("rejects supervised admission when provider-native delegation is not disabled", async () => {
+    const harness = await createHarness();
+    harness.providerCatalog.nativeDelegationStatus = "unavailable";
+    harness.daemonConfigStore.agentProfiles.push({
+      id: "profile_supervisor",
+      name: "Supervisor",
+      provider: "codex",
+      model: "gpt-5.6",
+      providerOptions: { features: { multi_agent_v2: false } },
+    });
+    const definition = await harness.repository.updateDefinition({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      patch: {
+        roles: [
+          ...harness.definition.roles,
+          {
+            id: "role_supervisor",
+            name: "Supervisor",
+            instructions: "Coordinate bounded work.",
+            profileId: "profile_supervisor",
+          },
+        ],
+      },
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Unsafe delegation posture",
+      objective: "Reject the run before any agent exists.",
+      workItem: null,
+    });
+
+    await expect(
+      harness.service.admitSupervisedAssignmentRun({
+        teamId: definition.id,
+        expectedRevision: definition.revision,
+        idempotencyKey: "supervised-native-delegation-unavailable",
+        assignmentId: assignment.id,
+        expectedAssignmentRevision: assignment.revision,
+        workspaceId: "wks_team_service",
+        supervisorRoleId: "role_supervisor",
+      }),
+    ).rejects.toMatchObject({
+      code: "team_native_delegation_unenforced",
+      roleId: "role_supervisor",
+      provider: "codex",
+    });
+    expect(harness.runtime.creations).toEqual([]);
   });
 
   test("previews every role without exposing provider options and rejects stale admission", async () => {

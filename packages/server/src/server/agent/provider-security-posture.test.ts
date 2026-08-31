@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import { projectClaudeSecurityPosture } from "./providers/claude/security-posture.js";
 import { projectCodexSecurityPosture } from "./providers/codex/security-posture.js";
+import { projectOpenCodeSecurityPosture } from "./providers/opencode/security-posture.js";
 
 describe("provider security posture", () => {
   test("reports only fail-closed Codex filesystem and network restrictions as enforced", () => {
@@ -17,7 +18,7 @@ describe("provider security posture", () => {
           exclude_tmpdir_env_var: true,
         },
         web_search: "disabled",
-        features: { network_proxy: false },
+        features: { network_proxy: false, multi_agent_v2: false },
       },
     });
 
@@ -26,6 +27,7 @@ describe("provider security posture", () => {
       filesystemWrite: { status: "enforced" },
       networkAccess: { status: "enforced" },
       toolShell: { status: "unavailable" },
+      nativeDelegation: { status: "enforced" },
     });
   });
 
@@ -79,6 +81,7 @@ describe("provider security posture", () => {
     expect(incomplete.filesystemWrite.status).toBe("unavailable");
     expect(incomplete.networkAccess.status).toBe("unavailable");
     expect(broadWriteScope.filesystemWrite.status).toBe("unavailable");
+    expect(incomplete.nativeDelegation?.status).toBe("unavailable");
   });
 
   test("keeps provider paths, proxies, sockets, and TLS material out of projected facts", () => {
@@ -124,6 +127,43 @@ describe("provider security posture", () => {
       filesystemWrite: { status: "unavailable" },
       networkAccess: { status: "unavailable" },
       toolShell: { status: "policy_only" },
+      nativeDelegation: { status: "unavailable" },
     });
+  });
+
+  test("proves only explicit provider-native delegation denies", () => {
+    const codex = projectCodexSecurityPosture({
+      provider: "codex",
+      modeId: null,
+      providerOptions: { features: { multi_agent_v2: false } },
+    });
+    const claude = projectClaudeSecurityPosture({
+      provider: "claude",
+      modeId: "default",
+      providerOptions: { disallowedTools: ["Task", "Agent", "Workflow"] },
+    });
+    const opencode = projectOpenCodeSecurityPosture({
+      provider: "opencode",
+      modeId: "build",
+      providerOptions: { permission: { task: "deny" } },
+    });
+
+    expect(codex.nativeDelegation?.status).toBe("enforced");
+    expect(claude.nativeDelegation?.status).toBe("enforced");
+    expect(opencode.nativeDelegation?.status).toBe("enforced");
+    expect(
+      projectOpenCodeSecurityPosture({
+        provider: "opencode",
+        modeId: "build",
+        providerOptions: { permission: { task: { reviewer: "deny" } } },
+      }).nativeDelegation?.status,
+    ).toBe("unavailable");
+    expect(
+      projectCodexSecurityPosture({
+        provider: "codex",
+        modeId: "auto-review",
+        providerOptions: { features: { multi_agent_v2: false } },
+      }).nativeDelegation?.status,
+    ).toBe("unavailable");
   });
 });

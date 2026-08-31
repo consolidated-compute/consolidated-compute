@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import type { AgentSessionConfig } from "./agent-sdk-types.js";
-import { withRuntimePaseoMcpServer } from "./runtime-mcp-config.js";
+import { createAgentMcpCapabilityToken, withRuntimePaseoMcpServer } from "./runtime-mcp-config.js";
 
 const BASE_CONFIG: AgentSessionConfig = {
   provider: "claude",
@@ -20,8 +20,16 @@ describe("withRuntimePaseoMcpServer", () => {
     expect(result.mcpServers?.paseo).toEqual({
       type: "http",
       url: "http://127.0.0.1:6767/mcp/agents?callerAgentId=agent-1",
-      headers: { Authorization: "Bearer cap-token" },
+      headers: {
+        Authorization: `Bearer ${createAgentMcpCapabilityToken("cap-token", "agent-1")}`,
+      },
     });
+  });
+
+  test("binds injected capability tokens to one agent identity", () => {
+    expect(createAgentMcpCapabilityToken("cap-token", "agent-1")).not.toBe(
+      createAgentMcpCapabilityToken("cap-token", "agent-2"),
+    );
   });
 
   test("omits the header when no token is available", () => {
