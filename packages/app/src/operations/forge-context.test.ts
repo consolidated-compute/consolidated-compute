@@ -72,6 +72,33 @@ describe("selectOperationsForgeContext", () => {
     });
   });
 
+  it("preserves checks that require action", () => {
+    const context = selectOperationsForgeContext({
+      workspace: workspace({
+        forge: "github",
+        forgeRuntime: {
+          pullRequest: pullRequest({
+            checks: [
+              {
+                name: "Deploy",
+                status: "pending",
+                traits: ["manual", "action_required"],
+                url: null,
+              },
+            ],
+          }),
+          error: null,
+        },
+      }),
+      isLastKnown: false,
+    });
+
+    expect(context).toMatchObject({
+      kind: "change_request",
+      changeRequest: { checksStatus: "actionRequired" },
+    });
+  });
+
   it.each([
     ["pending", "pending"],
     ["failure", "failure"],

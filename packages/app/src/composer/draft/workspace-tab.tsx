@@ -55,7 +55,7 @@ import {
   buildWorkspaceTabPersistenceKey,
   type WorkspaceDraftTabSetup,
 } from "@/workspace-tabs/model";
-import { openPreferredWorkspaceTarget } from "@/workspace-tabs/open-beside";
+import { openWorkspaceChanges } from "@/workspace-tabs/open-supporting-view";
 import { useSettings } from "@/hooks/use-settings";
 
 const EMPTY_PENDING_PERMISSIONS = new Map();
@@ -464,15 +464,14 @@ export function WorkspaceDraftAgentTab({
       if (attachment.kind !== "review") {
         return;
       }
-      openPreferredWorkspaceTarget({
+      openWorkspaceChanges({
         isCompact: isCompactFormFactor,
         workspaceKey: buildWorkspaceTabPersistenceKey({ serverId, workspaceId: workspaceId ?? "" }),
-        target: { kind: "working_diff" },
-        source: "changesLinks",
+        checkout: { serverId, cwd: composerState.workingDir, isGit: true },
         preferences: openInSidePane,
       });
     },
-    [isCompactFormFactor, openInSidePane, serverId, workspaceId],
+    [composerState.workingDir, isCompactFormFactor, openInSidePane, serverId, workspaceId],
   );
 
   const {
@@ -709,7 +708,7 @@ export function WorkspaceDraftAgentTab({
           blurOnSubmit={true}
           value={draftInput.text}
           onChangeText={draftInput.editText}
-          textReplacementKey={draftInput.textReplacementKey}
+          textReplacement={draftInput.textReplacement}
           attachments={draftInput.attachments}
           attachmentScopeKeys={attachmentScopeKeys}
           onOpenWorkspaceAttachment={handleOpenWorkspaceAttachment}
