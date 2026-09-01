@@ -43,7 +43,11 @@ import {
   type ResolveTeamRunSupervisionHumanRequestInput,
   type TeamRunUpdate,
 } from "./repository.js";
-import { materializeTeamStepArtifact, resolveTeamStepInputArtifacts } from "./artifacts.js";
+import {
+  materializeTeamStepArtifact,
+  resolveTeamRunArtifactInputs,
+  resolveTeamStepInputArtifacts,
+} from "./artifacts.js";
 import { buildTeamRunPreview, createTeamRunPreviewFingerprint } from "./security-preview.js";
 import { createInitialTeamRunSupervision } from "./supervision.js";
 import {
@@ -52,6 +56,7 @@ import {
   composeTeamSupervisorPrompt,
   createTeamSupervisorActionSchema,
   normalizeTeamSupervisorDecision,
+  resolveSupervisedWorkItemInputArtifactIds,
   type TeamSupervisorAction,
 } from "./supervised-execution.js";
 
@@ -724,15 +729,36 @@ export class TeamRunService {
     }
     const ready = requireSupervisedRun(await this.requireRun(runId));
     const readySupervisor = requireActiveSupervisor(ready);
+    const dispatchArtifactIssues = await this.resolveSupervisorDispatchArtifactIssues(ready);
     const action = await getStructuredAgentResponse<TeamSupervisorAction>({
       caller: (prompt) =>
         this.runSupervisorPrompt(runId, readySupervisor.index, readySupervisor.agentId, prompt),
-      prompt: composeTeamSupervisorPrompt(ready),
-      schema: createTeamSupervisorActionSchema(ready),
+      prompt: composeTeamSupervisorPrompt(ready, { dispatchArtifactIssues }),
+      schema: createTeamSupervisorActionSchema(ready, { dispatchArtifactIssues }),
       maxRetries: 2,
       schemaName: "TeamSupervisorAction",
     });
     return this.commitSupervisorAction(runId, decisionId, action);
+  }
+
+  private async resolveSupervisorDispatchArtifactIssues(
+    run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  ): Promise<ReadonlyMap<string, string>> {
+    const issues = new Map<string, string>();
+    const workItem = run.supervision.workItems.find((candidate, index, workItems) => {
+      return (
+        candidate.status === "planned" &&
+        workItems.slice(0, index).every((predecessor) => predecessor.status === "succeeded")
+      );
+    });
+    if (!workItem) return issues;
+    try {
+      const inputArtifactIds = resolveSupervisedWorkItemInputArtifactIds(run, workItem.id);
+      await resolveTeamRunArtifactInputs(this.requireAssignmentRepository(), run, inputArtifactIds);
+    } catch (error) {
+      issues.set(workItem.id, boundedError(errorMessage(error)));
+    }
+    return issues;
   }
 
   private async commitSupervisorAction(

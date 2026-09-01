@@ -61,8 +61,13 @@ const SupervisorActionSchema = z.discriminatedUnion("kind", [
 
 export type TeamSupervisorAction = z.infer<typeof SupervisorActionSchema>;
 
+export interface TeamSupervisorActionSchemaOptions {
+  dispatchArtifactIssues?: ReadonlyMap<string, string>;
+}
+
 export function createTeamSupervisorActionSchema(
   run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  options: TeamSupervisorActionSchemaOptions = {},
 ): z.ZodType<TeamSupervisorAction> {
   return SupervisorActionSchema.superRefine((action, context) => {
     const supervision = run.supervision;
@@ -78,7 +83,7 @@ export function createTeamSupervisorActionSchema(
     }
 
     if (action.kind === "plan") validatePlanAction(run, action, context);
-    if (action.kind === "dispatch") validateDispatchAction(run, action, context);
+    if (action.kind === "dispatch") validateDispatchAction(run, action, context, options);
     if (action.kind === "escalate") validateEscalationAction(run, action, context);
     if (action.kind === "complete") validateCompleteAction(run, context);
   });
@@ -137,6 +142,7 @@ function validateDispatchAction(
   run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
   action: Extract<TeamSupervisorAction, { kind: "dispatch" }>,
   context: z.core.$RefinementCtx<TeamSupervisorAction>,
+  options: TeamSupervisorActionSchemaOptions,
 ): void {
   const workItem = run.supervision.workItems.find((item) => item.id === action.workItemId);
   if (!workItem) {
@@ -170,6 +176,14 @@ function validateDispatchAction(
       code: "custom",
       path: ["workItemId"],
       message: `Dispatch requires preceding work item ${unfinishedPredecessor.id} to succeed`,
+    });
+  }
+  const artifactIssue = options.dispatchArtifactIssues?.get(workItem.id);
+  if (artifactIssue) {
+    context.addIssue({
+      code: "custom",
+      path: ["workItemId"],
+      message: `Dispatch Artifact inputs are unavailable: ${artifactIssue}`,
     });
   }
 }
@@ -216,15 +230,16 @@ function validateCompleteAction(
 
 export function composeTeamSupervisorPrompt(
   run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  options: TeamSupervisorActionSchemaOptions = {},
 ): string {
   const templates = run.supervision.workerTemplates.map(
     (template) =>
       `- ${template.stepId}: role=${template.roleName}; instructions=${JSON.stringify(template.stepInstructions)}`,
   );
-  const workItems = run.supervision.workItems.map(
-    (workItem) =>
-      `- ${workItem.id}: template=${workItem.templateStepId}; status=${workItem.status}; attempts=${workItem.attemptIds.join(",") || "none"}`,
-  );
+  const workItems = run.supervision.workItems.map((workItem) => {
+    const artifactIssue = options.dispatchArtifactIssues?.get(workItem.id);
+    return `- ${workItem.id}: template=${workItem.templateStepId}; status=${workItem.status}; attempts=${workItem.attemptIds.join(",") || "none"}; dispatch=${artifactIssue ? `blocked(${JSON.stringify(artifactIssue)})` : "available"}`;
+  });
   const decisions = run.supervision.decisions.map(
     (decision) =>
       `- ${decision.sequence}. ${decision.kind}; actionId=${decision.actionId}; summary=${JSON.stringify(decision.summary)}`,
@@ -363,7 +378,7 @@ export function buildTeamSupervisionDecisionUpdate(
   }
   if (input.action.kind === "dispatch") {
     const workItemId = input.action.workItemId;
-    const inputArtifactIds = resolvePrecedingAcceptedArtifactIds(input.run, workItemId);
+    const inputArtifactIds = resolveSupervisedWorkItemInputArtifactIds(input.run, workItemId);
     appendDispatchedWorker(input, steps, inputArtifactIds);
     workItems = input.run.supervision.workItems.map((workItem) =>
       workItem.id === workItemId
@@ -468,7 +483,7 @@ function appendDispatchedWorker(
   });
 }
 
-function resolvePrecedingAcceptedArtifactIds(
+export function resolveSupervisedWorkItemInputArtifactIds(
   run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
   workItemId: string,
 ): string[] {

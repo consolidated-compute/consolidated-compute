@@ -146,6 +146,24 @@ export async function resolveTeamStepInputArtifacts(
     );
   }
 
+  return resolveInputArtifacts(store, run, inputIds, stepIndex);
+}
+
+export async function resolveTeamRunArtifactInputs(
+  store: TeamArtifactStore,
+  run: PersistedTeamRunRecord,
+  inputIds: readonly string[],
+): Promise<PersistedAssignmentArtifactRecord[]> {
+  if (run.assignmentId === undefined || run.assignmentRevision === undefined) return [];
+  return resolveInputArtifacts(store, run, inputIds, run.steps.length);
+}
+
+async function resolveInputArtifacts(
+  store: TeamArtifactStore,
+  run: PersistedTeamRunRecord,
+  inputIds: readonly string[],
+  consumerStepIndex: number,
+): Promise<PersistedAssignmentArtifactRecord[]> {
   const seen = new Set<string>();
   const artifacts: PersistedAssignmentArtifactRecord[] = [];
   for (const artifactId of inputIds) {
@@ -153,7 +171,7 @@ export async function resolveTeamStepInputArtifacts(
       throw new TeamArtifactInputError(
         "duplicate",
         artifactId,
-        `Team step ${step.snapshot.stepId} repeats Artifact input ${artifactId}`,
+        `Team Run ${run.id} repeats Artifact input ${artifactId}`,
       );
     }
     seen.add(artifactId);
@@ -165,7 +183,7 @@ export async function resolveTeamStepInputArtifacts(
         `Required Assignment Artifact not found: ${artifactId}`,
       );
     }
-    validateInputArtifact(run, stepIndex, artifact);
+    validateInputArtifact(run, consumerStepIndex, artifact);
     artifacts.push(artifact);
   }
   requireArtifactInputBudget(artifacts);

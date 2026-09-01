@@ -27,7 +27,7 @@ import {
   TeamExecutionPreflightError,
   type TeamProviderCatalog,
 } from "./execution.js";
-import { materializeTeamStepArtifact } from "./artifacts.js";
+import { materializeTeamStepArtifact, TeamArtifactInputError } from "./artifacts.js";
 import {
   PersistedTeamRunRecordSchema,
   type PersistedTeamDefinition,
@@ -972,6 +972,155 @@ describe("TeamRunService", () => {
       ]),
       issues: [],
     });
+  });
+
+  test("rejects an over-budget cumulative Artifact handoff before dispatch", async () => {
+    const harness = await createHarness();
+    harness.daemonConfigStore.agentProfiles.push({
+      id: "profile_supervisor",
+      name: "Supervisor",
+      provider: "codex",
+      model: "gpt-5.6",
+      providerOptions: { features: { multi_agent_v2: false } },
+    });
+    const definition = await harness.repository.updateDefinition({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      patch: {
+        roles: [
+          ...harness.definition.roles,
+          {
+            id: "role_supervisor",
+            name: "Supervisor",
+            instructions: "Dispatch only bounded Artifact handoffs.",
+            profileId: "profile_supervisor",
+          },
+        ],
+      },
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Bound supervised Artifact inputs",
+      objective: "Do not persist a dispatch whose inputs cannot fit in the worker prompt.",
+      workItem: null,
+    });
+    const run = await harness.service.admitSupervisedAssignmentRun({
+      teamId: definition.id,
+      expectedRevision: definition.revision,
+      idempotencyKey: "supervised-artifact-budget",
+      assignmentId: assignment.id,
+      expectedAssignmentRevision: assignment.revision,
+      workspaceId: "wks_team_service",
+      supervisorRoleId: "role_supervisor",
+    });
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 1);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "plan",
+        actionId: "action_plan_budget",
+        summary: "Build, then review the bounded result.",
+        workItems: [
+          { id: "work_build_budget", templateStepId: "step_build" },
+          { id: "work_review_budget", templateStepId: "step_review" },
+        ],
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-plan-budget",
+    });
+    await harness.runtime.waitForStreamCount(firstAgentId, 2);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "dispatch",
+        actionId: "action_dispatch_build_budget",
+        summary: "Dispatch the builder.",
+        workItemId: "work_build_budget",
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-dispatch-build-budget",
+    });
+    await harness.runtime.waitForStream(secondAgentId);
+    const originalGetArtifact = harness.assignments.getArtifact.bind(harness.assignments);
+    harness.assignments.getArtifact = async (artifactId) => {
+      const artifact = await originalGetArtifact(artifactId);
+      if (artifact) {
+        throw new TeamArtifactInputError(
+          "input_budget_exceeded",
+          null,
+          "Artifact prompt inputs exceed 32768 UTF-8 bytes",
+        );
+      }
+      return artifact;
+    };
+    harness.runtime.finalResponses.set(secondAgentId, "Builder output.");
+    await harness.runtime.pushEvent(secondAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-worker-build-budget",
+    });
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 3);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "dispatch",
+        actionId: "action_dispatch_review_over_budget",
+        summary: "Dispatch the reviewer.",
+        workItemId: "work_review_budget",
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-dispatch-review-over-budget",
+    });
+    await harness.runtime.waitForStreamCount(firstAgentId, 4);
+    expect(
+      harness.runtime.streams.filter((stream) => stream.agentId === firstAgentId)[3]?.prompt,
+    ).toContain("Artifact prompt inputs exceed 32768 UTF-8 bytes");
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "escalate",
+        actionId: "action_escalate_artifact_budget",
+        summary: "The frozen Artifact handoff exceeds the prompt budget.",
+        workItemId: "work_review_budget",
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-escalate-artifact-budget",
+    });
+
+    const waiting = await harness.service.waitForRun(run.id);
+    expect(waiting).toMatchObject({
+      state: { status: "running" },
+      supervision: {
+        phase: "awaiting_human",
+        decisions: [
+          { kind: "plan" },
+          { kind: "dispatch", workItemId: "work_build_budget" },
+          { kind: "escalate", workItemId: "work_review_budget" },
+        ],
+        workItems: [
+          { id: "work_build_budget", status: "succeeded" },
+          { id: "work_review_budget", status: "planned", attemptIds: [] },
+        ],
+      },
+    });
+    expect(harness.runtime.creations.map((creation) => creation.agentId)).toEqual([
+      firstAgentId,
+      secondAgentId,
+    ]);
+    await harness.service.cancelRun(run.id);
   });
 
   test("persists escalation as an idle human wait without launching a worker", async () => {

@@ -128,7 +128,7 @@ Compose each initial prompt from these bounded sections:
 4. Objective.
 5. Exact frozen input Artifacts for Assignment-backed runs, or the immediately previous final response for objective-only runs.
 
-For an Assignment-backed step, persist its bounded final response under the preallocated output ID before committing step success or creating the next agent. Reject blank output. Resolve downstream inputs by their frozen IDs and verify the Assignment revision, Team Run, producing step, role, agent, success state, and descriptor before agent creation. Artifact content is capped at 32 KiB each and 32 KiB total per prompt. Delimit it as untrusted context with identity, provenance, and truncation facts.
+For an Assignment-backed step, persist its bounded final response under the preallocated output ID before committing step success or creating the next agent. Reject blank output. Resolve downstream inputs by their frozen IDs and verify the Assignment revision, Team Run, producing step, role, agent, success state, and descriptor before agent creation. Artifact content is capped at 32 KiB each and 32 KiB total per prompt. Validate that cumulative budget before a supervised dispatch becomes durable; an impossible handoff remains planned so the supervisor can choose another bounded action. Delimit accepted content as untrusted context with identity, provenance, and truncation facts.
 
 For an objective-only step, delimit the previous response as untrusted handoff context. Cap it at 4 KiB of UTF-8 and state when it was truncated. An empty final response gets an explicit empty marker. Do not pass the full transcript.
 
