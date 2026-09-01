@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Modal, Platform, Pressable, ScrollView, Text, View } from "react-native";
@@ -463,22 +463,21 @@ function resolveDesktopCardStyle(desktopMaxWidth: number | undefined): StyleProp
   return [styles.desktopCard, desktopMaxWidth == null ? null : { maxWidth: desktopMaxWidth }];
 }
 
+type WebTransitionStyle = ViewStyle &
+  Pick<CSSProperties, "transitionDuration" | "transitionProperty" | "transitionTimingFunction">;
+
 function resolveDesktopOverlayStyle(input: {
   isWebClosing: boolean;
   modalLayer: number;
 }): StyleProp<ViewStyle> {
-  return [
-    styles.desktopOverlay,
-    isWeb
-      ? {
-          zIndex: input.modalLayer,
-          opacity: input.isWebClosing ? 0 : 1,
-          transitionDuration: `${WEB_EXIT_DURATION_MS}ms`,
-          transitionProperty: "opacity",
-          transitionTimingFunction: "ease",
-        }
-      : null,
-  ];
+  const webTransitionStyle: WebTransitionStyle = {
+    zIndex: input.modalLayer,
+    opacity: input.isWebClosing ? 0 : 1,
+    transitionDuration: `${WEB_EXIT_DURATION_MS}ms`,
+    transitionProperty: "opacity",
+    transitionTimingFunction: "ease",
+  };
+  return [styles.desktopOverlay, isWeb ? webTransitionStyle : null];
 }
 
 function resolveNativeDismissHandler(

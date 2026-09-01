@@ -147,15 +147,21 @@ export function useOperationsData(): OperationsData {
 
   const refreshAll = useCallback(async () => {
     await Promise.all(
-      serverIds.flatMap((serverId) => {
-        const requests: Promise<unknown>[] = [runtime.refreshDirectories(serverId)];
+      serverIds.map(async (serverId) => {
+        const snapshot = runtime.getSnapshot(serverId);
+        if (snapshot?.connectionStatus !== "online") {
+          throw new Error(`Cannot refresh offline host ${serverId}`);
+        }
+        await runtime.refreshDirectories(serverId);
+        if (runtime.getSnapshot(serverId)?.connectionStatus !== "online") {
+          throw new Error(`Host ${serverId} disconnected during refresh`);
+        }
         const client = runtime.getClient(serverId);
         if (client && providerSubagentSupport.get(serverId) === true) {
           // The snapshot helper records its own provider-specific error state. Keep the generic
           // manual-refresh failure reserved for the managed agent directory.
-          requests.push(refreshProviderSubagentActivity(client, serverId).catch(() => undefined));
+          await refreshProviderSubagentActivity(client, serverId).catch(() => undefined);
         }
-        return requests;
       }),
     );
   }, [providerSubagentSupport, runtime, serverIds]);
