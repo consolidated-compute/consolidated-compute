@@ -930,6 +930,32 @@ describe("Team Run contract", () => {
     );
   });
 
+  test("reads dispatch decisions written before exact input projections", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    for (const decision of run.supervision!.decisions) {
+      if (decision.kind === "dispatch") delete decision.inputArtifactIds;
+    }
+
+    expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
+  });
+
+  test("rejects an explicit dispatch input projection that differs from its worker snapshot", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const decision = run.supervision!.decisions.find(
+      (candidate) => candidate.kind === "dispatch" && candidate.inputArtifactIds?.length === 1,
+    );
+    if (!decision || decision.kind !== "dispatch") throw new Error("Expected dispatch decision");
+    decision.inputArtifactIds = [];
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Supervisor decision inputs must match the launched attempt snapshot",
+    );
+  });
+
   test("requires active worker attempts to activate their work item", () => {
     const run = createSupervisedRunWithWorkerAttempts();
     const workerStep = run.steps.findLast((step) => step.snapshot.supervision?.kind === "worker")!;

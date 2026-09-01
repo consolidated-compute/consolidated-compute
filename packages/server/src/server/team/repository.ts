@@ -110,11 +110,16 @@ export type TeamRunUpdater = (
 ) => TeamRunUpdate | Promise<TeamRunUpdate>;
 
 export type TeamRunSupervisionDecision = PersistedTeamRunSupervision["decisions"][number];
-type WithoutRequiredDecisionTimestamp<T> = T extends TeamRunSupervisionDecision
+type TeamRunSupervisionCommitDecision = TeamRunSupervisionDecision extends infer Decision
+  ? Decision extends { kind: "dispatch" }
+    ? Omit<Decision, "inputArtifactIds"> & { inputArtifactIds: string[] }
+    : Decision
+  : never;
+type WithoutRequiredDecisionTimestamp<T> = T extends TeamRunSupervisionCommitDecision
   ? Omit<T, "createdAt"> & { createdAt?: string }
   : never;
 export type TeamRunSupervisionDecisionCandidate =
-  WithoutRequiredDecisionTimestamp<TeamRunSupervisionDecision>;
+  WithoutRequiredDecisionTimestamp<TeamRunSupervisionCommitDecision>;
 export interface CommitTeamRunSupervisionDecisionInput {
   runId: string;
   expectedSupervisionRevision: number;
@@ -132,7 +137,7 @@ export type TeamRunSupervisionUpdater = (
 export interface TeamRunSupervisionDecisionCommitContext {
   outputArtifactId: string | null;
   committedAt: string;
-  decision: TeamRunSupervisionDecision;
+  decision: TeamRunSupervisionCommitDecision;
 }
 
 export interface BeginTeamRunSupervisionTurnInput {
@@ -857,7 +862,7 @@ export class TeamRepository {
         (decision) => decision.actionId === input.decision.actionId,
       );
       if (existingDecision) {
-        if (decisionMatchesCandidate(existingDecision, input.decision)) return current;
+        if (decisionMatchesCandidate(current, existingDecision, input.decision)) return current;
         throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
       }
       if (current.supervision.revision !== input.expectedSupervisionRevision) {
@@ -889,7 +894,7 @@ export class TeamRepository {
       const decision = {
         ...input.decision,
         createdAt: committedAt,
-      } as TeamRunSupervisionDecision;
+      } as TeamRunSupervisionCommitDecision;
       const update = await updater(supervisedCurrent, {
         outputArtifactId,
         committedAt,
@@ -1403,7 +1408,7 @@ function supervisionDecisionUpdateMatches(
   update: TeamRunSupervisionUpdate,
   input: {
     expectedSupervisionRevision: number;
-    decision: TeamRunSupervisionDecision;
+    decision: TeamRunSupervisionCommitDecision;
   },
   reservedArtifactIds: ReadonlySet<string>,
 ): boolean {
@@ -1426,18 +1431,30 @@ function supervisionDecisionUpdateMatches(
 }
 
 function decisionMatchesCandidate(
+  run: PersistedTeamRunRecord,
   decision: TeamRunSupervisionDecision,
   candidate: TeamRunSupervisionDecisionCandidate,
 ): boolean {
   const { createdAt: _createdAt, ...persisted } = decision;
   const { createdAt: _candidateCreatedAt, ...requested } = candidate;
-  return equal(persisted, requested);
+  if (persisted.kind !== "dispatch" || persisted.inputArtifactIds !== undefined) {
+    return equal(persisted, requested);
+  }
+  const attempt = run.steps.find(
+    (step) =>
+      step.snapshot.supervision?.kind === "worker" &&
+      step.snapshot.supervision.attemptId === persisted.attemptId,
+  );
+  return equal(
+    { ...persisted, inputArtifactIds: attempt?.snapshot.inputArtifactIds ?? [] },
+    requested,
+  );
 }
 
 function decisionPreservesWorkItemLedger(
   preserved: PersistedTeamRunRecord,
   update: TeamRunSupervisionUpdate,
-  decision: TeamRunSupervisionDecision,
+  decision: TeamRunSupervisionCommitDecision,
 ): boolean {
   const preservedWorkItems = preserved.supervision!.workItems;
   if (update.supervision.workItems.length < preservedWorkItems.length) return false;
@@ -1484,7 +1501,7 @@ function resolvePrecedingAcceptedArtifactIds(
 function decisionPreservesHumanRequest(
   preserved: PersistedTeamRunRecord,
   update: TeamRunSupervisionUpdate,
-  decision: TeamRunSupervisionDecision,
+  decision: TeamRunSupervisionCommitDecision,
 ): boolean {
   const preservedRequest = preserved.supervision!.humanRequest;
   if (decision.kind === "escalate" && preservedRequest === null) return true;
@@ -1514,7 +1531,7 @@ function decisionPreservesRunStateProvenance(
 
 function decisionProducesRequiredSupervisionEffect(
   update: TeamRunSupervisionUpdate,
-  decision: TeamRunSupervisionDecision,
+  decision: TeamRunSupervisionCommitDecision,
 ): boolean {
   const request = update.supervision.humanRequest;
   const completesRun =
@@ -1535,7 +1552,7 @@ function decisionProducesRequiredSupervisionEffect(
 function decisionAppendsExpectedWorkerAttempt(
   preserved: PersistedTeamRunRecord,
   update: TeamRunSupervisionUpdate,
-  decision: TeamRunSupervisionDecision,
+  decision: TeamRunSupervisionCommitDecision,
   reservedArtifactIds: ReadonlySet<string>,
 ): boolean {
   const appendedWorkers: PersistedTeamRunRecord["steps"] = [];
@@ -1580,7 +1597,7 @@ function decisionAppendsExpectedWorkerAttempt(
 }
 
 type WorkerLaunchDecision = Extract<
-  TeamRunSupervisionDecision,
+  TeamRunSupervisionCommitDecision,
   { kind: "dispatch" | "request_revision" }
 >;
 
@@ -1600,7 +1617,7 @@ interface WorkerLaunchValidationContext {
 }
 
 function isWorkerLaunchDecision(
-  decision: TeamRunSupervisionDecision,
+  decision: TeamRunSupervisionCommitDecision,
 ): decision is WorkerLaunchDecision {
   return decision.kind === "dispatch" || decision.kind === "request_revision";
 }

@@ -287,7 +287,8 @@ export const PersistedTeamRunSupervisionDecisionSchema = z.discriminatedUnion("k
     kind: z.literal("dispatch"),
     workItemId: PersistedTeamEntityIdSchema,
     attemptId: PersistedTeamEntityIdSchema,
-    inputArtifactIds: PersistedTeamRunArtifactInputIdsSchema,
+    // Older supervised runs freeze these inputs only on the matching worker snapshot.
+    inputArtifactIds: PersistedTeamRunArtifactInputIdsSchema.optional(),
   }).strict(),
   PersistedTeamRunSupervisionDecisionBaseSchema.extend({
     kind: z.literal("request_revision"),
@@ -1271,7 +1272,11 @@ function validateSupervisionAttemptLaunchDecision(
   );
   const metadata = attempt?.snapshot.supervision;
   const attemptNumber = metadata?.kind === "worker" ? metadata.attemptNumber : null;
-  if (attempt && !sameStrings(attempt.snapshot.inputArtifactIds ?? [], decision.inputArtifactIds)) {
+  if (
+    attempt &&
+    decision.inputArtifactIds !== undefined &&
+    !sameStrings(attempt.snapshot.inputArtifactIds ?? [], decision.inputArtifactIds)
+  ) {
     issues.push({
       path: ["supervision", "decisions", index, "inputArtifactIds"],
       message: "Supervisor decision inputs must match the launched attempt snapshot",
