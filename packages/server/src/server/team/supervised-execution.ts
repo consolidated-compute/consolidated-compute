@@ -235,7 +235,7 @@ export function composeTeamSupervisorPrompt(
 ): string {
   const templates = run.supervision.workerTemplates.map(
     (template) =>
-      `- ${template.stepId}: role=${template.roleName}; instructions=${JSON.stringify(template.stepInstructions)}`,
+      `- ${template.stepId}: role=${template.roleName}; roleInstructions=${JSON.stringify(template.roleInstructions)}; stepInstructions=${JSON.stringify(template.stepInstructions)}`,
   );
   const workItems = run.supervision.workItems.map((workItem) => {
     const artifactIssue = options.dispatchArtifactIssues?.get(workItem.id);
@@ -325,6 +325,7 @@ export interface BuildTeamSupervisionDecisionUpdateInput {
   context: TeamRunSupervisionDecisionCommitContext;
   workerAgentId: string | null;
   humanRequestId: string | null;
+  allowContinueAfterEscalation: boolean;
 }
 
 export function buildTeamSupervisionDecisionUpdate(
@@ -393,9 +394,6 @@ export function buildTeamSupervisionDecisionUpdate(
   if (input.action.kind === "escalate") {
     if (input.humanRequestId === null) throw new Error("Escalation requires a human request ID");
     phase = "awaiting_human";
-    const hasFailedWork = input.run.supervision.workItems.some(
-      (workItem) => workItem.status === "failed",
-    );
     humanRequest = {
       id: input.humanRequestId,
       revision: 1,
@@ -403,7 +401,9 @@ export function buildTeamSupervisionDecisionUpdate(
       title: "Supervisor needs input",
       detail: input.action.summary.trim(),
       actions: [
-        ...(!hasFailedWork ? [{ id: "continue", label: "Continue", requiresNote: true }] : []),
+        ...(input.allowContinueAfterEscalation
+          ? [{ id: "continue", label: "Continue", requiresNote: true }]
+          : []),
         { id: "cancel", label: "Cancel run", requiresNote: false },
       ],
       roleIds: [input.run.supervision.supervisor.roleId],
@@ -435,6 +435,26 @@ export function buildTeamSupervisionDecisionUpdate(
       updatedAt: timestamp,
     },
   };
+}
+
+export function canContinueTeamSupervision(
+  run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  options: TeamSupervisorActionSchemaOptions = {},
+): boolean {
+  if (run.supervision.decisions.length + 1 >= run.supervision.limits.maxSupervisorActions) {
+    return false;
+  }
+  if (run.supervision.workItems.length === 0) return true;
+  if (run.supervision.workItems.every((workItem) => workItem.status === "succeeded")) return true;
+
+  const nextWorkItem = run.supervision.workItems.find(
+    (workItem) => workItem.status !== "succeeded",
+  );
+  return (
+    nextWorkItem?.status === "planned" &&
+    nextWorkItem.attemptIds.length === 0 &&
+    !options.dispatchArtifactIssues?.has(nextWorkItem.id)
+  );
 }
 
 function appendDispatchedWorker(

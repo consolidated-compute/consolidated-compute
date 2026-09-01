@@ -1044,6 +1044,9 @@ describe("TeamRunService", () => {
       harness.runtime.streams.filter((stream) => stream.agentId === firstAgentId)[1]?.prompt,
     ).toContain("Complete requires every planned work item to have succeeded");
     expect(
+      harness.runtime.streams.find((stream) => stream.agentId === firstAgentId)?.prompt,
+    ).toContain('roleInstructions="Implement the requested change."; stepInstructions=null');
+    expect(
       harness.runtime.streams.find((stream) => stream.agentId === secondAgentId)?.prompt,
     ).toContain("Work item: work_build");
     const reviewPrompt = harness.runtime.streams.find(
@@ -1202,13 +1205,29 @@ describe("TeamRunService", () => {
           { id: "work_build_budget", status: "succeeded" },
           { id: "work_review_budget", status: "planned", attemptIds: [] },
         ],
+        humanRequest: {
+          actions: [{ id: "cancel", label: "Cancel run", requiresNote: false }],
+        },
       },
     });
     expect(harness.runtime.creations.map((creation) => creation.agentId)).toEqual([
       firstAgentId,
       secondAgentId,
     ]);
-    await harness.service.cancelRun(run.id);
+    const request = waiting.supervision!.humanRequest!;
+    await expect(
+      harness.service.respondToSupervisionHumanRequest({
+        runId: run.id,
+        requestId: request.id,
+        expectedRequestRevision: request.revision,
+        actionId: "cancel",
+        note: null,
+        idempotencyKey: "cancel-artifact-budget",
+      }),
+    ).resolves.toMatchObject({
+      state: { status: "canceled" },
+      supervision: { humanRequest: { resolution: { actionId: "cancel" } } },
+    });
   });
 
   test("does not reinterpret a completed worker as failed when success persistence throws", async () => {

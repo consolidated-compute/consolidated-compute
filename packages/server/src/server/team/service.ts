@@ -52,6 +52,7 @@ import { buildTeamRunPreview, createTeamRunPreviewFingerprint } from "./security
 import { createInitialTeamRunSupervision } from "./supervision.js";
 import {
   buildTeamSupervisionDecisionUpdate,
+  canContinueTeamSupervision,
   composeSupervisedWorkerContext,
   composeTeamSupervisorPrompt,
   createTeamSupervisorActionSchema,
@@ -738,7 +739,12 @@ export class TeamRunService {
       maxRetries: 2,
       schemaName: "TeamSupervisorAction",
     });
-    return this.commitSupervisorAction(runId, decisionId, action);
+    return this.commitSupervisorAction(
+      runId,
+      decisionId,
+      action,
+      canContinueTeamSupervision(ready, { dispatchArtifactIssues }),
+    );
   }
 
   private async resolveSupervisorDispatchArtifactIssues(
@@ -765,6 +771,7 @@ export class TeamRunService {
     runId: string,
     decisionId: string,
     action: TeamSupervisorAction,
+    allowContinueAfterEscalation: boolean,
   ): Promise<PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision }> {
     const beforeCommit = requireSupervisedRun(await this.requireRun(runId));
     const attemptId = action.kind === "dispatch" ? randomUUID() : null;
@@ -790,6 +797,7 @@ export class TeamRunService {
             context,
             workerAgentId,
             humanRequestId,
+            allowContinueAfterEscalation,
           }),
       ),
     );

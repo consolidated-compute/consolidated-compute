@@ -119,9 +119,10 @@ not the supervisor, creates one requested worker from the named frozen template 
 decision and planned agent identity are durable. A worker terminal event is authoritative; finish
 notifications may only wake the executor. After `turn_completed`, Artifact or success-settlement
 errors propagate as execution failures; never reinterpret them as a failed worker turn. The first
-executor does not redispatch failed work or route revision Artifacts. An escalation after failed
-work offers cancellation only; reserve continuation for a later executor with durable retry or
-revision semantics.
+executor does not redispatch failed work or route revision Artifacts. An escalation offers
+continuation only when the frozen ledger has a valid next plan, dispatch, or completion action. A
+failed Work Item or blocked Artifact handoff offers cancellation only; reserve those continuation
+paths for a later executor with durable retry or revision semantics.
 
 Compose each initial prompt from these bounded sections:
 
