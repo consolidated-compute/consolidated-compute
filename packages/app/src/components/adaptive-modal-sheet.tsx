@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Modal, Platform, Pressable, ScrollView, Text, View } from "react-native";
@@ -23,6 +23,7 @@ import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { ArrowLeft, Search, X } from "lucide-react-native";
 import {
   IsolatedBottomSheetModal,
+  type ContextBridge,
   useIsolatedBottomSheetVisibility,
 } from "@/components/ui/isolated-bottom-sheet-modal";
 import {
@@ -454,6 +455,36 @@ export interface AdaptiveModalSheetProps {
   sizeContentToCurrentSnapPoint?: boolean;
   /** Whether user-driven close controls and gestures can dismiss the sheet. */
   dismissible?: boolean;
+  /** Re-establishes caller-owned contexts inside the compact bottom-sheet portal. */
+  contextBridge?: ContextBridge | null;
+}
+
+function resolveDesktopCardStyle(desktopMaxWidth: number | undefined): StyleProp<ViewStyle> {
+  return [styles.desktopCard, desktopMaxWidth == null ? null : { maxWidth: desktopMaxWidth }];
+}
+
+type WebTransitionStyle = ViewStyle &
+  Pick<CSSProperties, "transitionDuration" | "transitionProperty" | "transitionTimingFunction">;
+
+function resolveDesktopOverlayStyle(input: {
+  isWebClosing: boolean;
+  modalLayer: number;
+}): StyleProp<ViewStyle> {
+  const webTransitionStyle: WebTransitionStyle = {
+    zIndex: input.modalLayer,
+    opacity: input.isWebClosing ? 0 : 1,
+    transitionDuration: `${WEB_EXIT_DURATION_MS}ms`,
+    transitionProperty: "opacity",
+    transitionTimingFunction: "ease",
+  };
+  return [styles.desktopOverlay, isWeb ? webTransitionStyle : null];
+}
+
+function resolveNativeDismissHandler(
+  acceptsDismissRequest: boolean,
+  onClose: () => void,
+): () => void {
+  return acceptsDismissRequest ? onClose : IGNORE_DISMISS_REQUEST;
 }
 
 export function AdaptiveModalSheet({
@@ -472,6 +503,7 @@ export function AdaptiveModalSheet({
   contentStyle,
   sizeContentToCurrentSnapPoint = false,
   dismissible = true,
+  contextBridge = null,
 }: AdaptiveModalSheetProps) {
   const { theme } = useUnistyles();
   const { t } = useTranslation();
@@ -562,20 +594,11 @@ export function AdaptiveModalSheet({
   );
 
   const desktopCardStyle = useMemo(
-    () => [styles.desktopCard, desktopMaxWidth != null && { maxWidth: desktopMaxWidth }],
+    () => resolveDesktopCardStyle(desktopMaxWidth),
     [desktopMaxWidth],
   );
   const desktopOverlayStyle = useMemo(
-    () => [
-      styles.desktopOverlay,
-      isWeb && {
-        zIndex: modalLayer,
-        opacity: isWebClosing ? 0 : 1,
-        transitionDuration: `${WEB_EXIT_DURATION_MS}ms`,
-        transitionProperty: "opacity",
-        transitionTimingFunction: "ease",
-      },
-    ],
+    () => resolveDesktopOverlayStyle({ isWebClosing, modalLayer }),
     [isWebClosing, modalLayer],
   );
 
@@ -651,7 +674,7 @@ export function AdaptiveModalSheet({
     return (
       <IsolatedBottomSheetModal
         ref={sheetRef}
-        contextBridge={null}
+        contextBridge={contextBridge}
         snapPoints={resolvedSnapPoints}
         index={0}
         enableDynamicSizing={false}
@@ -733,7 +756,7 @@ export function AdaptiveModalSheet({
       transparent
       animationType="fade"
       visible={visible}
-      onRequestClose={dismissal.acceptsDismissRequest ? onClose : IGNORE_DISMISS_REQUEST}
+      onRequestClose={resolveNativeDismissHandler(dismissal.acceptsDismissRequest, onClose)}
       onDismiss={notifyNativeModalDismiss}
       hardwareAccelerated
     >

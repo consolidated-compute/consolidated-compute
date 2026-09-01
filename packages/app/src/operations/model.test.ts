@@ -36,6 +36,7 @@ function workspace(id: string, name: string): WorkspaceSummary {
     workspaceKind: "worktree",
     status: "done",
     currentBranch: `branch/${id}`,
+    changeRequestNumber: null,
   };
 }
 

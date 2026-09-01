@@ -166,7 +166,7 @@ test.describe("Operations handoffs", () => {
         await expect(planCard).toContainText(
           "Review the proposed plan before implementation starts.",
         );
-        await expect(planCard).toContainText("Add the README note.");
+        await expect(planCard).toContainText("Add the (c) README note.");
         await expectPermissionActions(page, ["Implement", "Dismiss"]);
         await returnToOperations(page);
       });

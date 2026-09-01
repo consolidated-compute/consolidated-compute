@@ -501,7 +501,6 @@ export const ru: TranslationResources = {
         added: "Добавлена",
         started: "Начата",
         completed: "Завершена",
-        reopened: "Возобновлена",
       },
     },
     compaction: {
@@ -573,6 +572,7 @@ export const ru: TranslationResources = {
     },
     fileActions: {
       openFile: "Открыть файл",
+      openIn: "Открыть в {{target}}",
       openToSide: "Открыть сбоку",
       copyPath: "Копировать путь",
       copyRelativePath: "Копировать относительный путь",
@@ -732,7 +732,7 @@ export const ru: TranslationResources = {
       },
       menu: {
         openFor: "Открыть меню для {{label}}",
-        copyResumeCommand: "Скопировать команду возобновления",
+        copyResumeCommand: "Копировать команду продолжения",
         copyAgentId: "Скопировать идентификатор агента",
         copyTerminalId: "Скопировать идентификатор терминала",
         copyFilePath: "Скопировать путь к файлу",
@@ -779,7 +779,7 @@ export const ru: TranslationResources = {
         copyFailed: "Не удалось скопировать",
         agentIdCopiedLabel: "ID агента",
         terminalIdCopiedLabel: "Идентификатор терминала",
-        resumeCommandCopiedLabel: "команда возобновления",
+        resumeCommandCopiedLabel: "команда продолжения",
         filePathCopiedLabel: "Путь к файлу",
         resumeIdUnavailable: "ID возобновления недоступен",
         resumeCommandUnavailable: "Команда возобновления недоступна",
@@ -1109,6 +1109,16 @@ export const ru: TranslationResources = {
         accessibility: {
           pullRequest: "PR #{{number}}",
           pullRequest_mr: "MR !{{number}}",
+          checkStatus: {
+            passed: "Успешно",
+            failed: "Ошибка",
+            warning: "Предупреждение",
+            actionRequired: "Требуется действие",
+            manual: "Вручную",
+            pending: "Ожидание",
+            skipped: "Пропущено",
+            cancelled: "Отменено",
+          },
         },
         states: {
           draft: "Черновик",
@@ -1299,6 +1309,14 @@ export const ru: TranslationResources = {
         serviceRunning: "Сервис {{name}} запущен",
         serviceUnhealthy: "Сервис {{name}} работает некорректно",
         creating: "Создание...",
+      },
+      checks: {
+        passed: "Успешные: {{count}}",
+        failed: "Ошибки: {{count}}",
+        warning: "Предупреждения: {{count}}",
+        actionRequired: "Требуется действие: {{count}}",
+        manual: "Вручную: {{count}}",
+        pending: "Ожидают: {{count}}",
       },
       actions: {
         menu: "Действия рабочего пространства",
@@ -1720,6 +1738,10 @@ export const ru: TranslationResources = {
         title: "Прямое подключение",
         description: "Локальная сеть или VPN.",
       },
+      remoteSsh: {
+        title: "Удалённый SSH",
+        description: "Подключение через SSH-клиент настольного приложения.",
+      },
       scanQr: {
         title: "Сканировать QR-код",
         description: "Зашифрованное подключение через ретранслятор.",
@@ -1770,6 +1792,24 @@ export const ru: TranslationResources = {
         unableToConnect:
           "Не удалось подключиться. Проверьте адрес хоста и порт, а также доступность демона.",
         details: "Подробности: {{detail}}",
+      },
+    },
+    remoteSsh: {
+      title: "Удалённый SSH",
+      helper: "Подключитесь к демону Paseo на удалённом хосте.",
+      fields: {
+        target: "Хост SSH",
+        daemonPassword: "Пароль демона",
+      },
+      actions: {
+        cancel: "Отмена",
+        connect: "Подключить",
+        connecting: "Подключение...",
+      },
+      errors: {
+        targetRequired: "Укажите хост SSH",
+        invalidTarget: "Укажите корректный хост ssh://",
+        failedToConnect: "Не удалось подключиться по SSH. {{detail}}",
       },
     },
     link: {
@@ -2416,6 +2456,7 @@ export const ru: TranslationResources = {
       badges: {
         relay: "Ретранслятор",
         local: "Локальный",
+        remoteSsh: "Удалённый SSH",
       },
       connections: {
         title: "Подключения",

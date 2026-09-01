@@ -41,7 +41,7 @@ test.describe("Agent profiles settings", () => {
           exclude_tmpdir_env_var: true,
         },
         web_search: "disabled",
-        features: { network_proxy: false },
+        features: { network_proxy: false, multi_agent_v2: false },
       });
     } finally {
       await seed.restore();

@@ -17,6 +17,7 @@ import {
   type ServerInfoStatusPayload,
 } from "@getpaseo/protocol/messages";
 import { validateWSOutboundMessage } from "@getpaseo/protocol/validation/ws-outbound";
+import { normalizeHubRelationshipPayload } from "./compat/normalize-hub-relationship.js";
 import type {
   AgentStreamEventPayload,
   AgentSnapshotPayload,
@@ -105,6 +106,8 @@ import type {
   WorkspaceRecoveryState,
   PluginListItem,
   PluginLogEntry,
+  PluginSourceStatusItem,
+  PluginSourceUpdateItem,
   AgentSkillSelection,
   AgentSkillsStatus,
   AgentSkillsSaveResult,
@@ -381,7 +384,7 @@ export type BrowserAutomationExecuteResponseMessage = BrowserAutomationExecuteRe
 export interface DaemonClientConfig {
   url: string;
   clientId: string;
-  clientType?: "mobile" | "browser" | "cli" | "mcp";
+  clientType?: "mobile" | "browser" | "cli" | "mcp" | "hub";
   appVersion?: string;
   runtimeGeneration?: number | null;
   password?: string;
@@ -4781,12 +4784,35 @@ export class DaemonClient {
     });
   }
 
-  async connectHub(hubUrl: string, token: string, requestId?: string) {
+  async connectHub(
+    hubUrl: string,
+    token: string,
+    permissions: readonly string[] = [],
+    requestId?: string,
+  ) {
     this.requireHubRelationshipSupport();
     return this.sendCorrelatedSessionRequest({
       requestId,
-      message: { type: "hub.management.daemon.connect.request", hubUrl, token },
+      message: { type: "hub.management.daemon.connect.request", hubUrl, token, permissions },
       responseType: "hub.management.daemon.connect.response",
+      selectPayload: normalizeHubRelationshipPayload,
+    });
+  }
+
+  async updateHubPermissions(
+    input: { grant?: readonly string[]; revoke?: readonly string[] },
+    requestId?: string,
+  ) {
+    this.requireHubRelationshipSupport();
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "hub.management.daemon.permissions.update.request",
+        grant: input.grant ?? [],
+        revoke: input.revoke ?? [],
+      },
+      responseType: "hub.management.daemon.permissions.update.response",
+      selectPayload: normalizeHubRelationshipPayload,
     });
   }
 
@@ -4796,6 +4822,7 @@ export class DaemonClient {
       requestId,
       message: { type: "hub.management.daemon.get_status.request" },
       responseType: "hub.management.daemon.get_status.response",
+      selectPayload: normalizeHubRelationshipPayload,
     });
   }
 
@@ -4805,6 +4832,7 @@ export class DaemonClient {
       requestId,
       message: { type: "hub.management.daemon.disconnect.request", force },
       responseType: "hub.management.daemon.disconnect.response",
+      selectPayload: normalizeHubRelationshipPayload,
     });
   }
 
@@ -5045,6 +5073,49 @@ export class DaemonClient {
       responseType: "plugin.directory.install.response",
     });
     return payload.plugin;
+  }
+
+  async installPluginSource(input: {
+    source: string;
+    id?: string;
+    ref?: string;
+    pluginPath?: string;
+  }): Promise<PluginListItem> {
+    const requestId = this.createRequestId();
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "plugin.source.install.request", requestId, ...input },
+      responseType: "plugin.source.install.response",
+    });
+    return payload.plugin;
+  }
+
+  async getPluginSourceStatus(pluginId?: string): Promise<PluginSourceStatusItem[]> {
+    const requestId = this.createRequestId();
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "plugin.source.status.request",
+        requestId,
+        ...(pluginId ? { pluginId } : {}),
+      },
+      responseType: "plugin.source.status.response",
+    });
+    return payload.plugins;
+  }
+
+  async updatePluginSources(pluginId?: string): Promise<PluginSourceUpdateItem[]> {
+    const requestId = this.createRequestId();
+    const payload = await this.sendCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "plugin.source.update.request",
+        requestId,
+        ...(pluginId ? { pluginId } : {}),
+      },
+      responseType: "plugin.source.update.response",
+    });
+    return payload.plugins;
   }
 
   async inspectDirectoryPlugin(path: string): Promise<{ id: string }> {

@@ -119,35 +119,17 @@ export function createRequireBearerMiddleware(
   };
 }
 
-// Routes that authenticate via their own capability and therefore must not be
-// gated a second time behind the daemon password.
-const BEARER_AUTH_BYPASS_PATHS = new Set([
-  // Unauthenticated liveness probe.
-  "/api/health",
-  // Guarded by a single-use download token (crypto-random UUID, 60s TTL,
-  // consumed on first use) that is only ever issued over the
-  // already-authenticated WebSocket. The token IS the capability for this
-  // route. Requiring the daemon password on top of it breaks browser and
-  // Electron downloads: those trigger the download via an anchor navigation,
-  // which cannot attach an `Authorization` header. The download endpoint still
-  // rejects requests without a valid token (400/403), so dropping the bearer
-  // here does not make the route unauthenticated.
-  "/api/files/download",
-  // The daemon injects its own agents' Paseo MCP connections at this endpoint
-  // (and connects its own per-client MCP client here). Those connections cannot
-  // carry the daemon password — it is only known in plaintext when set via env,
-  // never when set via the app — so the route authenticates each agent with an
-  // identity-bound capability (see isAgentMcpRequestAuthorized). Capabilities
-  // stay inside local agent configs/sessions, and callers still need one or a
-  // valid daemon password, so bypassing the global bearer is not unauthenticated.
-  "/mcp/agents",
-]);
+const SELF_AUTHENTICATING_ROUTES = new Set(["/api/files/download", "/mcp/agents"]);
+
+function isBearerFreeRoute(path: string): boolean {
+  return path === "/api/health" || SELF_AUTHENTICATING_ROUTES.has(path);
+}
 
 export function shouldBypassBearerAuth(method: string, path: string): boolean {
   if (method === "OPTIONS") {
     return true;
   }
-  return BEARER_AUTH_BYPASS_PATHS.has(path);
+  return isBearerFreeRoute(path);
 }
 
 /**

@@ -1,12 +1,12 @@
 import { getForgePresentation } from "@/git/forge";
 import { selectPrHintFromStatus, type PrHint } from "@/git/pr-hint";
 import { mapCheckStatus } from "@/git/pull-request-panel/check-status";
-import { summarizeChecks } from "@/git/pull-request-panel/checks-summary";
+import { summarizeChecks, type ChecksOutcome } from "@/git/pull-request-panel/checks-summary";
 import type { PrPaneCheck } from "@/git/pull-request-panel/data";
 import type { WorkspaceSummary } from "@/utils/projects";
 
 export type OperationsChangeRequestState = PrHint["state"] | "unknown";
-export type OperationsChecksStatus = NonNullable<PrHint["checksStatus"]> | "unknown";
+export type OperationsChecksStatus = ChecksOutcome | "unknown";
 export type OperationsReviewDecision =
   | Exclude<NonNullable<PrHint["reviewDecision"]>, null>
   | "unknown";
@@ -31,6 +31,7 @@ function selectChecksStatus(hint: PrHint): OperationsChecksStatus {
       provider: hint.forge,
       name: check.name,
       status: mapCheckStatus(check.status),
+      traits: check.traits,
       url: check.url ?? "",
     }));
     return summarizeChecks(checks).outcome;

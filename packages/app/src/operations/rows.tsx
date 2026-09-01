@@ -106,6 +106,8 @@ function forgeContextParts(
         return t("workspace.git.pr.checksSummary.failedAccessible");
       case "pending":
         return t("workspace.git.pr.checksSummary.runningAccessible");
+      case "actionRequired":
+        return t("workspace.git.pr.accessibility.checkStatus.actionRequired");
       case "none":
         return t("operations.forge.noChecks");
       case "unknown":
