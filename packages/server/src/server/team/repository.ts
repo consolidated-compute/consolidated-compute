@@ -110,11 +110,16 @@ export type TeamRunUpdater = (
 ) => TeamRunUpdate | Promise<TeamRunUpdate>;
 
 export type TeamRunSupervisionDecision = PersistedTeamRunSupervision["decisions"][number];
-type WithoutRequiredDecisionTimestamp<T> = T extends TeamRunSupervisionDecision
+type TeamRunSupervisionCommitDecision = TeamRunSupervisionDecision extends infer Decision
+  ? Decision extends { kind: "dispatch" }
+    ? Omit<Decision, "inputArtifactIds"> & { inputArtifactIds: string[] }
+    : Decision
+  : never;
+type WithoutRequiredDecisionTimestamp<T> = T extends TeamRunSupervisionCommitDecision
   ? Omit<T, "createdAt"> & { createdAt?: string }
   : never;
 export type TeamRunSupervisionDecisionCandidate =
-  WithoutRequiredDecisionTimestamp<TeamRunSupervisionDecision>;
+  WithoutRequiredDecisionTimestamp<TeamRunSupervisionCommitDecision>;
 export interface CommitTeamRunSupervisionDecisionInput {
   runId: string;
   expectedSupervisionRevision: number;
@@ -132,7 +137,7 @@ export type TeamRunSupervisionUpdater = (
 export interface TeamRunSupervisionDecisionCommitContext {
   outputArtifactId: string | null;
   committedAt: string;
-  decision: TeamRunSupervisionDecision;
+  decision: TeamRunSupervisionCommitDecision;
 }
 
 export interface BeginTeamRunSupervisionTurnInput {
@@ -857,7 +862,7 @@ export class TeamRepository {
         (decision) => decision.actionId === input.decision.actionId,
       );
       if (existingDecision) {
-        if (decisionMatchesCandidate(existingDecision, input.decision)) return current;
+        if (decisionMatchesCandidate(current, existingDecision, input.decision)) return current;
         throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
       }
       if (current.supervision.revision !== input.expectedSupervisionRevision) {
@@ -877,19 +882,19 @@ export class TeamRepository {
       ) as PersistedTeamRunRecord & {
         supervision: PersistedTeamRunSupervision;
       };
-      const reservedArtifactIds =
-        input.decision.kind === "dispatch"
-          ? await this.readReservedTeamRunArtifactIds()
-          : new Set<string>();
-      const outputArtifactId =
-        input.decision.kind === "dispatch"
-          ? this.generateAvailableArtifactId(reservedArtifactIds)
-          : null;
+      const launchesWorker =
+        input.decision.kind === "dispatch" || input.decision.kind === "request_revision";
+      const reservedArtifactIds = launchesWorker
+        ? await this.readReservedTeamRunArtifactIds()
+        : new Set<string>();
+      const outputArtifactId = launchesWorker
+        ? this.generateAvailableArtifactId(reservedArtifactIds)
+        : null;
       const committedAt = this.now().toISOString();
       const decision = {
         ...input.decision,
         createdAt: committedAt,
-      } as TeamRunSupervisionDecision;
+      } as TeamRunSupervisionCommitDecision;
       const update = await updater(supervisedCurrent, {
         outputArtifactId,
         committedAt,
@@ -1403,7 +1408,7 @@ function supervisionDecisionUpdateMatches(
   update: TeamRunSupervisionUpdate,
   input: {
     expectedSupervisionRevision: number;
-    decision: TeamRunSupervisionDecision;
+    decision: TeamRunSupervisionCommitDecision;
   },
   reservedArtifactIds: ReadonlySet<string>,
 ): boolean {
@@ -1426,41 +1431,67 @@ function supervisionDecisionUpdateMatches(
 }
 
 function decisionMatchesCandidate(
+  run: PersistedTeamRunRecord,
   decision: TeamRunSupervisionDecision,
   candidate: TeamRunSupervisionDecisionCandidate,
 ): boolean {
   const { createdAt: _createdAt, ...persisted } = decision;
   const { createdAt: _candidateCreatedAt, ...requested } = candidate;
-  return equal(persisted, requested);
+  if (persisted.kind !== "dispatch" || persisted.inputArtifactIds !== undefined) {
+    return equal(persisted, requested);
+  }
+  const attempt = run.steps.find(
+    (step) =>
+      step.snapshot.supervision?.kind === "worker" &&
+      step.snapshot.supervision.attemptId === persisted.attemptId,
+  );
+  return equal(
+    { ...persisted, inputArtifactIds: attempt?.snapshot.inputArtifactIds ?? [] },
+    requested,
+  );
 }
 
 function decisionPreservesWorkItemLedger(
   preserved: PersistedTeamRunRecord,
   update: TeamRunSupervisionUpdate,
-  decision: TeamRunSupervisionDecision,
+  decision: TeamRunSupervisionCommitDecision,
 ): boolean {
   const preservedWorkItems = preserved.supervision!.workItems;
-  if (update.supervision.workItems.length < preservedWorkItems.length) return false;
+  if (
+    !canSupervisionDecisionChangeWorkItemCount(
+      preservedWorkItems.length,
+      update.supervision.workItems.length,
+      decision.kind,
+    )
+  ) {
+    return false;
+  }
   return preservedWorkItems.every((workItem, index) => {
     const updatedWorkItem = update.supervision.workItems[index];
     if (!updatedWorkItem) return false;
-    const expectedInputArtifactIds =
-      decision.kind === "dispatch" && decision.workItemId === workItem.id
-        ? resolvePrecedingAcceptedArtifactIds(preserved, workItem.id)
-        : workItem.inputArtifactIds;
+    const launchesThisWorkItem =
+      (decision.kind === "dispatch" || decision.kind === "request_revision") &&
+      decision.workItemId === workItem.id;
+    if (!launchesThisWorkItem) return equal(updatedWorkItem, workItem);
     const identityMatches =
       updatedWorkItem.id === workItem.id &&
       updatedWorkItem.templateStepId === workItem.templateStepId &&
-      expectedInputArtifactIds !== null &&
-      equal(updatedWorkItem.inputArtifactIds, expectedInputArtifactIds);
+      equal(updatedWorkItem.inputArtifactIds, decision.inputArtifactIds);
     const attemptHistoryMatches = workItem.attemptIds.every(
       (attemptId, attemptIndex) => updatedWorkItem.attemptIds[attemptIndex] === attemptId,
     );
-    const acceptedAttemptMatches =
-      workItem.acceptedAttemptId === null ||
-      updatedWorkItem.acceptedAttemptId === workItem.acceptedAttemptId;
-    return identityMatches && attemptHistoryMatches && acceptedAttemptMatches;
+    return identityMatches && attemptHistoryMatches && updatedWorkItem.acceptedAttemptId === null;
   });
+}
+
+export function canSupervisionDecisionChangeWorkItemCount(
+  preservedCount: number,
+  updatedCount: number,
+  decisionKind: TeamRunSupervisionDecision["kind"],
+): boolean {
+  return (
+    updatedCount >= preservedCount && (decisionKind === "plan" || updatedCount === preservedCount)
+  );
 }
 
 function resolvePrecedingAcceptedArtifactIds(
@@ -1488,7 +1519,7 @@ function resolvePrecedingAcceptedArtifactIds(
 function decisionPreservesHumanRequest(
   preserved: PersistedTeamRunRecord,
   update: TeamRunSupervisionUpdate,
-  decision: TeamRunSupervisionDecision,
+  decision: TeamRunSupervisionCommitDecision,
 ): boolean {
   const preservedRequest = preserved.supervision!.humanRequest;
   if (decision.kind === "escalate" && preservedRequest === null) return true;
@@ -1518,7 +1549,7 @@ function decisionPreservesRunStateProvenance(
 
 function decisionProducesRequiredSupervisionEffect(
   update: TeamRunSupervisionUpdate,
-  decision: TeamRunSupervisionDecision,
+  decision: TeamRunSupervisionCommitDecision,
 ): boolean {
   const request = update.supervision.humanRequest;
   const completesRun =
@@ -1539,14 +1570,14 @@ function decisionProducesRequiredSupervisionEffect(
 function decisionAppendsExpectedWorkerAttempt(
   preserved: PersistedTeamRunRecord,
   update: TeamRunSupervisionUpdate,
-  decision: TeamRunSupervisionDecision,
+  decision: TeamRunSupervisionCommitDecision,
   reservedArtifactIds: ReadonlySet<string>,
 ): boolean {
   const appendedWorkers: PersistedTeamRunRecord["steps"] = [];
   for (const step of update.steps.slice(preserved.steps.length)) {
     if (step.snapshot.supervision?.kind === "worker") appendedWorkers.push(step);
   }
-  if (decision.kind !== "dispatch") return appendedWorkers.length === 0;
+  if (!isWorkerLaunchDecision(decision)) return appendedWorkers.length === 0;
   const attemptAlreadyExists = preserved.steps.some(
     (step) =>
       step.snapshot.supervision?.kind === "worker" &&
@@ -1558,16 +1589,147 @@ function decisionAppendsExpectedWorkerAttempt(
   const workItem = update.supervision.workItems.find(
     (candidate) => candidate.id === decision.workItemId,
   );
+  const preservedWorkItem = preserved.supervision!.workItems.find(
+    (candidate) => candidate.id === decision.workItemId,
+  );
+  if (!workItem || metadata?.kind !== "worker") return false;
+  if (decision.kind === "request_revision" && !preservedWorkItem) return false;
+  const preservedAttemptIds = preservedWorkItem?.attemptIds ?? [];
+  const expectedRevisionParent =
+    decision.kind === "request_revision" ? (preservedWorkItem?.acceptedAttemptId ?? null) : null;
+  const context = {
+    preserved,
+    update,
+    decision,
+    worker,
+    metadata,
+    workItem,
+    preservedWorkItem,
+    preservedAttemptIds,
+    expectedRevisionParent,
+  };
+  if (!workerLaunchBaseMatches(context, reservedArtifactIds)) return false;
+  return decision.kind === "dispatch"
+    ? workerDispatchMatches(context)
+    : workerRevisionMatches(context);
+}
+
+type WorkerLaunchDecision = Extract<
+  TeamRunSupervisionCommitDecision,
+  { kind: "dispatch" | "request_revision" }
+>;
+
+interface WorkerLaunchValidationContext {
+  preserved: PersistedTeamRunRecord;
+  update: TeamRunSupervisionUpdate;
+  decision: WorkerLaunchDecision;
+  worker: PersistedTeamRunRecord["steps"][number];
+  metadata: Extract<
+    NonNullable<PersistedTeamRunRecord["steps"][number]["snapshot"]["supervision"]>,
+    { kind: "worker" }
+  >;
+  workItem: PersistedTeamRunSupervision["workItems"][number];
+  preservedWorkItem: PersistedTeamRunSupervision["workItems"][number] | undefined;
+  preservedAttemptIds: string[];
+  expectedRevisionParent: string | null;
+}
+
+function isWorkerLaunchDecision(
+  decision: TeamRunSupervisionCommitDecision,
+): decision is WorkerLaunchDecision {
+  return decision.kind === "dispatch" || decision.kind === "request_revision";
+}
+
+function workerLaunchBaseMatches(
+  context: WorkerLaunchValidationContext,
+  reservedArtifactIds: ReadonlySet<string>,
+): boolean {
+  const {
+    decision,
+    expectedRevisionParent,
+    metadata,
+    preservedAttemptIds,
+    update,
+    workItem,
+    worker,
+  } = context;
+  const outputArtifactId = worker.snapshot.outputArtifact?.id;
+  const acceptedArtifactIds = collectAcceptedArtifactIds(context.preserved);
+  const inputsAreAcceptedOutputs = (worker.snapshot.inputArtifactIds ?? []).every((artifactId) =>
+    acceptedArtifactIds.has(artifactId),
+  );
+  return [
+    metadata.workItemId === decision.workItemId,
+    metadata.attemptId === decision.attemptId,
+    metadata.attemptNumber === preservedAttemptIds.length + 1,
+    metadata.revisionParentAttemptId === expectedRevisionParent,
+    worker.state.status === "creating",
+    workItem.status === "active",
+    workItem.acceptedAttemptId === null,
+    equal(workItem.attemptIds, [...preservedAttemptIds, decision.attemptId]),
+    update.supervision.phase === "working",
+    outputArtifactId !== undefined,
+    equal(worker.snapshot.inputArtifactIds, workItem.inputArtifactIds),
+    equal(worker.snapshot.inputArtifactIds, decision.inputArtifactIds),
+    inputsAreAcceptedOutputs,
+    outputArtifactId !== undefined && !reservedArtifactIds.has(outputArtifactId),
+  ].every(Boolean);
+}
+
+function workerDispatchMatches(context: WorkerLaunchValidationContext): boolean {
+  const { decision, preserved, preservedAttemptIds, preservedWorkItem, worker } = context;
+  let expectedInputs: string[] | null = [];
+  if (preservedWorkItem) {
+    expectedInputs = resolvePrecedingAcceptedArtifactIds(preserved, decision.workItemId);
+  }
+  return [
+    preservedAttemptIds.length === 0,
+    preservedWorkItem === undefined || preservedWorkItem.status === "planned",
+    expectedInputs !== null,
+    expectedInputs !== null && equal(worker.snapshot.inputArtifactIds, expectedInputs),
+  ].every(Boolean);
+}
+
+function workerRevisionMatches(context: WorkerLaunchValidationContext): boolean {
+  const {
+    decision,
+    expectedRevisionParent,
+    preserved,
+    preservedAttemptIds,
+    preservedWorkItem,
+    worker,
+  } = context;
+  if (!preservedWorkItem || expectedRevisionParent === null) return false;
+  const parentArtifactId = findAttemptOutputArtifactId(preserved, expectedRevisionParent);
+  return [
+    preservedWorkItem.status === "succeeded",
+    preservedAttemptIds.length < preserved.supervision!.limits.maxAttemptsPerWorkItem,
+    parentArtifactId !== null,
+    parentArtifactId !== null && worker.snapshot.inputArtifactIds?.includes(parentArtifactId),
+    equal(worker.snapshot.inputArtifactIds, decision.inputArtifactIds),
+  ].every(Boolean);
+}
+
+function collectAcceptedArtifactIds(run: PersistedTeamRunRecord): Set<string> {
+  return new Set(
+    run.supervision!.workItems.flatMap((workItem) => {
+      if (!workItem.acceptedAttemptId) return [];
+      const artifactId = findAttemptOutputArtifactId(run, workItem.acceptedAttemptId);
+      return artifactId ? [artifactId] : [];
+    }),
+  );
+}
+
+function findAttemptOutputArtifactId(
+  run: PersistedTeamRunRecord,
+  attemptId: string,
+): string | null {
   return (
-    metadata?.kind === "worker" &&
-    metadata.workItemId === decision.workItemId &&
-    metadata.attemptId === decision.attemptId &&
-    worker.state.status === "creating" &&
-    workItem?.status === "active" &&
-    update.supervision.phase === "working" &&
-    worker.snapshot.outputArtifact !== undefined &&
-    equal(worker.snapshot.inputArtifactIds, workItem.inputArtifactIds) &&
-    !reservedArtifactIds.has(worker.snapshot.outputArtifact.id)
+    run.steps.find(
+      (step) =>
+        step.snapshot.supervision?.kind === "worker" &&
+        step.snapshot.supervision.attemptId === attemptId,
+    )?.snapshot.outputArtifact?.id ?? null
   );
 }
 

@@ -63,6 +63,7 @@ import {
   resolveSupervisedWorkItemInputArtifactIds,
   TEAM_SUPERVISOR_PROMPT_MAX_BYTES,
   type TeamSupervisorAction,
+  type TeamSupervisorActionSchemaOptions,
 } from "./supervised-execution.js";
 
 type TeamRunStep = PersistedTeamRunRecord["steps"][number];
@@ -735,9 +736,9 @@ export class TeamRunService {
     }
     const ready = requireSupervisedRun(await this.requireRun(runId));
     const readySupervisor = requireActiveSupervisor(ready);
-    const dispatchArtifactIssues = await this.resolveSupervisorDispatchArtifactIssues(ready);
-    const schema = createTeamSupervisorActionSchema(ready, { dispatchArtifactIssues });
-    const prompt = composeTeamSupervisorPrompt(ready, { dispatchArtifactIssues });
+    const artifactRouting = await this.resolveSupervisorArtifactRouting(ready);
+    const schema = createTeamSupervisorActionSchema(ready, artifactRouting);
+    const prompt = composeTeamSupervisorPrompt(ready, artifactRouting);
     const structuredPrompt = buildStructuredAgentResponsePrompt({
       prompt,
       schema,
@@ -766,28 +767,51 @@ export class TeamRunService {
       runId,
       decisionId,
       action,
-      canContinueTeamSupervision(ready, { dispatchArtifactIssues }),
+      canContinueTeamSupervision(ready, artifactRouting),
     );
   }
 
-  private async resolveSupervisorDispatchArtifactIssues(
+  private async resolveSupervisorArtifactRouting(
     run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
-  ): Promise<ReadonlyMap<string, string>> {
-    const issues = new Map<string, string>();
-    const workItem = run.supervision.workItems.find((candidate, index, workItems) => {
-      return (
-        candidate.status === "planned" &&
-        workItems.slice(0, index).every((predecessor) => predecessor.status === "succeeded")
-      );
-    });
-    if (!workItem) return issues;
-    try {
-      const inputArtifactIds = resolveSupervisedWorkItemInputArtifactIds(run, workItem.id);
-      await resolveTeamRunArtifactInputs(this.requireAssignmentRepository(), run, inputArtifactIds);
-    } catch (error) {
-      issues.set(workItem.id, boundedError(errorMessage(error)));
+  ): Promise<TeamSupervisorActionSchemaOptions> {
+    const artifactInputIssues = new Map<string, string>();
+    const availableArtifactBytes = new Map<string, number>();
+    const assignments = this.requireAssignmentRepository();
+    for (const step of run.steps) {
+      if (
+        step.snapshot.supervision?.kind !== "worker" ||
+        step.state.status !== "succeeded" ||
+        !step.snapshot.outputArtifact
+      ) {
+        continue;
+      }
+      const artifactId = step.snapshot.outputArtifact.id;
+      try {
+        const [artifact] = await resolveTeamRunArtifactInputs(assignments, run, [artifactId]);
+        if (artifact) availableArtifactBytes.set(artifactId, artifact.includedBytes);
+      } catch {
+        // The action schema treats outputs absent from this map as unavailable. The targeted
+        // work-item issue below carries the bounded diagnostic when an action requires one.
+      }
     }
-    return issues;
+    for (const [index, workItem] of run.supervision.workItems.entries()) {
+      const canDispatch =
+        workItem.status === "planned" &&
+        run.supervision.workItems
+          .slice(0, index)
+          .every((predecessor) => predecessor.status === "succeeded");
+      const canRevise = workItem.status === "succeeded" && workItem.acceptedAttemptId !== null;
+      if (!canDispatch && !canRevise) continue;
+      try {
+        const requiredArtifactIds = canDispatch
+          ? resolveSupervisedWorkItemInputArtifactIds(run, workItem.id)
+          : [requireAcceptedWorkItemOutputArtifactId(run, workItem.id)];
+        await resolveTeamRunArtifactInputs(assignments, run, requiredArtifactIds);
+      } catch (error) {
+        artifactInputIssues.set(workItem.id, boundedError(errorMessage(error)));
+      }
+    }
+    return { artifactInputIssues, availableArtifactBytes };
   }
 
   private async commitSupervisorAction(
@@ -797,14 +821,15 @@ export class TeamRunService {
     allowContinueAfterEscalation: boolean,
   ): Promise<PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision }> {
     const beforeCommit = requireSupervisedRun(await this.requireRun(runId));
-    const attemptId = action.kind === "dispatch" ? randomUUID() : null;
+    const launchesWorker = action.kind === "dispatch" || action.kind === "request_revision";
+    const attemptId = launchesWorker ? randomUUID() : null;
     const decision = normalizeTeamSupervisorDecision({
       run: beforeCommit,
       action,
       decisionId,
       attemptId,
     });
-    const workerAgentId = action.kind === "dispatch" ? this.createAgentId() : null;
+    const workerAgentId = launchesWorker ? this.createAgentId() : null;
     const humanRequestId = action.kind === "escalate" ? randomUUID() : null;
     return requireSupervisedRun(
       await this.repository.commitSupervisionDecision(
@@ -1632,6 +1657,24 @@ function terminationStepState(
     startedAt: step.state.startedAt,
     endedAt,
   };
+}
+
+function requireAcceptedWorkItemOutputArtifactId(
+  run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  workItemId: string,
+): string {
+  const workItem = run.supervision.workItems.find((candidate) => candidate.id === workItemId);
+  const acceptedAttemptId = workItem?.acceptedAttemptId;
+  const acceptedStep = run.steps.find(
+    (step) =>
+      step.snapshot.supervision?.kind === "worker" &&
+      step.snapshot.supervision.attemptId === acceptedAttemptId,
+  );
+  const artifactId = acceptedStep?.snapshot.outputArtifact?.id;
+  if (!acceptedAttemptId || acceptedStep?.state.status !== "succeeded" || !artifactId) {
+    throw new Error(`Work item ${workItemId} has no accepted output Artifact`);
+  }
+  return artifactId;
 }
 
 function boundedError(message: string): string {

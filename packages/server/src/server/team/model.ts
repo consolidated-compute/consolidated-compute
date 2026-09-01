@@ -175,6 +175,23 @@ export const PersistedTeamRunArtifactOutputSchema = z
   })
   .strict();
 
+export const PersistedTeamRunArtifactInputIdsSchema = z
+  .array(PersistedAssignmentArtifactIdSchema)
+  .max(TEAM_SUPERVISION_MAX_WORK_ITEMS)
+  .superRefine((artifactIds, context) => {
+    const seenArtifactIds = new Set<string>();
+    for (const [index, artifactId] of artifactIds.entries()) {
+      if (seenArtifactIds.has(artifactId)) {
+        context.addIssue({
+          code: "custom",
+          path: [index],
+          message: `Duplicate supervised input Artifact ID: ${artifactId}`,
+        });
+      }
+      seenArtifactIds.add(artifactId);
+    }
+  });
+
 export const PersistedTeamRunStepSnapshotSchema = z
   .object({
     stepId: PersistedTeamEntityIdSchema,
@@ -183,10 +200,7 @@ export const PersistedTeamRunStepSnapshotSchema = z
     roleInstructions: nonBlankStringSchema(TEAM_INSTRUCTIONS_MAX_CHARS),
     stepInstructions: nonBlankStringSchema(TEAM_INSTRUCTIONS_MAX_CHARS).nullable(),
     resolvedLaunch: PersistedTeamResolvedLaunchSchema,
-    inputArtifactIds: z
-      .array(PersistedAssignmentArtifactIdSchema)
-      .max(TEAM_MAX_WORKFLOW_STEPS)
-      .optional(),
+    inputArtifactIds: PersistedTeamRunArtifactInputIdsSchema.optional(),
     outputArtifact: PersistedTeamRunArtifactOutputSchema.optional(),
     supervision: z
       .discriminatedUnion("kind", [
@@ -246,29 +260,14 @@ export const PersistedTeamRunSupervisionWorkItemSchema = z
   .object({
     id: PersistedTeamEntityIdSchema,
     templateStepId: PersistedTeamEntityIdSchema,
-    inputArtifactIds: z
-      .array(PersistedAssignmentArtifactIdSchema)
-      .max(TEAM_SUPERVISION_MAX_WORK_ITEMS),
+    inputArtifactIds: PersistedTeamRunArtifactInputIdsSchema,
     attemptIds: z
       .array(PersistedTeamEntityIdSchema)
       .max(TEAM_SUPERVISION_MAX_ATTEMPTS_PER_WORK_ITEM),
     acceptedAttemptId: PersistedTeamEntityIdSchema.nullable(),
     status: z.enum(["planned", "active", "succeeded", "failed", "canceled", "interrupted"]),
   })
-  .strict()
-  .superRefine((workItem, context) => {
-    const seenArtifactIds = new Set<string>();
-    for (const [index, artifactId] of workItem.inputArtifactIds.entries()) {
-      if (seenArtifactIds.has(artifactId)) {
-        context.addIssue({
-          code: "custom",
-          path: ["inputArtifactIds", index],
-          message: `Duplicate supervised input Artifact ID: ${artifactId}`,
-        });
-      }
-      seenArtifactIds.add(artifactId);
-    }
-  });
+  .strict();
 
 const PersistedTeamRunSupervisionDecisionBaseSchema = z.object({
   id: PersistedTeamEntityIdSchema,
@@ -288,11 +287,14 @@ export const PersistedTeamRunSupervisionDecisionSchema = z.discriminatedUnion("k
     kind: z.literal("dispatch"),
     workItemId: PersistedTeamEntityIdSchema,
     attemptId: PersistedTeamEntityIdSchema,
+    // COMPAT(supervisedDispatchInputs): added in v0.7.0, review after 2027-03-01; remove once pre-v0.7.0 Team Run records are migrated or retired.
+    inputArtifactIds: PersistedTeamRunArtifactInputIdsSchema.optional(),
   }).strict(),
   PersistedTeamRunSupervisionDecisionBaseSchema.extend({
     kind: z.literal("request_revision"),
     workItemId: PersistedTeamEntityIdSchema,
     attemptId: PersistedTeamEntityIdSchema,
+    inputArtifactIds: PersistedTeamRunArtifactInputIdsSchema,
   }).strict(),
   PersistedTeamRunSupervisionDecisionBaseSchema.extend({
     kind: z.literal("escalate"),
@@ -783,6 +785,7 @@ type SupervisedStepMetadata = NonNullable<SupervisedRunStep["snapshot"]["supervi
 type SupervisorStepMetadata = Extract<SupervisedStepMetadata, { kind: "supervisor" }>;
 type WorkerStepMetadata = Extract<SupervisedStepMetadata, { kind: "worker" }>;
 type SupervisionDecision = NonNullable<TeamRunRecordShape["supervision"]>["decisions"][number];
+type SupervisionWorkItem = NonNullable<TeamRunRecordShape["supervision"]>["workItems"][number];
 
 interface SupervisedStepValidationContext {
   run: TeamRunRecordShape;
@@ -952,12 +955,6 @@ function validateWorkerStep(
       message: "Worker attempt must be listed by its supervised work item",
     });
   }
-  if (workItem && !sameStrings(step.snapshot.inputArtifactIds ?? [], workItem.inputArtifactIds)) {
-    context.issues.push({
-      path: ["steps", index, "snapshot", "inputArtifactIds"],
-      message: "Worker attempt inputs must match the frozen work item Artifact inputs",
-    });
-  }
   if (workItem && ACTIVE_STEP_STATUSES.has(step.state.status) && workItem.status !== "active") {
     context.issues.push({
       path: ["supervision", "workItems", context.run.supervision!.workItems.indexOf(workItem)],
@@ -1103,6 +1100,15 @@ function validateSupervisionWorkItems(run: TeamRunRecordShape): ContractIssue[] 
         message: "Accepted attempt must belong to its supervised work item",
       });
     }
+    if (
+      workItem.acceptedAttemptId !== null &&
+      workItem.attemptIds.at(-1) !== workItem.acceptedAttemptId
+    ) {
+      issues.push({
+        path: ["supervision", "workItems", index, "acceptedAttemptId"],
+        message: "Accepted attempt must be the latest supervised work-item attempt",
+      });
+    }
     if ((workItem.status === "succeeded") !== (workItem.acceptedAttemptId !== null)) {
       issues.push({
         path: ["supervision", "workItems", index, "status"],
@@ -1126,7 +1132,7 @@ function validateSupervisionDecisions(run: TeamRunRecordShape): ContractIssue[] 
   const attemptIds = new Set(supervision.workItems.flatMap((workItem) => workItem.attemptIds));
   const decisionIds = new Set<string>();
   const actionIds = new Set<string>();
-  const dispatchedAttemptIds = new Set<string>();
+  const launchedAttemptIds = new Set<string>();
   for (const [index, decision] of supervision.decisions.entries()) {
     if (decision.sequence !== index + 1) {
       issues.push({
@@ -1148,7 +1154,7 @@ function validateSupervisionDecisions(run: TeamRunRecordShape): ContractIssue[] 
       });
     }
     actionIds.add(decision.actionId);
-    issues.push(...validateSupervisionDecisionKind(run, index, decision, dispatchedAttemptIds));
+    issues.push(...validateSupervisionDecisionKind(run, index, decision, launchedAttemptIds));
     const workItem = decision.workItemId === null ? null : workItems.get(decision.workItemId);
     if (decision.workItemId !== null && !workItem) {
       issues.push({
@@ -1175,10 +1181,10 @@ function validateSupervisionDecisions(run: TeamRunRecordShape): ContractIssue[] 
   issues.push(...validateLatestSupervisionDecisionEffect(run));
   for (const step of run.steps) {
     const metadata = step.snapshot.supervision;
-    if (metadata?.kind !== "worker" || dispatchedAttemptIds.has(metadata.attemptId)) continue;
+    if (metadata?.kind !== "worker" || launchedAttemptIds.has(metadata.attemptId)) continue;
     issues.push({
       path: ["steps", run.steps.indexOf(step), "snapshot", "supervision", "attemptId"],
-      message: `Supervised attempt has no dispatch decision: ${metadata.attemptId}`,
+      message: `Supervised attempt has no dispatch or revision decision: ${metadata.attemptId}`,
     });
   }
   return issues;
@@ -1215,17 +1221,13 @@ function validateSupervisionDecisionKind(
   run: TeamRunRecordShape,
   index: number,
   decision: SupervisionDecision,
-  dispatchedAttemptIds: Set<string>,
+  launchedAttemptIds: Set<string>,
 ): ContractIssue[] {
   const issues: ContractIssue[] = [];
-  if (decision.kind === "dispatch") {
-    if (dispatchedAttemptIds.has(decision.attemptId)) {
-      issues.push({
-        path: ["supervision", "decisions", index, "attemptId"],
-        message: `Supervised attempt may be dispatched only once: ${decision.attemptId}`,
-      });
-    }
-    dispatchedAttemptIds.add(decision.attemptId);
+  if (decision.kind === "dispatch" || decision.kind === "request_revision") {
+    issues.push(
+      ...validateSupervisionAttemptLaunchDecision(run, index, decision, launchedAttemptIds),
+    );
   }
   if (
     decision.kind === "complete" &&
@@ -1241,6 +1243,53 @@ function validateSupervisionDecisionKind(
     issues.push({
       path: ["supervision", "decisions", index, "kind"],
       message: "An escalation decision must create a durable human request",
+    });
+  }
+  return issues;
+}
+
+function validateSupervisionAttemptLaunchDecision(
+  run: TeamRunRecordShape,
+  index: number,
+  decision: Extract<SupervisionDecision, { kind: "dispatch" | "request_revision" }>,
+  launchedAttemptIds: Set<string>,
+): ContractIssue[] {
+  const issues: ContractIssue[] = [];
+  if (launchedAttemptIds.has(decision.attemptId)) {
+    issues.push({
+      path: ["supervision", "decisions", index, "attemptId"],
+      message:
+        decision.kind === "dispatch"
+          ? `Supervised attempt may be dispatched only once: ${decision.attemptId}`
+          : `Supervised revision attempt may be launched only once: ${decision.attemptId}`,
+    });
+  }
+  launchedAttemptIds.add(decision.attemptId);
+  const attempt = run.steps.find(
+    (step) =>
+      step.snapshot.supervision?.kind === "worker" &&
+      step.snapshot.supervision.attemptId === decision.attemptId,
+  );
+  const metadata = attempt?.snapshot.supervision;
+  const attemptNumber = metadata?.kind === "worker" ? metadata.attemptNumber : null;
+  if (
+    attempt &&
+    decision.inputArtifactIds !== undefined &&
+    !sameStrings(attempt.snapshot.inputArtifactIds ?? [], decision.inputArtifactIds)
+  ) {
+    issues.push({
+      path: ["supervision", "decisions", index, "inputArtifactIds"],
+      message: "Supervisor decision inputs must match the launched attempt snapshot",
+    });
+  }
+  const kindMatchesAttempt =
+    decision.kind === "dispatch"
+      ? attemptNumber === 1
+      : attemptNumber !== null && attemptNumber > 1;
+  if (!kindMatchesAttempt) {
+    issues.push({
+      path: ["supervision", "decisions", index, "kind"],
+      message: "Dispatch creates the first attempt and request_revision creates a later attempt",
     });
   }
   return issues;
@@ -1327,68 +1376,142 @@ function validateSupervisionAttempts(
   stepsByAttemptId: Map<string, TeamRunRecordShape["steps"][number]>,
 ): ContractIssue[] {
   const issues: ContractIssue[] = [];
-  const availableArtifactIds = new Set<string>();
   const outputArtifactIds = new Set<string>();
   for (const [workIndex, workItem] of run.supervision!.workItems.entries()) {
-    for (const [inputIndex, artifactId] of workItem.inputArtifactIds.entries()) {
+    issues.push(
+      ...validateSupervisionWorkItemAttempts(
+        run,
+        stepsByAttemptId,
+        outputArtifactIds,
+        workIndex,
+        workItem,
+      ),
+    );
+  }
+  issues.push(...validateChronologicalSupervisedArtifactInputs(run));
+  return issues;
+}
+
+function validateSupervisionWorkItemAttempts(
+  run: TeamRunRecordShape,
+  stepsByAttemptId: Map<string, TeamRunRecordShape["steps"][number]>,
+  outputArtifactIds: Set<string>,
+  workIndex: number,
+  workItem: SupervisionWorkItem,
+): ContractIssue[] {
+  const issues: ContractIssue[] = [];
+  for (const [attemptIndex, attemptId] of workItem.attemptIds.entries()) {
+    const step = stepsByAttemptId.get(attemptId);
+    if (!step) {
+      issues.push({
+        path: ["supervision", "workItems", workIndex, "attemptIds", attemptIndex],
+        message: `Supervised attempt has no Team Run step: ${attemptId}`,
+      });
+      continue;
+    }
+    issues.push(
+      ...validateSupervisedAttemptLineage(
+        run,
+        stepsByAttemptId,
+        outputArtifactIds,
+        workItem,
+        attemptIndex,
+        step,
+      ),
+    );
+  }
+  const latestAttemptId = workItem.attemptIds.at(-1);
+  const latestAttempt = latestAttemptId ? stepsByAttemptId.get(latestAttemptId) : undefined;
+  if (
+    latestAttempt &&
+    !sameStrings(latestAttempt.snapshot.inputArtifactIds ?? [], workItem.inputArtifactIds)
+  ) {
+    issues.push({
+      path: ["supervision", "workItems", workIndex, "inputArtifactIds"],
+      message: "Work item inputs must match its latest attempt's frozen Artifact inputs",
+    });
+  }
+  if (!latestAttemptId && workItem.inputArtifactIds.length > 0) {
+    issues.push({
+      path: ["supervision", "workItems", workIndex, "inputArtifactIds"],
+      message: "Undispatched work items cannot own Artifact inputs",
+    });
+  }
+  const acceptedStep = workItem.acceptedAttemptId
+    ? stepsByAttemptId.get(workItem.acceptedAttemptId)
+    : undefined;
+  if (workItem.acceptedAttemptId && acceptedStep?.state.status !== "succeeded") {
+    issues.push({
+      path: ["supervision", "workItems", workIndex, "acceptedAttemptId"],
+      message: "Accepted supervised attempts must have succeeded",
+    });
+  }
+  return issues;
+}
+
+function validateSupervisedAttemptLineage(
+  run: TeamRunRecordShape,
+  stepsByAttemptId: Map<string, TeamRunRecordShape["steps"][number]>,
+  outputArtifactIds: Set<string>,
+  workItem: SupervisionWorkItem,
+  attemptIndex: number,
+  step: TeamRunRecordShape["steps"][number],
+): ContractIssue[] {
+  const issues: ContractIssue[] = [];
+  const metadata = step.snapshot.supervision;
+  if (metadata?.kind !== "worker") return issues;
+  const stepIndex = run.steps.indexOf(step);
+  if (metadata.attemptNumber !== attemptIndex + 1) {
+    issues.push({
+      path: ["steps", stepIndex, "snapshot", "supervision", "attemptNumber"],
+      message: "Work item attempt numbers must be contiguous",
+    });
+  }
+  const expectedParent = attemptIndex === 0 ? null : workItem.attemptIds[attemptIndex - 1]!;
+  if (metadata.revisionParentAttemptId !== expectedParent) {
+    issues.push({
+      path: ["steps", stepIndex, "snapshot", "supervision", "revisionParentAttemptId"],
+      message: "Revision attempts must reference the immediately preceding attempt",
+    });
+  }
+  const parentArtifactId = expectedParent
+    ? stepsByAttemptId.get(expectedParent)?.snapshot.outputArtifact?.id
+    : null;
+  if (
+    expectedParent &&
+    (!parentArtifactId || !step.snapshot.inputArtifactIds?.includes(parentArtifactId))
+  ) {
+    issues.push({
+      path: ["steps", stepIndex, "snapshot", "inputArtifactIds"],
+      message: "Revision attempts must consume their parent output Artifact",
+    });
+  }
+  const outputArtifactId = step.snapshot.outputArtifact?.id;
+  if (outputArtifactId && outputArtifactIds.has(outputArtifactId)) {
+    issues.push({
+      path: ["steps", stepIndex, "snapshot", "outputArtifact", "id"],
+      message: "Each supervised attempt must own a distinct output Artifact ID",
+    });
+  }
+  if (outputArtifactId) outputArtifactIds.add(outputArtifactId);
+  return issues;
+}
+
+function validateChronologicalSupervisedArtifactInputs(run: TeamRunRecordShape): ContractIssue[] {
+  const issues: ContractIssue[] = [];
+  const availableArtifactIds = new Set<string>();
+  for (const [stepIndex, step] of run.steps.entries()) {
+    if (step.snapshot.supervision?.kind !== "worker") continue;
+    for (const [inputIndex, artifactId] of (step.snapshot.inputArtifactIds ?? []).entries()) {
       if (!availableArtifactIds.has(artifactId)) {
         issues.push({
-          path: ["supervision", "workItems", workIndex, "inputArtifactIds", inputIndex],
-          message: "Work item inputs must reference accepted earlier run-local Artifacts",
+          path: ["steps", stepIndex, "snapshot", "inputArtifactIds", inputIndex],
+          message: "Worker inputs must reference successful preceding run-local Artifacts",
         });
       }
     }
-    for (const [attemptIndex, attemptId] of workItem.attemptIds.entries()) {
-      const step = stepsByAttemptId.get(attemptId);
-      if (!step) {
-        issues.push({
-          path: ["supervision", "workItems", workIndex, "attemptIds", attemptIndex],
-          message: `Supervised attempt has no Team Run step: ${attemptId}`,
-        });
-        continue;
-      }
-      const metadata = step.snapshot.supervision;
-      if (metadata?.kind !== "worker") continue;
-      if (metadata.attemptNumber !== attemptIndex + 1) {
-        issues.push({
-          path: ["steps", run.steps.indexOf(step), "snapshot", "supervision", "attemptNumber"],
-          message: "Work item attempt numbers must be contiguous",
-        });
-      }
-      const expectedParent = attemptIndex === 0 ? null : workItem.attemptIds[attemptIndex - 1]!;
-      if (metadata.revisionParentAttemptId !== expectedParent) {
-        issues.push({
-          path: [
-            "steps",
-            run.steps.indexOf(step),
-            "snapshot",
-            "supervision",
-            "revisionParentAttemptId",
-          ],
-          message: "Revision attempts must reference the immediately preceding attempt",
-        });
-      }
-      const outputArtifactId = step.snapshot.outputArtifact?.id;
-      if (outputArtifactId) {
-        if (outputArtifactIds.has(outputArtifactId)) {
-          issues.push({
-            path: ["steps", run.steps.indexOf(step), "snapshot", "outputArtifact", "id"],
-            message: "Each supervised attempt must own a distinct output Artifact ID",
-          });
-        }
-        outputArtifactIds.add(outputArtifactId);
-      }
-    }
-    if (workItem.acceptedAttemptId) {
-      const acceptedStep = stepsByAttemptId.get(workItem.acceptedAttemptId);
-      if (acceptedStep?.state.status !== "succeeded") {
-        issues.push({
-          path: ["supervision", "workItems", workIndex, "acceptedAttemptId"],
-          message: "Accepted supervised attempts must have succeeded",
-        });
-      }
-      const acceptedArtifactId = acceptedStep?.snapshot.outputArtifact?.id;
-      if (acceptedArtifactId) availableArtifactIds.add(acceptedArtifactId);
+    if (step.state.status === "succeeded" && step.snapshot.outputArtifact) {
+      availableArtifactIds.add(step.snapshot.outputArtifact.id);
     }
   }
   return issues;

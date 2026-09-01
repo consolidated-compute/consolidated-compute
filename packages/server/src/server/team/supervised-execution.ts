@@ -1,7 +1,9 @@
 import { z } from "zod";
 
+import { TEAM_ARTIFACT_PROMPT_INPUT_MAX_BYTES } from "./artifacts.js";
 import {
   PersistedTeamEntityIdSchema,
+  PersistedTeamRunArtifactInputIdsSchema,
   TEAM_SUPERVISION_DECISION_SUMMARY_MAX_CHARS,
   type PersistedTeamRunRecord,
   type PersistedTeamRunSupervision,
@@ -41,6 +43,16 @@ const SupervisorActionSchema = z.discriminatedUnion("kind", [
       actionId: PersistedTeamEntityIdSchema,
       summary: SummarySchema,
       workItemId: PersistedTeamEntityIdSchema,
+      inputArtifactIds: PersistedTeamRunArtifactInputIdsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("request_revision"),
+      actionId: PersistedTeamEntityIdSchema,
+      summary: SummarySchema,
+      workItemId: PersistedTeamEntityIdSchema,
+      inputArtifactIds: PersistedTeamRunArtifactInputIdsSchema,
     })
     .strict(),
   z
@@ -63,7 +75,8 @@ const SupervisorActionSchema = z.discriminatedUnion("kind", [
 export type TeamSupervisorAction = z.infer<typeof SupervisorActionSchema>;
 
 export interface TeamSupervisorActionSchemaOptions {
-  dispatchArtifactIssues?: ReadonlyMap<string, string>;
+  artifactInputIssues?: ReadonlyMap<string, string>;
+  availableArtifactBytes?: ReadonlyMap<string, number>;
 }
 
 export const TEAM_SUPERVISOR_PROMPT_MAX_BYTES = 64 * 1024;
@@ -89,6 +102,9 @@ export function createTeamSupervisorActionSchema(
 
     if (action.kind === "plan") validatePlanAction(run, action, context);
     if (action.kind === "dispatch") validateDispatchAction(run, action, context, options);
+    if (action.kind === "request_revision") {
+      validateRevisionAction(run, action, context, options);
+    }
     if (action.kind === "escalate") validateEscalationAction(run, action, context);
     if (action.kind === "complete") validateCompleteAction(run, context);
   });
@@ -169,7 +185,7 @@ function validateDispatchAction(
     context.addIssue({
       code: "custom",
       path: ["workItemId"],
-      message: "Revision attempts are not available in this executor",
+      message: "Only an undispatched work item can be dispatched",
     });
   }
   const workItemIndex = run.supervision.workItems.indexOf(workItem);
@@ -183,12 +199,122 @@ function validateDispatchAction(
       message: `Dispatch requires preceding work item ${unfinishedPredecessor.id} to succeed`,
     });
   }
-  const artifactIssue = options.dispatchArtifactIssues?.get(workItem.id);
+  let expectedInputArtifactIds: string[] | null = null;
+  try {
+    expectedInputArtifactIds = resolveSupervisedWorkItemInputArtifactIds(run, workItem.id);
+  } catch (error) {
+    context.addIssue({
+      code: "custom",
+      path: ["inputArtifactIds"],
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+  if (
+    expectedInputArtifactIds !== null &&
+    !sameStrings(action.inputArtifactIds, expectedInputArtifactIds)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["inputArtifactIds"],
+      message: "Dispatch must consume the accepted outputs of every preceding work item",
+    });
+  }
+  validateArtifactInputSelection(run, action.inputArtifactIds, context, options);
+  const artifactIssue = options.artifactInputIssues?.get(workItem.id);
   if (artifactIssue) {
     context.addIssue({
       code: "custom",
       path: ["workItemId"],
       message: `Dispatch Artifact inputs are unavailable: ${artifactIssue}`,
+    });
+  }
+}
+
+function validateRevisionAction(
+  run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  action: Extract<TeamSupervisorAction, { kind: "request_revision" }>,
+  context: z.core.$RefinementCtx<TeamSupervisorAction>,
+  options: TeamSupervisorActionSchemaOptions,
+): void {
+  const workItem = run.supervision.workItems.find((item) => item.id === action.workItemId);
+  if (!workItem) {
+    context.addIssue({
+      code: "custom",
+      path: ["workItemId"],
+      message: "Revision must name a planned work item",
+    });
+    return;
+  }
+  if (workItem.status !== "succeeded" || workItem.acceptedAttemptId === null) {
+    context.addIssue({
+      code: "custom",
+      path: ["workItemId"],
+      message: "Revision requires a succeeded work item with an accepted attempt",
+    });
+    return;
+  }
+  if (workItem.attemptIds.length >= run.supervision.limits.maxAttemptsPerWorkItem) {
+    context.addIssue({
+      code: "custom",
+      path: ["workItemId"],
+      message: `Work item reached the ${run.supervision.limits.maxAttemptsPerWorkItem}-attempt limit`,
+    });
+  }
+  const parentStep = findWorkerAttempt(run, workItem.acceptedAttemptId);
+  const parentArtifactId = parentStep?.snapshot.outputArtifact?.id;
+  if (!parentArtifactId || !action.inputArtifactIds.includes(parentArtifactId)) {
+    context.addIssue({
+      code: "custom",
+      path: ["inputArtifactIds"],
+      message: "Revision inputs must include the accepted attempt's output Artifact",
+    });
+  }
+  validateArtifactInputSelection(run, action.inputArtifactIds, context, options);
+  const artifactIssue = options.artifactInputIssues?.get(workItem.id);
+  if (artifactIssue) {
+    context.addIssue({
+      code: "custom",
+      path: ["inputArtifactIds"],
+      message: `Revision Artifact inputs are unavailable: ${artifactIssue}`,
+    });
+  }
+}
+
+function validateArtifactInputSelection(
+  run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  artifactIds: readonly string[],
+  context: z.core.$RefinementCtx<TeamSupervisorAction>,
+  options: TeamSupervisorActionSchemaOptions,
+): void {
+  const availableOutputIds = new Set(
+    run.supervision.workItems.flatMap((workItem) => {
+      if (!workItem.acceptedAttemptId) return [];
+      const artifactId = findWorkerAttempt(run, workItem.acceptedAttemptId)?.snapshot.outputArtifact
+        ?.id;
+      return artifactId ? [artifactId] : [];
+    }),
+  );
+  let totalBytes = 0;
+  for (const [index, artifactId] of artifactIds.entries()) {
+    const bytes = options.availableArtifactBytes?.get(artifactId);
+    if (
+      !availableOutputIds.has(artifactId) ||
+      (options.availableArtifactBytes && bytes === undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["inputArtifactIds", index],
+        message: `Artifact input must name an accepted run-local output: ${artifactId}`,
+      });
+      continue;
+    }
+    totalBytes += bytes ?? 0;
+  }
+  if (options.availableArtifactBytes && totalBytes > TEAM_ARTIFACT_PROMPT_INPUT_MAX_BYTES) {
+    context.addIssue({
+      code: "custom",
+      path: ["inputArtifactIds"],
+      message: `Artifact prompt inputs exceed ${TEAM_ARTIFACT_PROMPT_INPUT_MAX_BYTES} UTF-8 bytes`,
     });
   }
 }
@@ -252,9 +378,23 @@ export function composeTeamSupervisorPrompt(
       `- ${template.stepId}: role=${template.roleName}; roleInstructions=${formatPromptString(template.roleInstructions, instructionBytes)}; stepInstructions=${formatPromptString(template.stepInstructions, instructionBytes)}`,
   );
   const workItems = run.supervision.workItems.map((workItem) => {
-    const artifactIssue = options.dispatchArtifactIssues?.get(workItem.id);
-    return `- ${workItem.id}: template=${workItem.templateStepId}; status=${workItem.status}; attempts=${workItem.attemptIds.length}; dispatch=${artifactIssue ? `blocked(${formatPromptString(artifactIssue, 256)})` : "available"}`;
+    const artifactIssue = options.artifactInputIssues?.get(workItem.id);
+    const acceptedArtifactId = workItem.acceptedAttemptId
+      ? findWorkerAttempt(run, workItem.acceptedAttemptId)?.snapshot.outputArtifact?.id
+      : null;
+    return `- ${workItem.id}: template=${workItem.templateStepId}; status=${workItem.status}; attempts=${workItem.attemptIds.length}; acceptedOutput=${acceptedArtifactId ?? "none"}; artifactInputs=${artifactIssue ? `blocked(${formatPromptString(artifactIssue, 256)})` : "available"}`;
   });
+  const acceptedArtifactIds = new Set(
+    run.supervision.workItems.flatMap((workItem) => {
+      if (!workItem.acceptedAttemptId) return [];
+      const artifactId = findWorkerAttempt(run, workItem.acceptedAttemptId)?.snapshot.outputArtifact
+        ?.id;
+      return artifactId ? [artifactId] : [];
+    }),
+  );
+  const availableArtifacts = [...(options.availableArtifactBytes?.entries() ?? [])]
+    .filter(([artifactId]) => acceptedArtifactIds.has(artifactId))
+    .map(([artifactId, bytes]) => `- ${artifactId}: includedBytes=${bytes}`);
   const decisions = run.supervision.decisions.map(
     (decision) =>
       `- ${decision.sequence}. ${decision.kind}; actionId=${decision.actionId}; summary=${formatPromptString(decision.summary, 192)}`,
@@ -278,10 +418,14 @@ export function composeTeamSupervisorPrompt(
       4 * 1024,
     ),
     boundPromptText(`## Assignment objective\n${run.objective}`, 4 * 1024),
-    boundPromptText(`## Frozen worker templates\n${templates.join("\n")}`, 18 * 1024),
+    boundPromptText(`## Frozen worker templates\n${templates.join("\n")}`, 17 * 1024),
     boundPromptText(
       `## Durable work ledger\n${workItems.length > 0 ? workItems.join("\n") : "No work has been planned."}`,
       9 * 1024,
+    ),
+    boundPromptText(
+      `## Available accepted Artifacts\n${availableArtifacts.length > 0 ? availableArtifacts.join("\n") : "No accepted worker Artifacts are available."}`,
+      2 * 1024,
     ),
     boundPromptText(
       `## Prior durable decisions\n${decisions.length > 0 ? decisions.join("\n") : "No decisions have been committed."}`,
@@ -293,7 +437,9 @@ export function composeTeamSupervisorPrompt(
         "## Decision rules",
         "Return exactly one action. Do not create agents or invoke delegation tools yourself.",
         "Use plan once to map one or more unique work-item IDs to frozen template step IDs. Plan order is execution and Artifact handoff order.",
-        "Use dispatch for the first unfinished planned work item. The daemon creates that worker from its frozen template and supplies every accepted preceding output Artifact.",
+        "Use dispatch for the first unfinished planned work item and name every accepted preceding output in inputArtifactIds.",
+        "Use request_revision only for a succeeded work item. Name the exact immutable Artifacts the new attempt needs, including that work item's accepted output.",
+        "The daemon creates every dispatched or revised worker from its frozen template after the exact input IDs, fresh agent ID, attempt lineage, and planned output Artifact ID are durable.",
         "Use escalate when a human decision is required. Use complete only after every planned work item succeeded.",
         `Limits: workItems=${run.supervision.limits.maxWorkItems}; activeWorkers=${run.supervision.limits.maxActiveWorkers}; actions=${run.supervision.limits.maxSupervisorActions}; delegationDepth=${run.supervision.limits.maxDelegationDepth}.`,
       ].join("\n"),
@@ -356,13 +502,16 @@ export function normalizeTeamSupervisorDecision(
     actionId: input.action.actionId,
     summary: input.action.summary.trim(),
   };
-  if (input.action.kind === "dispatch") {
-    if (input.attemptId === null) throw new Error("Dispatch requires a preallocated attempt ID");
+  if (input.action.kind === "dispatch" || input.action.kind === "request_revision") {
+    if (input.attemptId === null) {
+      throw new Error("Dispatch and revision require a preallocated attempt ID");
+    }
     return {
       ...base,
-      kind: "dispatch",
+      kind: input.action.kind,
       workItemId: input.action.workItemId,
       attemptId: input.attemptId,
+      inputArtifactIds: input.action.inputArtifactIds,
     };
   }
   if (input.action.kind === "escalate") {
@@ -442,9 +591,9 @@ export function buildTeamSupervisionDecisionUpdate(
       status: "planned" as const,
     }));
   }
-  if (input.action.kind === "dispatch") {
+  if (input.action.kind === "dispatch" || input.action.kind === "request_revision") {
     const workItemId = input.action.workItemId;
-    const inputArtifactIds = resolveSupervisedWorkItemInputArtifactIds(input.run, workItemId);
+    const inputArtifactIds = input.action.inputArtifactIds;
     appendDispatchedWorker(input, decision, steps, inputArtifactIds);
     workItems = input.run.supervision.workItems.map((workItem) =>
       workItem.id === workItemId
@@ -452,6 +601,7 @@ export function buildTeamSupervisionDecisionUpdate(
             ...workItem,
             inputArtifactIds,
             attemptIds: [...workItem.attemptIds, decision.attemptId!],
+            acceptedAttemptId: null,
             status: "active" as const,
           }
         : workItem,
@@ -517,10 +667,17 @@ export function canContinueTeamSupervision(
   const nextWorkItem = run.supervision.workItems.find(
     (workItem) => workItem.status !== "succeeded",
   );
-  return (
+  const canDispatch =
     nextWorkItem?.status === "planned" &&
     nextWorkItem.attemptIds.length === 0 &&
-    !options.dispatchArtifactIssues?.has(nextWorkItem.id)
+    !options.artifactInputIssues?.has(nextWorkItem.id);
+  if (canDispatch) return true;
+  if (nextWorkItem?.status !== "planned") return false;
+  return run.supervision.workItems.some(
+    (workItem) =>
+      workItem.status === "succeeded" &&
+      workItem.attemptIds.length < run.supervision.limits.maxAttemptsPerWorkItem &&
+      !options.artifactInputIssues?.has(workItem.id),
   );
 }
 
@@ -531,12 +688,12 @@ function appendDispatchedWorker(
   inputArtifactIds: string[],
 ): void {
   if (
-    input.action.kind !== "dispatch" ||
-    decision.kind !== "dispatch" ||
+    (input.action.kind !== "dispatch" && input.action.kind !== "request_revision") ||
+    (decision.kind !== "dispatch" && decision.kind !== "request_revision") ||
     input.workerAgentId === null ||
     input.context.outputArtifactId === null
   ) {
-    throw new Error("Dispatch requires preallocated worker, attempt, and Artifact IDs");
+    throw new Error("Dispatch and revision require preallocated worker, attempt, and Artifact IDs");
   }
   const workItemId = input.action.workItemId;
   const workItem = input.run.supervision.workItems.find((item) => item.id === workItemId);
@@ -561,7 +718,8 @@ function appendDispatchedWorker(
         attemptId: decision.attemptId,
         attemptNumber: workItem.attemptIds.length + 1,
         templateStepId: template.stepId,
-        revisionParentAttemptId: null,
+        revisionParentAttemptId:
+          input.action.kind === "request_revision" ? workItem.acceptedAttemptId : null,
       },
     },
     state: {
@@ -600,11 +758,38 @@ export function composeSupervisedWorkerContext(
   workItemId: string,
 ): string {
   const plan = run.supervision.decisions.find((decision) => decision.kind === "plan");
+  const workItem = run.supervision.workItems.find((item) => item.id === workItemId);
+  const attemptId = workItem?.attemptIds.at(-1);
+  const step = attemptId ? findWorkerAttempt(run, attemptId) : undefined;
+  const metadata = step?.snapshot.supervision;
   return [
     `Work item: ${workItemId}`,
+    ...(metadata?.kind === "worker"
+      ? [
+          `Attempt: ${metadata.attemptId} (${metadata.attemptNumber} of ${run.supervision.limits.maxAttemptsPerWorkItem})`,
+          ...(metadata.revisionParentAttemptId
+            ? [`Revision parent attempt: ${metadata.revisionParentAttemptId}`]
+            : []),
+        ]
+      : []),
     `Durable supervisor plan: ${plan?.summary ?? "No plan summary was recorded."}`,
     "Complete only this frozen workflow step. Do not delegate or create other agents.",
   ].join("\n");
+}
+
+function findWorkerAttempt(
+  run: PersistedTeamRunRecord,
+  attemptId: string,
+): PersistedTeamRunRecord["steps"][number] | undefined {
+  return run.steps.find(
+    (step) =>
+      step.snapshot.supervision?.kind === "worker" &&
+      step.snapshot.supervision.attemptId === attemptId,
+  );
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function requireRunStartedAt(run: PersistedTeamRunRecord): string {

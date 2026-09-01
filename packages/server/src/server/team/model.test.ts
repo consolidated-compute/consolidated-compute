@@ -23,6 +23,7 @@ import {
   type PersistedTeamDefinition,
   type PersistedTeamRunRecord,
 } from "./model.js";
+import { createTeamSupervisorActionSchema } from "./supervised-execution.js";
 
 const timestamp = "2026-08-25T12:00:00.000Z";
 const agentId = "9f44cd43-89a5-4371-af49-679bfbf8d1d7";
@@ -296,6 +297,7 @@ function createSupervisedRunWithWorkerAttempts(): PersistedTeamRunRecord {
     summary: "Dispatch the planning work item.",
     workItemId: firstWorkItemId,
     attemptId: firstAttemptId,
+    inputArtifactIds: [],
     createdAt: timestamp,
   };
   const dispatchBuild = {
@@ -306,6 +308,7 @@ function createSupervisedRunWithWorkerAttempts(): PersistedTeamRunRecord {
     summary: "Dispatch the build work item.",
     workItemId: secondWorkItemId,
     attemptId: secondAttemptId,
+    inputArtifactIds: [firstArtifactId],
     createdAt: timestamp,
   };
   return PersistedTeamRunRecordSchema.parse({
@@ -848,6 +851,43 @@ describe("Team Run contract", () => {
     },
   );
 
+  test("accepts only bounded revision actions with the accepted output in their exact inputs", () => {
+    const run = createSupervisedRunWithWorkerAttempts() as PersistedTeamRunRecord & {
+      supervision: NonNullable<PersistedTeamRunRecord["supervision"]>;
+    };
+    const workItem = run.supervision.workItems[0]!;
+    const acceptedStep = run.steps.find(
+      (step) =>
+        step.snapshot.supervision?.kind === "worker" &&
+        step.snapshot.supervision.attemptId === workItem.acceptedAttemptId,
+    );
+    const acceptedArtifactId = acceptedStep?.snapshot.outputArtifact?.id;
+    const reviewArtifactId = run.steps.at(-1)?.snapshot.outputArtifact?.id;
+    if (!acceptedArtifactId || !reviewArtifactId) throw new Error("Expected revision Artifacts");
+    const schema = createTeamSupervisorActionSchema(run);
+    const action = {
+      kind: "request_revision" as const,
+      actionId: "action_request_plan_revision",
+      summary: "Revise the plan using its accepted output and the later review.",
+      workItemId: workItem.id,
+      inputArtifactIds: [acceptedArtifactId, reviewArtifactId],
+    };
+
+    expect(schema.safeParse(action).success).toBe(true);
+    expect(schema.safeParse({ ...action, inputArtifactIds: [reviewArtifactId] }).success).toBe(
+      false,
+    );
+    expect(
+      schema.safeParse({
+        ...action,
+        inputArtifactIds: [acceptedArtifactId, acceptedArtifactId],
+      }).success,
+    ).toBe(false);
+
+    run.supervision.limits.maxAttemptsPerWorkItem = workItem.attemptIds.length;
+    expect(createTeamSupervisorActionSchema(run).safeParse(action).success).toBe(false);
+  });
+
   test("rejects duplicate Artifact inputs in supervised work items", () => {
     const artifactId = "aart_0123456789abcdef";
     const result = PersistedTeamRunSupervisionWorkItemSchema.safeParse({
@@ -887,6 +927,32 @@ describe("Team Run contract", () => {
     if (result.success) return;
     expect(result.error.issues.map((issue) => issue.message)).toContain(
       `Supervised attempt may be dispatched only once: ${firstDispatch.attemptId}`,
+    );
+  });
+
+  test("reads dispatch decisions written before exact input projections", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    for (const decision of run.supervision!.decisions) {
+      if (decision.kind === "dispatch") delete decision.inputArtifactIds;
+    }
+
+    expect(PersistedTeamRunRecordSchema.safeParse(run).success).toBe(true);
+  });
+
+  test("rejects an explicit dispatch input projection that differs from its worker snapshot", () => {
+    const run = createSupervisedRunWithWorkerAttempts();
+    const decision = run.supervision!.decisions.find(
+      (candidate) => candidate.kind === "dispatch" && candidate.inputArtifactIds?.length === 1,
+    );
+    if (!decision || decision.kind !== "dispatch") throw new Error("Expected dispatch decision");
+    decision.inputArtifactIds = [];
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Supervisor decision inputs must match the launched attempt snapshot",
     );
   });
 
