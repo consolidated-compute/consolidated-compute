@@ -7,6 +7,9 @@ import {
   TeamRunDtoSchema,
   TeamRunPreviewDtoSchema,
   TeamRunPreviewFingerprintSchema,
+  TeamRunSupervisionEventDtoSchema,
+  TeamRunSupervisionStateDtoSchema,
+  TEAM_SUPERVISION_HUMAN_REQUEST_NOTE_MAX_CHARS,
 } from "./types.js";
 
 export const TEAM_RUN_PAGE_MAX_LIMIT = 100;
@@ -21,9 +24,14 @@ export const TEAM_RPC_ERROR_CODES = [
   "team_assignment_has_active_run",
   "team_run_idempotency_conflict",
   "invalid_team_run_page",
+  "invalid_team_supervision_event_page",
   "invalid_team_repository_id",
   "team_storage_corrupt",
   "team_run_service_shutting_down",
+  "team_run_not_supervised",
+  "team_run_supervision_action_conflict",
+  "team_run_supervision_human_request_conflict",
+  "team_run_supervision_human_request_revision_conflict",
   "team_execution_preflight_failed",
   "team_security_preview_stale",
   "team_profile_not_found",
@@ -108,6 +116,31 @@ export const TeamRunCancelRequestSchema = z.object({
   runId: z.string(),
 });
 
+export const TeamRunSupervisionGetRequestSchema = z.object({
+  type: z.literal("team.run.supervision.get.request"),
+  requestId: z.string(),
+  runId: z.string(),
+});
+
+export const TeamRunSupervisionEventsListRequestSchema = z.object({
+  type: z.literal("team.run.supervision.events.list.request"),
+  requestId: z.string(),
+  runId: z.string(),
+  cursor: z.string().optional(),
+  limit: z.number().int().positive().max(TEAM_RUN_PAGE_MAX_LIMIT).optional(),
+});
+
+export const TeamRunSupervisionHumanRequestRespondRequestSchema = z.object({
+  type: z.literal("team.run.supervision.human_request.respond.request"),
+  requestId: z.string(),
+  runId: z.string().min(1).max(128),
+  humanRequestId: z.string().min(1).max(128),
+  expectedRevision: z.number().int().positive(),
+  actionId: z.string().min(1).max(128),
+  note: z.string().min(1).max(TEAM_SUPERVISION_HUMAN_REQUEST_NOTE_MAX_CHARS).nullable(),
+  idempotencyKey: z.string().min(1).max(256),
+});
+
 export const TeamCreateResponseSchema = z.object({
   type: z.literal("team.create.response"),
   payload: z.object({ requestId: z.string(), team: TeamDefinitionDtoSchema }),
@@ -162,6 +195,25 @@ export const TeamRunCancelResponseSchema = z.object({
   payload: z.object({ requestId: z.string(), run: TeamRunDtoSchema }),
 });
 
+export const TeamRunSupervisionGetResponseSchema = z.object({
+  type: z.literal("team.run.supervision.get.response"),
+  payload: z.object({ requestId: z.string(), supervision: TeamRunSupervisionStateDtoSchema }),
+});
+
+export const TeamRunSupervisionEventsListResponseSchema = z.object({
+  type: z.literal("team.run.supervision.events.list.response"),
+  payload: z.object({
+    requestId: z.string(),
+    events: z.array(TeamRunSupervisionEventDtoSchema).max(TEAM_RUN_PAGE_MAX_LIMIT),
+    nextCursor: z.string().nullable(),
+  }),
+});
+
+export const TeamRunSupervisionHumanRequestRespondResponseSchema = z.object({
+  type: z.literal("team.run.supervision.human_request.respond.response"),
+  payload: z.object({ requestId: z.string(), supervision: TeamRunSupervisionStateDtoSchema }),
+});
+
 export type TeamCreateRequest = z.infer<typeof TeamCreateRequestSchema>;
 export type TeamListRequest = z.infer<typeof TeamListRequestSchema>;
 export type TeamGetRequest = z.infer<typeof TeamGetRequestSchema>;
@@ -172,3 +224,10 @@ export type TeamRunPreviewRequest = z.infer<typeof TeamRunPreviewRequestSchema>;
 export type TeamRunListRequest = z.infer<typeof TeamRunListRequestSchema>;
 export type TeamRunGetRequest = z.infer<typeof TeamRunGetRequestSchema>;
 export type TeamRunCancelRequest = z.infer<typeof TeamRunCancelRequestSchema>;
+export type TeamRunSupervisionGetRequest = z.infer<typeof TeamRunSupervisionGetRequestSchema>;
+export type TeamRunSupervisionEventsListRequest = z.infer<
+  typeof TeamRunSupervisionEventsListRequestSchema
+>;
+export type TeamRunSupervisionHumanRequestRespondRequest = z.infer<
+  typeof TeamRunSupervisionHumanRequestRespondRequestSchema
+>;

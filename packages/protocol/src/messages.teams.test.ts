@@ -375,6 +375,75 @@ describe("Team wire contracts", () => {
     ).toMatchObject({ expectedPreviewFingerprint: fingerprint });
   });
 
+  test("parses durable supervision state, event pagination, and responses", () => {
+    expect(
+      SessionInboundMessageSchema.parse({
+        type: "team.run.supervision.human_request.respond.request",
+        requestId: "request_respond",
+        runId: run.id,
+        humanRequestId: "human_1",
+        expectedRevision: 2,
+        actionId: "continue",
+        note: "Proceed.",
+        idempotencyKey: "response_1",
+      }),
+    ).toMatchObject({ expectedRevision: 2, actionId: "continue" });
+
+    const event = {
+      id: "event_1",
+      sequence: 1,
+      kind: "decision.escalate",
+      title: "Supervisor requested human input",
+      detail: "Choose the next action.",
+      decisionId: "decision_1",
+      actionId: "action_1",
+      workItemId: null,
+      attemptId: null,
+      humanRequestId: "human_1",
+      roleIds: ["supervisor"],
+      agentIds: ["agent_1"],
+      stepIds: [],
+      artifactIds: [],
+      createdAt: "2026-08-26T12:00:00.000Z",
+    };
+    expect(
+      SessionOutboundMessageSchema.parse({
+        type: "team.run.supervision.events.list.response",
+        payload: { requestId: "request_events", events: [event], nextCursor: null },
+      }),
+    ).toMatchObject({ payload: { events: [{ kind: "decision.escalate" }] } });
+
+    const supervision = {
+      runId: run.id,
+      revision: 3,
+      status: "awaiting_human",
+      supervisorRoleId: "supervisor",
+      supervisorAgentId: "agent_1",
+      completedWorkItems: 0,
+      totalWorkItems: 1,
+      humanRequest: {
+        id: "human_1",
+        revision: 1,
+        kind: "supervisor_escalation",
+        title: "Supervisor needs input",
+        detail: "Choose the next action.",
+        actions: [{ id: "continue", label: "Continue", requiresNote: false }],
+        roleIds: ["supervisor"],
+        agentIds: ["agent_1"],
+        stepIds: [],
+        artifactIds: [],
+        createdAt: "2026-08-26T12:00:00.000Z",
+      },
+      updatedAt: "2026-08-26T12:00:00.000Z",
+    };
+    expect(
+      SessionOutboundMessageSchema.parse({
+        type: "team.run.supervision.get.response",
+        payload: { requestId: "request_state", supervision },
+      }),
+    ).toMatchObject({ payload: { supervision: { status: "awaiting_human" } } });
+  });
+
   test("keeps the Team capability optional for old peers", () => {
     expect(
       ServerInfoStatusPayloadSchema.parse({

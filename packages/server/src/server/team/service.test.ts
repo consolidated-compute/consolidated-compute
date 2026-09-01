@@ -1800,7 +1800,7 @@ describe("TeamRunService", () => {
     });
   });
 
-  test("persists escalation as an idle human wait without launching a worker", async () => {
+  test("preserves an idle human wait across restart and resumes only after a durable response", async () => {
     const harness = await createHarness();
     harness.daemonConfigStore.agentProfiles.push({
       id: "profile_supervisor",
@@ -1870,8 +1870,23 @@ describe("TeamRunService", () => {
     });
     expect(harness.runtime.creations.map((creation) => creation.agentId)).toEqual([firstAgentId]);
 
-    const request = waiting.supervision!.humanRequest!;
-    const resumed = await harness.service.respondToSupervisionHumanRequest({
+    await harness.service.shutdown();
+    const preservedWait = await harness.repository.getRun(run.id);
+    expect(preservedWait).toMatchObject({
+      state: { status: "running" },
+      supervision: { phase: "awaiting_human" },
+    });
+    expect(preservedWait?.supervision?.humanRequest).not.toHaveProperty("resolution");
+    const restarted = await createHarness({
+      repository: harness.repository,
+      assignmentRepository: harness.assignments,
+      workspace: createWorkspace(),
+    });
+    expect(restarted.runtime.creations).toEqual([]);
+    expect(restarted.runtime.streams).toEqual([]);
+
+    const request = (await restarted.repository.getRun(run.id))!.supervision!.humanRequest!;
+    const resumed = await restarted.service.respondToSupervisionHumanRequest({
       runId: run.id,
       requestId: request.id,
       expectedRequestRevision: request.revision,
@@ -1889,12 +1904,12 @@ describe("TeamRunService", () => {
         },
       },
     });
-    await harness.runtime.waitForStreamCount(firstAgentId, 2);
+    await restarted.runtime.waitForStreamCount(firstAgentId, 1);
     expect(
-      harness.runtime.streams.filter((stream) => stream.agentId === firstAgentId)[1]?.prompt,
+      restarted.runtime.streams.find((stream) => stream.agentId === firstAgentId)?.prompt,
     ).toContain("Proceed with the bounded plan.");
     await expect(
-      harness.service.respondToSupervisionHumanRequest({
+      restarted.service.respondToSupervisionHumanRequest({
         runId: run.id,
         requestId: request.id,
         expectedRequestRevision: request.revision,
@@ -1906,7 +1921,7 @@ describe("TeamRunService", () => {
       supervision: { humanRequest: { resolution: { actionId: "continue" } } },
     });
 
-    const canceled = await harness.service.cancelRun(run.id);
+    const canceled = await restarted.service.cancelRun(run.id);
     expect(canceled).toMatchObject({
       state: { status: "canceled" },
       supervision: {

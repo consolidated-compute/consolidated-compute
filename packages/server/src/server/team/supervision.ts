@@ -95,6 +95,7 @@ export function createInitialTeamRunSupervision(
     },
     workItems: [],
     decisions: [],
+    events: [],
     humanRequest: null,
     updatedAt: input.timestamp,
   });

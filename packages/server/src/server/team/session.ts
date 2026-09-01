@@ -1,15 +1,32 @@
 import type { SessionInboundMessage, SessionOutboundMessage } from "../messages.js";
 import { TeamRpcErrorCodeSchema, type TeamRpcErrorCode } from "@getpaseo/protocol/team/rpc-schemas";
 import { TeamExecutionPreflightError } from "./execution.js";
+import type { PersistedTeamRunRecord, PersistedTeamRunSupervision } from "./model.js";
 import type {
   CreateTeamDefinitionInput,
+  ListTeamRunSupervisionEventsInput,
   ListTeamRunsInput,
   TeamDefinitionPatch,
   TeamRepository,
 } from "./repository.js";
-import { TeamNotFoundError, TeamRunNotFoundError, TeamStorageCorruptError } from "./repository.js";
-import type { PreviewTeamRunInput, StartTeamRunInput, TeamRunService } from "./service.js";
-import { toTeamDefinitionDto, toTeamRunDto } from "./wire.js";
+import {
+  TeamNotFoundError,
+  TeamRunNotFoundError,
+  TeamRunNotSupervisedError,
+  TeamStorageCorruptError,
+} from "./repository.js";
+import type {
+  PreviewTeamRunInput,
+  RespondToTeamRunSupervisionHumanRequestInput,
+  StartTeamRunInput,
+  TeamRunService,
+} from "./service.js";
+import {
+  toTeamDefinitionDto,
+  toTeamRunDto,
+  toTeamRunSupervisionEventDto,
+  toTeamRunSupervisionStateDto,
+} from "./wire.js";
 
 export interface TeamSessionRepository {
   createDefinition(
@@ -28,12 +45,18 @@ export interface TeamSessionRepository {
   }): ReturnType<TeamRepository["deleteDefinition"]>;
   listRuns(input?: ListTeamRunsInput): ReturnType<TeamRepository["listRuns"]>;
   getRun(runId: string): ReturnType<TeamRepository["getRun"]>;
+  listSupervisionEvents(
+    input: ListTeamRunSupervisionEventsInput,
+  ): ReturnType<TeamRepository["listSupervisionEvents"]>;
 }
 
 export interface TeamSessionRunService {
   previewRun(input: PreviewTeamRunInput): ReturnType<TeamRunService["previewRun"]>;
   startRun(input: StartTeamRunInput): ReturnType<TeamRunService["startRun"]>;
   cancelRun(runId: string): ReturnType<TeamRunService["cancelRun"]>;
+  respondToSupervisionHumanRequest(
+    input: RespondToTeamRunSupervisionHumanRequestInput,
+  ): ReturnType<TeamRunService["respondToSupervisionHumanRequest"]>;
 }
 
 export interface TeamSessionOptions {
@@ -183,6 +206,54 @@ export class TeamSession {
             run: toTeamRunDto(await this.runService.cancelRun(message.runId)),
           },
         }));
+      case "team.run.supervision.get.request":
+        return this.respond(message, async () => {
+          const run = await this.repository.getRun(message.runId);
+          if (!run) throw new TeamRunNotFoundError(message.runId);
+          const supervisedRun = requireSupervisedRun(run);
+          return {
+            type: "team.run.supervision.get.response",
+            payload: {
+              requestId: message.requestId,
+              supervision: toTeamRunSupervisionStateDto(supervisedRun),
+            },
+          };
+        });
+      case "team.run.supervision.events.list.request":
+        return this.respond(message, async () => {
+          const page = await this.repository.listSupervisionEvents({
+            runId: message.runId,
+            ...(message.cursor !== undefined ? { cursor: message.cursor } : {}),
+            ...(message.limit !== undefined ? { limit: message.limit } : {}),
+          });
+          return {
+            type: "team.run.supervision.events.list.response",
+            payload: {
+              requestId: message.requestId,
+              events: page.events.map(toTeamRunSupervisionEventDto),
+              nextCursor: page.nextCursor,
+            },
+          };
+        });
+      case "team.run.supervision.human_request.respond.request":
+        return this.respond(message, async () => {
+          const run = await this.runService.respondToSupervisionHumanRequest({
+            runId: message.runId,
+            requestId: message.humanRequestId,
+            expectedRequestRevision: message.expectedRevision,
+            actionId: message.actionId,
+            note: message.note,
+            idempotencyKey: message.idempotencyKey,
+          });
+          const supervisedRun = requireSupervisedRun(run);
+          return {
+            type: "team.run.supervision.human_request.respond.response",
+            payload: {
+              requestId: message.requestId,
+              supervision: toTeamRunSupervisionStateDto(supervisedRun),
+            },
+          };
+        });
       default:
         return undefined;
     }
@@ -212,6 +283,13 @@ export class TeamSession {
 function requireHealthyTeamCollection(issues: TeamStorageCorruptError["issues"]): void {
   const invalidRecords = issues.filter((issue) => issue.kind === "invalid_record");
   if (invalidRecords.length > 0) throw new TeamStorageCorruptError(invalidRecords);
+}
+
+function requireSupervisedRun(
+  run: PersistedTeamRunRecord,
+): PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision } {
+  if (!run.supervision) throw new TeamRunNotSupervisedError(run.id);
+  return run as PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision };
 }
 
 export function toTeamRpcError(error: unknown): TeamRpcError {

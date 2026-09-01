@@ -90,13 +90,21 @@ requires `escalate` to be the latest decision. The repository stamps the supervi
 outer run with the same decision commit time; updater-supplied timestamps are not authoritative.
 Resolving the frozen `continue` action persists the response before the service relaunches
 supervision. The next supervisor prompt includes the request, selected action, and human note. The
-public response RPC, event history, reconnect behavior, and restart-safe human wait belong to the
-human-escalation phase.
+response command checks the request ID and revision, then uses a caller idempotency key so stale or
+duplicate clients cannot apply a second action.
 
-The wire projection exposes only a compact optional supervision summary. Existing Team Run and
-step lifecycle values do not change. The daemon does not advertise supervised execution until the
-executor and its server-enforced agent authority are available; the current app continues to start
-sequential runs.
+Supervision also owns a bounded append-only event ledger. Decision commits, worker outcomes, human
+responses, and unresolved-request retirement append an event in the same run write as the state they
+describe. Events carry exact bounded role, agent, step, Work Item, attempt, decision, request, and
+Artifact references. Read them newest-first through a run-bound paginated cursor. A legacy
+supervised record without the event field remains readable; do not infer events for work that
+predates the ledger.
+
+The Team Run wire projection keeps its compact optional supervision summary. Separate get-state,
+list-events, and respond RPCs expose the full human request and its frozen actions without exposing
+the response idempotency key. A reconnect reads the persisted state; it does not reconstruct a wait
+from an agent transcript. Existing Team Run and step lifecycle values do not change. Gate the client
+surface once on the supervised-execution capability.
 
 Supervised agent authority comes from persisted run membership by exact preallocated agent ID.
 Correlation labels never grant access. Persist the identity before provider launch so its first tool
@@ -162,7 +170,11 @@ Cancellation uses the ordinary agent cancellation path and drains the stream to 
 
 Workspace archive or removal wins over the Team Run. Stop the current step and create no later agents. Keep the preexisting Workspace and every created agent.
 
-Shutdown fences new starts before agents close. Mark in-flight runs interrupted and cancel or settle them best-effort. On startup, mark every leftover active run interrupted. Never replay a prompt whose effects are uncertain.
+Shutdown fences new starts before agents close. Mark in-flight runs interrupted and cancel or settle
+them best-effort. Preserve an outer-running, idle `awaiting_human` record only when its request is
+unresolved and unretired and no step is active. Startup preserves that same safe wait. Interrupt all
+other leftover active runs, including malformed waits and active supervisor or worker turns. Never
+replay a prompt whose effects are uncertain.
 
 A terminal supervision phase must match the outer Team Run status. That transition retires any
 unresolved human request and settles every unfinished work item in the same atomic run write. The

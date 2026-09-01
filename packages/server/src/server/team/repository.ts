@@ -20,6 +20,7 @@ import {
 import {
   canTransitionTeamRun,
   canTransitionTeamRunStep,
+  generateTeamSupervisionEventId,
   generateTeamId,
   generateTeamRunId,
   TEAM_ERROR_MAX_CHARS,
@@ -110,6 +111,7 @@ export type TeamRunUpdater = (
 ) => TeamRunUpdate | Promise<TeamRunUpdate>;
 
 export type TeamRunSupervisionDecision = PersistedTeamRunSupervision["decisions"][number];
+export type TeamRunSupervisionEvent = NonNullable<PersistedTeamRunSupervision["events"]>[number];
 type TeamRunSupervisionCommitDecision = TeamRunSupervisionDecision extends infer Decision
   ? Decision extends { kind: "dispatch" }
     ? Omit<Decision, "inputArtifactIds"> & { inputArtifactIds: string[] }
@@ -174,6 +176,17 @@ export interface TeamRunPage {
   issues: TeamRepositoryFileIssue[];
 }
 
+export interface ListTeamRunSupervisionEventsInput {
+  runId: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface TeamRunSupervisionEventPage {
+  events: NonNullable<PersistedTeamRunSupervision["events"]>;
+  nextCursor: string | null;
+}
+
 export type TeamRepositoryCollection = "definitions" | "runs";
 export type TeamRepositoryFileIssueKind = "unknown_file" | "invalid_record";
 
@@ -203,6 +216,7 @@ export interface TeamRepositoryOptions {
   now?: () => Date;
   writeJson?: (filePath: string, value: unknown) => Promise<void>;
   generateArtifactId?: () => string;
+  generateSupervisionEventId?: () => string;
 }
 
 interface CollectionRead<TRecord> {
@@ -219,6 +233,15 @@ const TeamRunCursorSchema = z
   .strict();
 
 type TeamRunCursor = z.infer<typeof TeamRunCursorSchema>;
+
+const TeamRunSupervisionEventCursorSchema = z
+  .object({
+    runId: PersistedTeamEntityIdSchema,
+    sequence: z.number().int().positive(),
+  })
+  .strict();
+
+type TeamRunSupervisionEventCursor = z.infer<typeof TeamRunSupervisionEventCursorSchema>;
 
 export class TeamNotFoundError extends Error {
   readonly code = "team_not_found";
@@ -377,6 +400,15 @@ export class TeamRunPageError extends Error {
   }
 }
 
+export class TeamRunSupervisionEventPageError extends Error {
+  readonly code = "invalid_team_supervision_event_page";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "TeamRunSupervisionEventPageError";
+  }
+}
+
 export class TeamRepositoryIdError extends Error {
   readonly code = "invalid_team_repository_id";
 
@@ -401,6 +433,7 @@ export class TeamRepository {
   private readonly now: () => Date;
   private readonly writeJson: (filePath: string, value: unknown) => Promise<void>;
   private readonly generateArtifactId: () => string;
+  private readonly generateSupervisionEventId: () => string;
   private readonly listeners = new Set<TeamRepositoryListener>();
   readonly persistenceBoundaryKey: string;
 
@@ -412,6 +445,8 @@ export class TeamRepository {
     this.now = options.now ?? (() => new Date());
     this.writeJson = options.writeJson ?? writeJsonFileAtomic;
     this.generateArtifactId = options.generateArtifactId ?? generateAssignmentArtifactId;
+    this.generateSupervisionEventId =
+      options.generateSupervisionEventId ?? generateTeamSupervisionEventId;
   }
 
   subscribe(listener: TeamRepositoryListener): () => void {
@@ -460,6 +495,29 @@ export class TeamRepository {
 
   async getRun(runId: string): Promise<PersistedTeamRunRecord | null> {
     return this.readRecord(this.runPath(runId), runId, "runs", PersistedTeamRunRecordSchema);
+  }
+
+  async listSupervisionEvents(
+    input: ListTeamRunSupervisionEventsInput,
+  ): Promise<TeamRunSupervisionEventPage> {
+    requireRepositoryId(input.runId);
+    const limit = normalizeSupervisionEventPageLimit(input.limit);
+    const run = await this.requireRun(input.runId);
+    if (!run.supervision) throw new TeamRunNotSupervisedError(input.runId);
+    const cursor = input.cursor ? decodeSupervisionEventCursor(input.cursor, input.runId) : null;
+    const events = (run.supervision.events ?? [])
+      .filter((event) => cursor === null || event.sequence < cursor.sequence)
+      .toReversed();
+    const hasNextPage = events.length > limit;
+    const page = events.slice(0, limit);
+    const lastEvent = page.at(-1);
+    return {
+      events: page,
+      nextCursor:
+        hasNextPage && lastEvent
+          ? encodeSupervisionEventCursor(input.runId, lastEvent.sequence)
+          : null,
+    };
   }
 
   async getRunByIdempotency(
@@ -743,7 +801,12 @@ export class TeamRepository {
       const supervisionPhase = terminalSupervisionPhase(update.state.status);
       const supervision =
         preserved.supervision && isActiveTeamRunStatus(preserved.state.status) && supervisionPhase
-          ? terminalizeSupervision(preserved.supervision, supervisionPhase, updatedAt)
+          ? terminalizeSupervision(
+              preserved.supervision,
+              supervisionPhase,
+              updatedAt,
+              this.generateAvailableSupervisionEventId(preserved.supervision),
+            )
           : preserved.supervision;
       const run = PersistedTeamRunRecordSchema.parse({
         ...preserved,
@@ -921,7 +984,14 @@ export class TeamRepository {
         ...preserved,
         steps: update.steps,
         state: update.state,
-        supervision: { ...update.supervision, updatedAt: committedAt },
+        supervision: appendSupervisionEvent(
+          { ...update.supervision, updatedAt: committedAt },
+          createDecisionSupervisionEvent(
+            update,
+            decision,
+            this.generateAvailableSupervisionEventId(update.supervision),
+          ),
+        ),
         updatedAt: committedAt,
       });
       await this.writeJson(this.runPath(run.id), run);
@@ -972,24 +1042,43 @@ export class TeamRepository {
       }
 
       const updatedAt = this.now().toISOString();
+      const eventId = this.generateAvailableSupervisionEventId(current.supervision);
       const run = PersistedTeamRunRecordSchema.parse({
         ...current,
-        supervision: {
-          ...current.supervision,
-          revision: current.supervision.revision + 1,
-          phase: "planning",
-          humanRequest: {
-            ...request,
-            revision: request.revision + 1,
-            resolution: {
-              actionId: input.actionId,
-              note: input.note,
-              idempotencyKey: input.idempotencyKey,
-              resolvedAt: updatedAt,
+        supervision: appendSupervisionEvent(
+          {
+            ...current.supervision,
+            revision: current.supervision.revision + 1,
+            phase: "planning",
+            humanRequest: {
+              ...request,
+              revision: request.revision + 1,
+              resolution: {
+                actionId: input.actionId,
+                note: input.note,
+                idempotencyKey: input.idempotencyKey,
+                resolvedAt: updatedAt,
+              },
             },
+            updatedAt,
           },
-          updatedAt,
-        },
+          {
+            id: eventId,
+            kind: "human_request.resolved",
+            title: `Human response: ${action.label}`,
+            ...(input.note ? { detail: input.note } : {}),
+            decisionId: null,
+            actionId: input.actionId,
+            workItemId: null,
+            attemptId: null,
+            humanRequestId: request.id,
+            roleIds: request.roleIds,
+            agentIds: request.agentIds,
+            stepIds: request.stepIds,
+            artifactIds: request.artifactIds,
+            createdAt: updatedAt,
+          },
+        ),
         updatedAt,
       });
       await this.writeJson(this.runPath(run.id), run);
@@ -1064,16 +1153,41 @@ export class TeamRepository {
         status: input.outcome.status,
       };
       const startedAt = "startedAt" in current.state ? current.state.startedAt : timestamp;
+      const outputArtifactId =
+        input.outcome.status === "succeeded" ? active.step.snapshot.outputArtifact?.id : undefined;
+      const dispatchDecisionId =
+        current.supervision.decisions.find((decision) => decision.attemptId === input.attemptId)
+          ?.id ?? null;
       const run = PersistedTeamRunRecordSchema.parse({
         ...current,
         steps,
-        supervision: {
-          ...current.supervision,
-          revision: current.supervision.revision + 1,
-          phase: "planning",
-          workItems,
-          updatedAt: timestamp,
-        },
+        supervision: appendSupervisionEvent(
+          {
+            ...current.supervision,
+            revision: current.supervision.revision + 1,
+            phase: "planning",
+            workItems,
+            updatedAt: timestamp,
+          },
+          {
+            id: this.generateAvailableSupervisionEventId(current.supervision),
+            kind: `worker.${input.outcome.status}`,
+            title: `Worker ${input.outcome.status}`,
+            ...(input.outcome.status === "failed"
+              ? { detail: boundedTeamRunError(input.outcome.error) }
+              : {}),
+            decisionId: dispatchDecisionId,
+            actionId: null,
+            workItemId: active.workItem.id,
+            attemptId: input.attemptId,
+            humanRequestId: null,
+            roleIds: [active.step.snapshot.roleId],
+            agentIds: active.agentId ? [active.agentId] : [],
+            stepIds: [active.step.snapshot.stepId],
+            artifactIds: outputArtifactId ? [outputArtifactId] : [],
+            createdAt: timestamp,
+          },
+        ),
         state: { status: "running", startedAt },
         updatedAt: timestamp,
       });
@@ -1136,6 +1250,13 @@ export class TeamRepository {
     let artifactId = this.generateArtifactId();
     while (reservedArtifactIds.has(artifactId)) artifactId = this.generateArtifactId();
     return artifactId;
+  }
+
+  private generateAvailableSupervisionEventId(supervision: PersistedTeamRunSupervision): string {
+    const existingIds = new Set((supervision.events ?? []).map((event) => event.id));
+    let eventId = this.generateSupervisionEventId();
+    while (existingIds.has(eventId)) eventId = this.generateSupervisionEventId();
+    return eventId;
   }
 
   private requireMatchingAdmissionIdentity(
@@ -1416,7 +1537,8 @@ function supervisionDecisionUpdateMatches(
   const immutableSnapshotMatches =
     equal(update.supervision.supervisor, preserved.supervision!.supervisor) &&
     equal(update.supervision.workerTemplates, preserved.supervision!.workerTemplates) &&
-    equal(update.supervision.limits, preserved.supervision!.limits);
+    equal(update.supervision.limits, preserved.supervision!.limits) &&
+    equal(update.supervision.events, preserved.supervision!.events);
   return (
     immutableSnapshotMatches &&
     decisionPreservesWorkItemLedger(preserved, update, input.decision) &&
@@ -1743,10 +1865,97 @@ function collectTeamRunOutputArtifactIds(runs: readonly PersistedTeamRunRecord[]
   );
 }
 
+type TeamRunSupervisionEventDraft = Omit<TeamRunSupervisionEvent, "sequence">;
+
+function appendSupervisionEvent(
+  supervision: PersistedTeamRunSupervision,
+  event: TeamRunSupervisionEventDraft,
+): PersistedTeamRunSupervision {
+  const events = supervision.events ?? [];
+  return {
+    ...supervision,
+    events: [...events, { ...event, sequence: events.length + 1 }],
+  };
+}
+
+function createDecisionSupervisionEvent(
+  update: TeamRunSupervisionUpdate,
+  decision: TeamRunSupervisionCommitDecision,
+  eventId: string,
+): TeamRunSupervisionEventDraft {
+  const supervisorStep = update.steps.find(
+    (step) =>
+      step.snapshot.supervision?.kind === "supervisor" &&
+      step.snapshot.supervision.decisionId === decision.id,
+  );
+  const workerStep =
+    decision.attemptId === null
+      ? null
+      : update.steps.find(
+          (step) =>
+            step.snapshot.supervision?.kind === "worker" &&
+            step.snapshot.supervision.attemptId === decision.attemptId,
+        );
+  const artifactIds =
+    decision.kind === "dispatch" || decision.kind === "request_revision"
+      ? [
+          ...decision.inputArtifactIds,
+          ...(workerStep?.snapshot.outputArtifact ? [workerStep.snapshot.outputArtifact.id] : []),
+        ]
+      : [];
+  const humanRequest = decision.kind === "escalate" ? update.supervision.humanRequest : null;
+  const roleIds = [
+    update.supervision.supervisor.roleId,
+    ...(workerStep ? [workerStep.snapshot.roleId] : []),
+  ];
+  const stepIds = [
+    ...(supervisorStep ? [supervisorStep.snapshot.stepId] : []),
+    ...(workerStep ? [workerStep.snapshot.stepId] : []),
+  ];
+  const agentIds = [
+    update.supervision.supervisor.agentId,
+    ...(workerStep && "agentId" in workerStep.state && workerStep.state.agentId
+      ? [workerStep.state.agentId]
+      : []),
+  ];
+  return {
+    id: eventId,
+    kind: `decision.${decision.kind}`,
+    title: decisionTitle(decision.kind),
+    detail: decision.summary,
+    decisionId: decision.id,
+    actionId: decision.actionId,
+    workItemId: decision.workItemId,
+    attemptId: decision.attemptId,
+    humanRequestId: humanRequest?.id ?? null,
+    roleIds: [...new Set(roleIds)],
+    agentIds: [...new Set(agentIds)],
+    stepIds: [...new Set(stepIds)],
+    artifactIds: [...new Set(artifactIds)],
+    createdAt: decision.createdAt,
+  };
+}
+
+function decisionTitle(kind: TeamRunSupervisionCommitDecision["kind"]): string {
+  switch (kind) {
+    case "plan":
+      return "Supervisor planned work";
+    case "dispatch":
+      return "Supervisor dispatched work";
+    case "request_revision":
+      return "Supervisor requested a revision";
+    case "escalate":
+      return "Supervisor requested human input";
+    case "complete":
+      return "Supervisor completed the run";
+  }
+}
+
 function terminalizeSupervision(
   supervision: PersistedTeamRunSupervision,
   phase: PersistedTeamRunSupervision["phase"],
   updatedAt: string,
+  eventId: string,
 ): PersistedTeamRunSupervision {
   const humanRequest = supervision.humanRequest;
   const isPendingRequest = humanRequest && !humanRequest.resolution && !humanRequest.retirement;
@@ -1759,7 +1968,7 @@ function terminalizeSupervision(
           : workItem,
       )
     : supervision.workItems;
-  return {
+  const terminalized = {
     ...supervision,
     revision: supervision.revision + 1,
     phase,
@@ -1774,6 +1983,41 @@ function terminalizeSupervision(
       : {}),
     updatedAt,
   };
+  return appendSupervisionEvent(
+    terminalized,
+    isPendingRequest && retirementReason
+      ? {
+          id: eventId,
+          kind: "human_request.retired",
+          title: "Human request retired",
+          detail: `The Team Run was ${retirementReason}`,
+          decisionId: null,
+          actionId: null,
+          workItemId: null,
+          attemptId: null,
+          humanRequestId: humanRequest.id,
+          roleIds: humanRequest.roleIds,
+          agentIds: humanRequest.agentIds,
+          stepIds: humanRequest.stepIds,
+          artifactIds: humanRequest.artifactIds,
+          createdAt: updatedAt,
+        }
+      : {
+          id: eventId,
+          kind: `run.${phase}`,
+          title: `Team Run ${phase}`,
+          decisionId: null,
+          actionId: null,
+          workItemId: null,
+          attemptId: null,
+          humanRequestId: null,
+          roleIds: [supervision.supervisor.roleId],
+          agentIds: [supervision.supervisor.agentId],
+          stepIds: [],
+          artifactIds: [],
+          createdAt: updatedAt,
+        },
+  );
 }
 
 function compareRunsNewestFirst(
@@ -1790,6 +2034,17 @@ function normalizeRunPageLimit(limit: number | undefined): number {
   if (!isValid) {
     throw new TeamRunPageError(
       `Team Run page limit must be between 1 and ${TEAM_RUN_PAGE_MAX_LIMIT}`,
+    );
+  }
+  return limit;
+}
+
+function normalizeSupervisionEventPageLimit(limit: number | undefined): number {
+  if (limit === undefined) return TEAM_RUN_PAGE_DEFAULT_LIMIT;
+  const isValid = Number.isInteger(limit) && limit > 0 && limit <= TEAM_RUN_PAGE_MAX_LIMIT;
+  if (!isValid) {
+    throw new TeamRunSupervisionEventPageError(
+      `Supervision event page limit must be between 1 and ${TEAM_RUN_PAGE_MAX_LIMIT}`,
     );
   }
   return limit;
@@ -1820,6 +2075,27 @@ function isRunAfterCursor(run: PersistedTeamRunRecord, cursor: TeamRunCursor): b
   if (runCreatedAt < cursorCreatedAt) return true;
   if (runCreatedAt > cursorCreatedAt) return false;
   return run.id < cursor.id;
+}
+
+function encodeSupervisionEventCursor(runId: string, sequence: number): string {
+  const cursor: TeamRunSupervisionEventCursor = { runId, sequence };
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodeSupervisionEventCursor(token: string, runId: string): TeamRunSupervisionEventCursor {
+  try {
+    const decoded = Buffer.from(token, "base64url").toString("utf8");
+    const cursor = TeamRunSupervisionEventCursorSchema.parse(JSON.parse(decoded));
+    if (cursor.runId !== runId) {
+      throw new TeamRunSupervisionEventPageError(
+        "Supervision event cursor does not match the Team Run",
+      );
+    }
+    return cursor;
+  } catch (error) {
+    if (error instanceof TeamRunSupervisionEventPageError) throw error;
+    throw new TeamRunSupervisionEventPageError("Invalid supervision event cursor");
+  }
 }
 
 function hasErrorCode(error: unknown, code: string): boolean {

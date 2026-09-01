@@ -1273,6 +1273,58 @@ describe("Team Run contract", () => {
     );
   });
 
+  test("keeps legacy supervision readable and validates append-only event identity", () => {
+    const legacy = createSupervisedAssignmentRun();
+    expect(legacy.supervision).not.toHaveProperty("events");
+    expect(PersistedTeamRunRecordSchema.safeParse(legacy).success).toBe(true);
+
+    const invalid = structuredClone(legacy);
+    invalid.supervision!.events = [
+      {
+        id: "sevt_duplicate",
+        sequence: 1,
+        kind: "decision.plan",
+        title: "Supervisor planned work",
+        decisionId: null,
+        actionId: null,
+        workItemId: null,
+        attemptId: null,
+        humanRequestId: null,
+        roleIds: [invalid.supervision!.supervisor.roleId],
+        agentIds: [invalid.supervision!.supervisor.agentId],
+        stepIds: [],
+        artifactIds: [],
+        createdAt: timestamp,
+      },
+      {
+        id: "sevt_duplicate",
+        sequence: 3,
+        kind: "run.interrupted",
+        title: "Team Run interrupted",
+        decisionId: null,
+        actionId: null,
+        workItemId: null,
+        attemptId: null,
+        humanRequestId: null,
+        roleIds: [invalid.supervision!.supervisor.roleId],
+        agentIds: [invalid.supervision!.supervisor.agentId],
+        stepIds: [],
+        artifactIds: [],
+        createdAt: timestamp,
+      },
+    ];
+
+    const result = PersistedTeamRunRecordSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toEqual(
+      expect.arrayContaining([
+        "Supervision event sequences must be contiguous",
+        "Duplicate supervision event ID: sevt_duplicate",
+      ]),
+    );
+  });
+
   test("rejects terminal success while a human request remains unresolved", () => {
     const supervised = createSupervisedAssignmentRun();
     const result = PersistedTeamRunRecordSchema.safeParse({

@@ -1503,6 +1503,11 @@ describe("TeamRepository runs", () => {
         retirement: { reason: "canceled", retiredAt: secondTimestamp },
       },
     });
+    expect(canceled.supervision?.events?.at(-1)).toMatchObject({
+      kind: "human_request.retired",
+      humanRequestId: "human_review_1",
+      detail: "The Team Run was canceled",
+    });
     expect(toTeamRunDto(canceled).supervision).not.toHaveProperty("pendingHumanRequest");
     await expect(repository.getActiveRunForAssignment(assignment.id)).resolves.toBeNull();
 
@@ -1660,6 +1665,30 @@ describe("TeamRepository runs", () => {
           resolvedAt: secondTimestamp,
         },
       },
+    });
+    expect(resolved.supervision?.events?.map((event) => event.kind)).toEqual([
+      "decision.plan",
+      "decision.escalate",
+      "human_request.resolved",
+    ]);
+    const newestEvents = await repository.listSupervisionEvents({
+      runId: admitted.id,
+      limit: 2,
+    });
+    expect(newestEvents.events.map((event) => event.kind)).toEqual([
+      "human_request.resolved",
+      "decision.escalate",
+    ]);
+    expect(newestEvents.nextCursor).not.toBeNull();
+    await expect(
+      repository.listSupervisionEvents({
+        runId: admitted.id,
+        cursor: newestEvents.nextCursor!,
+        limit: 2,
+      }),
+    ).resolves.toMatchObject({
+      events: [{ kind: "decision.plan" }],
+      nextCursor: null,
     });
     await expect(repository.resolveSupervisionHumanRequest(response)).resolves.toEqual(resolved);
     await expect(

@@ -225,6 +225,23 @@ export interface ListTeamRunsInput {
   requestId?: string;
 }
 
+export interface ListTeamRunSupervisionEventsInput {
+  runId: string;
+  cursor?: string;
+  limit?: number;
+  requestId?: string;
+}
+
+export interface RespondToTeamRunSupervisionHumanRequestInput {
+  runId: string;
+  humanRequestId: string;
+  expectedRevision: number;
+  actionId: string;
+  note: string | null;
+  idempotencyKey: string;
+  requestId?: string;
+}
+
 export interface CreateAssignmentInput extends AssignmentInputDto {
   requestId?: string;
 }
@@ -5769,6 +5786,38 @@ export class DaemonClient {
       requestId,
       message: { type: "team.run.cancel.request", runId },
     });
+  }
+
+  async getTeamRunSupervision(runId: string, requestId?: string) {
+    this.requireTeamsSupport();
+    return this.sendNamespacedCorrelatedSessionRequest<"team.run.supervision.get.response">({
+      requestId,
+      message: { type: "team.run.supervision.get.request", runId },
+    });
+  }
+
+  async listTeamRunSupervisionEvents(input: ListTeamRunSupervisionEventsInput) {
+    this.requireTeamsSupport();
+    const { requestId, ...message } = input;
+    return this.sendNamespacedCorrelatedSessionRequest<"team.run.supervision.events.list.response">(
+      {
+        requestId,
+        message: { type: "team.run.supervision.events.list.request", ...message },
+      },
+    );
+  }
+
+  async respondToTeamRunSupervisionHumanRequest(
+    input: RespondToTeamRunSupervisionHumanRequestInput,
+  ) {
+    this.requireTeamsSupport();
+    const { requestId, ...message } = input;
+    return this.sendNamespacedCorrelatedSessionRequest<"team.run.supervision.human_request.respond.response">(
+      {
+        requestId,
+        message: { type: "team.run.supervision.human_request.respond.request", ...message },
+      },
+    );
   }
 
   async createAssignment(input: CreateAssignmentInput) {

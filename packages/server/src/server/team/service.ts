@@ -29,6 +29,7 @@ import {
   TeamStepStreamEndedError,
 } from "./execution.js";
 import {
+  isActiveTeamRunStepStatus,
   isTerminalTeamRunStatus,
   TEAM_ERROR_MAX_CHARS,
   type PersistedTeamRunRecord,
@@ -255,6 +256,16 @@ export class TeamRunService {
     if (this.initialized) return;
     const activeRuns = await this.repository.listActiveRuns();
     for (const run of activeRuns) {
+      if (isSafeAwaitingHumanRun(run)) {
+        const workspace = await this.workspaceRegistry.get(run.workspace.workspaceId);
+        if (workspace && !workspace.archivedAt) continue;
+        await this.finishTermination(
+          run.id,
+          "workspace",
+          "Workspace was removed or archived while the Team Run awaited human input",
+        );
+        continue;
+      }
       await this.finishTermination(
         run.id,
         "shutdown",
@@ -446,7 +457,7 @@ export class TeamRunService {
   ): Promise<PersistedTeamRunRecord> {
     const current = await this.requireRun(input.runId);
     const humanRequest = current.supervision?.humanRequest;
-    if (humanRequest && !humanRequest.resolution) {
+    if (humanRequest && !humanRequest.resolution && !humanRequest.retirement) {
       await this.executions.get(input.runId);
     }
     return this.serializeAdmission(async () => {
@@ -470,11 +481,13 @@ export class TeamRunService {
     this.unsubscribeWorkspaceMutations?.();
     this.unsubscribeWorkspaceMutations = null;
     const activeRuns = await this.repository.listActiveRuns();
-    for (const run of activeRuns) this.requestTermination(run.id, "shutdown");
-    await Promise.allSettled(activeRuns.map((run) => this.stopActiveRun(run.id)));
+    const runsToInterrupt = activeRuns.filter((run) => !isSafeAwaitingHumanRun(run));
+    for (const run of runsToInterrupt) this.requestTermination(run.id, "shutdown");
+    await Promise.allSettled(runsToInterrupt.map((run) => this.stopActiveRun(run.id)));
 
     const unsettledRuns = await this.repository.listActiveRuns();
     for (const run of unsettledRuns) {
+      if (isSafeAwaitingHumanRun(run)) continue;
       await this.finishTermination(run.id, "shutdown", "Daemon shut down during Team Run");
     }
     this.unsubscribeWorkspaceTerminationBoundaries?.();
@@ -1555,6 +1568,19 @@ function requireSupervisedRun(
 ): PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision } {
   if (!run.supervision) throw new Error(`Team Run ${run.id} is not supervised`);
   return run as PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision };
+}
+
+function isSafeAwaitingHumanRun(run: PersistedTeamRunRecord): boolean {
+  const request = run.supervision?.humanRequest;
+  return (
+    run.state.status === "running" &&
+    run.supervision?.phase === "awaiting_human" &&
+    request !== null &&
+    request !== undefined &&
+    !request.resolution &&
+    !request.retirement &&
+    !run.steps.some((step) => isActiveTeamRunStepStatus(step.state.status))
+  );
 }
 
 function requireActiveSupervisor(run: PersistedTeamRunRecord): {

@@ -1179,6 +1179,97 @@ test("keeps Team run admission pending beyond the default session RPC deadline",
   await expect(responsePromise).rejects.toThrow("Admission response received");
 });
 
+test("sends correlated Team supervision state, event, and response requests", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_team_supervision_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen({ features: { teams: true } });
+  await connectPromise;
+
+  const statePromise = client.getTeamRunSupervision("run-1", "req-supervision-state");
+  expect(parseSentFrame(mock.sent[0])).toEqual({
+    type: "team.run.supervision.get.request",
+    requestId: "req-supervision-state",
+    runId: "run-1",
+  });
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "rpc_error",
+      payload: {
+        requestId: "req-supervision-state",
+        requestType: "team.run.supervision.get.request",
+        error: "state checked",
+      },
+    }),
+  );
+  await expect(statePromise).rejects.toThrow("state checked");
+
+  const eventsPromise = client.listTeamRunSupervisionEvents({
+    runId: "run-1",
+    cursor: "event-cursor",
+    limit: 25,
+    requestId: "req-supervision-events",
+  });
+  expect(parseSentFrame(mock.sent[1])).toEqual({
+    type: "team.run.supervision.events.list.request",
+    requestId: "req-supervision-events",
+    runId: "run-1",
+    cursor: "event-cursor",
+    limit: 25,
+  });
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "rpc_error",
+      payload: {
+        requestId: "req-supervision-events",
+        requestType: "team.run.supervision.events.list.request",
+        error: "events checked",
+      },
+    }),
+  );
+  await expect(eventsPromise).rejects.toThrow("events checked");
+
+  const responsePromise = client.respondToTeamRunSupervisionHumanRequest({
+    runId: "run-1",
+    humanRequestId: "human-1",
+    expectedRevision: 2,
+    actionId: "continue",
+    note: "Proceed.",
+    idempotencyKey: "response-1",
+    requestId: "req-supervision-response",
+  });
+  expect(parseSentFrame(mock.sent[2])).toEqual({
+    type: "team.run.supervision.human_request.respond.request",
+    requestId: "req-supervision-response",
+    runId: "run-1",
+    humanRequestId: "human-1",
+    expectedRevision: 2,
+    actionId: "continue",
+    note: "Proceed.",
+    idempotencyKey: "response-1",
+  });
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "rpc_error",
+      payload: {
+        requestId: "req-supervision-response",
+        requestType: "team.run.supervision.human_request.respond.request",
+        error: "response checked",
+      },
+    }),
+  );
+  await expect(responsePromise).rejects.toThrow("response checked");
+});
+
 test("keeps Assignment-backed Team run admission pending beyond the default deadline", async () => {
   useHeartbeatClock();
   const logger = createMockLogger();
