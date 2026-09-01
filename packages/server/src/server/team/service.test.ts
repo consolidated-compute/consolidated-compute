@@ -1280,6 +1280,103 @@ describe("TeamRunService", () => {
     });
   });
 
+  test("offers only cancellation when escalation follows failed work", async () => {
+    const harness = await createHarness();
+    const { run } = await startSupervisedRun(harness, "failed-worker-escalation");
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 1);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "plan",
+        actionId: "action_plan_failed_worker",
+        summary: "Run the frozen builder.",
+        workItems: [{ id: "work_failed_builder", templateStepId: "step_build" }],
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-plan-failed-worker",
+    });
+    await harness.runtime.waitForStreamCount(firstAgentId, 2);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "dispatch",
+        actionId: "action_dispatch_failed_worker",
+        summary: "Dispatch the builder.",
+        workItemId: "work_failed_builder",
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-dispatch-failed-worker",
+    });
+    await harness.runtime.waitForStream(secondAgentId);
+    await harness.runtime.pushEvent(secondAgentId, {
+      type: "turn_failed",
+      provider: "codex",
+      error: "Builder could not complete the work.",
+    });
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 3);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "escalate",
+        actionId: "action_escalate_failed_worker",
+        summary: "The first executor cannot retry this failed Work Item.",
+        workItemId: "work_failed_builder",
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-escalate-failed-worker",
+    });
+
+    const waiting = await harness.service.waitForRun(run.id);
+    expect(waiting.supervision).toMatchObject({
+      phase: "awaiting_human",
+      workItems: [{ id: "work_failed_builder", status: "failed" }],
+      humanRequest: {
+        actions: [{ id: "cancel", label: "Cancel run", requiresNote: false }],
+      },
+    });
+    const request = waiting.supervision!.humanRequest!;
+    await expect(
+      harness.service.respondToSupervisionHumanRequest({
+        runId: run.id,
+        requestId: request.id,
+        expectedRequestRevision: request.revision,
+        actionId: "continue",
+        note: "Retry the failed worker.",
+        idempotencyKey: "continue-failed-worker",
+      }),
+    ).rejects.toMatchObject({ code: "team_run_supervision_human_request_conflict" });
+    expect(
+      harness.runtime.streams.filter((stream) => stream.agentId === firstAgentId),
+    ).toHaveLength(3);
+
+    const canceled = await harness.service.respondToSupervisionHumanRequest({
+      runId: run.id,
+      requestId: request.id,
+      expectedRequestRevision: request.revision,
+      actionId: "cancel",
+      note: null,
+      idempotencyKey: "cancel-failed-worker",
+    });
+    expect(canceled).toMatchObject({
+      state: { status: "canceled" },
+      supervision: {
+        phase: "canceled",
+        humanRequest: { resolution: { actionId: "cancel" } },
+      },
+    });
+  });
+
   test("persists escalation as an idle human wait without launching a worker", async () => {
     const harness = await createHarness();
     harness.daemonConfigStore.agentProfiles.push({

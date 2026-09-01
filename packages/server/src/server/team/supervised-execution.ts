@@ -393,6 +393,9 @@ export function buildTeamSupervisionDecisionUpdate(
   if (input.action.kind === "escalate") {
     if (input.humanRequestId === null) throw new Error("Escalation requires a human request ID");
     phase = "awaiting_human";
+    const hasFailedWork = input.run.supervision.workItems.some(
+      (workItem) => workItem.status === "failed",
+    );
     humanRequest = {
       id: input.humanRequestId,
       revision: 1,
@@ -400,7 +403,7 @@ export function buildTeamSupervisionDecisionUpdate(
       title: "Supervisor needs input",
       detail: input.action.summary.trim(),
       actions: [
-        { id: "continue", label: "Continue", requiresNote: true },
+        ...(!hasFailedWork ? [{ id: "continue", label: "Continue", requiresNote: true }] : []),
         { id: "cancel", label: "Cancel run", requiresNote: false },
       ],
       roleIds: [input.run.supervision.supervisor.roleId],
