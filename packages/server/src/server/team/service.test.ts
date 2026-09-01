@@ -474,6 +474,7 @@ describe("TeamRunService", () => {
     assignmentRepository?: AssignmentRepository;
     supervisedControlPlaneProtection?: TeamSupervisedControlPlaneProtection;
     initialize?: boolean;
+    now?: () => Date;
   }): Promise<Harness> {
     const repository =
       options?.repository ?? new TeamRepository({ paseoHome, now: () => new Date(timestamp) });
@@ -504,7 +505,7 @@ describe("TeamRunService", () => {
       agentManager: runtime,
       cancelAgentRun: (agentId) => runtime.cancelAgentRun(agentId),
       logger: createTestLogger(),
-      now: () => new Date(timestamp),
+      now: options?.now ?? (() => new Date(timestamp)),
       createAgentId: () => {
         const id = ids.shift();
         if (!id) throw new Error("Test exhausted planned agent IDs");
@@ -570,6 +571,46 @@ describe("TeamRunService", () => {
       expectedAssignmentRevision: assignment.revision,
       workspaceId: "wks_team_service",
     });
+  }
+
+  async function startSupervisedRun(harness: Harness, idempotencyKey: string) {
+    harness.daemonConfigStore.agentProfiles.push({
+      id: "profile_supervisor",
+      name: "Supervisor",
+      provider: "codex",
+      model: "gpt-5.6",
+      providerOptions: { features: { multi_agent_v2: false } },
+    });
+    const definition = await harness.repository.updateDefinition({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      patch: {
+        roles: [
+          ...harness.definition.roles,
+          {
+            id: "role_supervisor",
+            name: "Supervisor",
+            instructions: "Coordinate bounded work through durable decisions.",
+            profileId: "profile_supervisor",
+          },
+        ],
+      },
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Supervised execution boundary",
+      objective: "Preserve authoritative worker and decision outcomes.",
+      workItem: null,
+    });
+    const run = await harness.service.admitSupervisedAssignmentRun({
+      teamId: definition.id,
+      expectedRevision: definition.revision,
+      idempotencyKey,
+      assignmentId: assignment.id,
+      expectedAssignmentRevision: assignment.revision,
+      workspaceId: "wks_team_service",
+      supervisorRoleId: "role_supervisor",
+    });
+    return { assignment, definition, run };
   }
 
   test("persists supervised admission before launching its frozen supervisor", async () => {
@@ -781,6 +822,53 @@ describe("TeamRunService", () => {
     });
     expect(harness.runtime.streams).toHaveLength(1);
     expect(harness.runtime.cancellations).toEqual([firstAgentId]);
+  });
+
+  test("uses one repository timestamp for every supervisor decision effect", async () => {
+    let repositoryTimestamp = timestamp;
+    let serviceTimestamp = "2026-08-25T12:00:05.000Z";
+    const committedAt = "2026-08-25T12:00:10.000Z";
+    const repository = new TeamRepository({
+      paseoHome,
+      now: () => new Date(repositoryTimestamp),
+    });
+    const harness = await createHarness({
+      repository,
+      now: () => new Date(serviceTimestamp),
+    });
+    const { run } = await startSupervisedRun(harness, "supervision-commit-timestamp");
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 1);
+    repositoryTimestamp = committedAt;
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "escalate",
+        actionId: "action_escalate_timestamp",
+        summary: "Commit every effect at one repository-owned instant.",
+        workItemId: null,
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-escalate-timestamp",
+    });
+
+    const waiting = await harness.service.waitForRun(run.id);
+    expect(waiting).toMatchObject({
+      steps: [{ state: { status: "succeeded", endedAt: committedAt } }],
+      supervision: {
+        phase: "awaiting_human",
+        decisions: [{ actionId: "action_escalate_timestamp", createdAt: committedAt }],
+        humanRequest: { createdAt: committedAt },
+        updatedAt: committedAt,
+      },
+      updatedAt: committedAt,
+    });
+    repositoryTimestamp = "2026-08-25T12:00:15.000Z";
+    serviceTimestamp = repositoryTimestamp;
+    await harness.service.cancelRun(run.id);
   });
 
   test("executes validated supervisor decisions and one frozen worker at a time", async () => {
@@ -1121,6 +1209,75 @@ describe("TeamRunService", () => {
       secondAgentId,
     ]);
     await harness.service.cancelRun(run.id);
+  });
+
+  test("does not reinterpret a completed worker as failed when success persistence throws", async () => {
+    const harness = await createHarness();
+    const { assignment, run } = await startSupervisedRun(
+      harness,
+      "supervised-worker-success-persistence",
+    );
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 1);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "plan",
+        actionId: "action_plan_success_persistence",
+        summary: "Run the frozen builder.",
+        workItems: [{ id: "work_success_persistence", templateStepId: "step_build" }],
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-plan-success-persistence",
+    });
+    await harness.runtime.waitForStreamCount(firstAgentId, 2);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "dispatch",
+        actionId: "action_dispatch_success_persistence",
+        summary: "Dispatch the builder.",
+        workItemId: "work_success_persistence",
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-dispatch-success-persistence",
+    });
+
+    await harness.runtime.waitForStream(secondAgentId);
+    const settlementOutcomes: string[] = [];
+    const originalSettle = harness.repository.settleSupervisedWorker.bind(harness.repository);
+    harness.repository.settleSupervisedWorker = async (input) => {
+      settlementOutcomes.push(input.outcome.status);
+      if (input.outcome.status === "succeeded") {
+        throw new Error("simulated success settlement persistence failure");
+      }
+      return originalSettle(input);
+    };
+    harness.runtime.finalResponses.set(secondAgentId, "Authoritative successful worker output.");
+    await harness.runtime.pushEvent(secondAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-worker-success-persistence",
+    });
+
+    const failed = await harness.service.waitForRun(run.id);
+    expect(failed.state).toMatchObject({
+      status: "failed",
+      error: "simulated success settlement persistence failure",
+    });
+    expect(settlementOutcomes).toEqual(["succeeded"]);
+    await expect(
+      harness.assignments.listArtifacts({ assignmentId: assignment.id }),
+    ).resolves.toMatchObject({
+      artifacts: [expect.objectContaining({ content: "Authoritative successful worker output." })],
+      issues: [],
+    });
   });
 
   test("persists escalation as an idle human wait without launching a worker", async () => {

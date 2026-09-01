@@ -110,10 +110,15 @@ export type TeamRunUpdater = (
 ) => TeamRunUpdate | Promise<TeamRunUpdate>;
 
 export type TeamRunSupervisionDecision = PersistedTeamRunSupervision["decisions"][number];
+type WithoutRequiredDecisionTimestamp<T> = T extends TeamRunSupervisionDecision
+  ? Omit<T, "createdAt"> & { createdAt?: string }
+  : never;
+export type TeamRunSupervisionDecisionCandidate =
+  WithoutRequiredDecisionTimestamp<TeamRunSupervisionDecision>;
 export interface CommitTeamRunSupervisionDecisionInput {
   runId: string;
   expectedSupervisionRevision: number;
-  decision: TeamRunSupervisionDecision;
+  decision: TeamRunSupervisionDecisionCandidate;
 }
 export type TeamRunSupervisionUpdate = Pick<
   PersistedTeamRunRecord,
@@ -126,6 +131,8 @@ export type TeamRunSupervisionUpdater = (
 
 export interface TeamRunSupervisionDecisionCommitContext {
   outputArtifactId: string | null;
+  committedAt: string;
+  decision: TeamRunSupervisionDecision;
 }
 
 export interface BeginTeamRunSupervisionTurnInput {
@@ -850,7 +857,7 @@ export class TeamRepository {
         (decision) => decision.actionId === input.decision.actionId,
       );
       if (existingDecision) {
-        if (equal(existingDecision, input.decision)) return current;
+        if (decisionMatchesCandidate(existingDecision, input.decision)) return current;
         throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
       }
       if (current.supervision.revision !== input.expectedSupervisionRevision) {
@@ -878,21 +885,39 @@ export class TeamRepository {
         input.decision.kind === "dispatch"
           ? this.generateAvailableArtifactId(reservedArtifactIds)
           : null;
-      const update = await updater(supervisedCurrent, { outputArtifactId });
-      if (!supervisionDecisionUpdateMatches(preserved, update, input, reservedArtifactIds)) {
+      const committedAt = this.now().toISOString();
+      const decision = {
+        ...input.decision,
+        createdAt: committedAt,
+      } as TeamRunSupervisionDecision;
+      const update = await updater(supervisedCurrent, {
+        outputArtifactId,
+        committedAt,
+        decision,
+      });
+      if (
+        !supervisionDecisionUpdateMatches(
+          preserved,
+          update,
+          {
+            expectedSupervisionRevision: input.expectedSupervisionRevision,
+            decision,
+          },
+          reservedArtifactIds,
+        )
+      ) {
         throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
       }
       if (!preservedStepsFollowDecisionTransitions(preserved, update)) {
         throw new TeamRunSupervisionActionConflictError(input.runId, input.decision.actionId);
       }
 
-      const updatedAt = this.now().toISOString();
       const run = PersistedTeamRunRecordSchema.parse({
         ...preserved,
         steps: update.steps,
         state: update.state,
-        supervision: { ...update.supervision, updatedAt },
-        updatedAt,
+        supervision: { ...update.supervision, updatedAt: committedAt },
+        updatedAt: committedAt,
       });
       await this.writeJson(this.runPath(run.id), run);
       this.publish({ type: "run_updated", run });
@@ -1376,7 +1401,10 @@ function settledWorkerOutcomeMatches(
 function supervisionDecisionUpdateMatches(
   preserved: PersistedTeamRunRecord,
   update: TeamRunSupervisionUpdate,
-  input: CommitTeamRunSupervisionDecisionInput,
+  input: {
+    expectedSupervisionRevision: number;
+    decision: TeamRunSupervisionDecision;
+  },
   reservedArtifactIds: ReadonlySet<string>,
 ): boolean {
   const expectedDecisions = [...preserved.supervision!.decisions, input.decision];
@@ -1395,6 +1423,15 @@ function supervisionDecisionUpdateMatches(
     decisionProducesRequiredSupervisionEffect(update, input.decision) &&
     decisionAppendsExpectedWorkerAttempt(preserved, update, input.decision, reservedArtifactIds)
   );
+}
+
+function decisionMatchesCandidate(
+  decision: TeamRunSupervisionDecision,
+  candidate: TeamRunSupervisionDecisionCandidate,
+): boolean {
+  const { createdAt: _createdAt, ...persisted } = decision;
+  const { createdAt: _candidateCreatedAt, ...requested } = candidate;
+  return equal(persisted, requested);
 }
 
 function decisionPreservesWorkItemLedger(

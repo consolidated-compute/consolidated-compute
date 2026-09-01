@@ -767,14 +767,12 @@ export class TeamRunService {
     action: TeamSupervisorAction,
   ): Promise<PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision }> {
     const beforeCommit = requireSupervisedRun(await this.requireRun(runId));
-    const timestamp = this.timestamp();
     const attemptId = action.kind === "dispatch" ? randomUUID() : null;
     const decision = normalizeTeamSupervisorDecision({
       run: beforeCommit,
       action,
       decisionId,
       attemptId,
-      createdAt: timestamp,
     });
     const workerAgentId = action.kind === "dispatch" ? this.createAgentId() : null;
     const humanRequestId = action.kind === "escalate" ? randomUUID() : null;
@@ -789,11 +787,9 @@ export class TeamRunService {
           buildTeamSupervisionDecisionUpdate({
             run: current,
             action,
-            decision,
             context,
             workerAgentId,
             humanRequestId,
-            timestamp,
           }),
       ),
     );
@@ -850,6 +846,7 @@ export class TeamRunService {
     )[Symbol.asyncIterator]();
     let agentCreated = false;
     let streamAdmitted = false;
+    let completionObserved = false;
 
     try {
       for (;;) {
@@ -865,6 +862,7 @@ export class TeamRunService {
             `Team step ${active.step.snapshot.stepId} ended without a terminal event`,
           );
         }
+        completionObserved ||= next.value.type === "turn_completed";
         const handled = await this.handleStepEvent(run.id, active.index, next.value);
         agentCreated ||= handled.agentCreated;
         if (!handled.outcome) continue;
@@ -873,6 +871,7 @@ export class TeamRunService {
       }
     } catch (error) {
       await events.return?.(undefined);
+      if (completionObserved) throw error;
       return this.handleStepExecutionError(run.id, active.index, error);
     }
   }

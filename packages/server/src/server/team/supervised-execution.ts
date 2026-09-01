@@ -8,6 +8,7 @@ import {
 } from "./model.js";
 import type {
   TeamRunSupervisionDecision,
+  TeamRunSupervisionDecisionCandidate,
   TeamRunSupervisionDecisionCommitContext,
   TeamRunSupervisionUpdate,
 } from "./repository.js";
@@ -277,18 +278,16 @@ export interface NormalizeTeamSupervisorDecisionInput {
   action: TeamSupervisorAction;
   decisionId: string;
   attemptId: string | null;
-  createdAt: string;
 }
 
 export function normalizeTeamSupervisorDecision(
   input: NormalizeTeamSupervisorDecisionInput,
-): TeamRunSupervisionDecision {
+): TeamRunSupervisionDecisionCandidate {
   const base = {
     id: input.decisionId,
     sequence: input.run.supervision.decisions.length + 1,
     actionId: input.action.actionId,
     summary: input.action.summary.trim(),
-    createdAt: input.createdAt,
   };
   if (input.action.kind === "dispatch") {
     if (input.attemptId === null) throw new Error("Dispatch requires a preallocated attempt ID");
@@ -323,21 +322,20 @@ export function normalizeTeamSupervisorDecision(
 export interface BuildTeamSupervisionDecisionUpdateInput {
   run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision };
   action: TeamSupervisorAction;
-  decision: TeamRunSupervisionDecision;
   context: TeamRunSupervisionDecisionCommitContext;
   workerAgentId: string | null;
   humanRequestId: string | null;
-  timestamp: string;
 }
 
 export function buildTeamSupervisionDecisionUpdate(
   input: BuildTeamSupervisionDecisionUpdateInput,
 ): TeamRunSupervisionUpdate {
+  const { committedAt: timestamp, decision } = input.context;
   const supervisorStepIndex = input.run.steps.findIndex((step) => {
     const metadata = step.snapshot.supervision;
     return (
       metadata?.kind === "supervisor" &&
-      metadata.decisionId === input.decision.id &&
+      metadata.decisionId === decision.id &&
       (step.state.status === "running" || step.state.status === "waiting_for_permission")
     );
   });
@@ -348,7 +346,7 @@ export function buildTeamSupervisionDecisionUpdate(
     !("agentId" in supervisorStep.state) ||
     supervisorStep.state.agentId === null
   ) {
-    throw new Error(`Supervisor decision ${input.decision.id} has no active persisted turn`);
+    throw new Error(`Supervisor decision ${decision.id} has no active persisted turn`);
   }
   const steps = input.run.steps.slice();
   steps[supervisorStepIndex] = {
@@ -358,7 +356,7 @@ export function buildTeamSupervisionDecisionUpdate(
       plannedAgentId: supervisorStep.state.plannedAgentId,
       agentId: supervisorStep.state.agentId,
       startedAt: supervisorStep.state.startedAt,
-      endedAt: input.timestamp,
+      endedAt: timestamp,
     },
   };
 
@@ -379,13 +377,13 @@ export function buildTeamSupervisionDecisionUpdate(
   if (input.action.kind === "dispatch") {
     const workItemId = input.action.workItemId;
     const inputArtifactIds = resolveSupervisedWorkItemInputArtifactIds(input.run, workItemId);
-    appendDispatchedWorker(input, steps, inputArtifactIds);
+    appendDispatchedWorker(input, decision, steps, inputArtifactIds);
     workItems = input.run.supervision.workItems.map((workItem) =>
       workItem.id === workItemId
         ? {
             ...workItem,
             inputArtifactIds,
-            attemptIds: [...workItem.attemptIds, input.decision.attemptId!],
+            attemptIds: [...workItem.attemptIds, decision.attemptId!],
             status: "active" as const,
           }
         : workItem,
@@ -409,7 +407,7 @@ export function buildTeamSupervisionDecisionUpdate(
       agentIds: [input.run.supervision.supervisor.agentId],
       stepIds: [],
       artifactIds: [],
-      createdAt: input.timestamp,
+      createdAt: timestamp,
     };
   }
   if (input.action.kind === "complete") {
@@ -417,7 +415,7 @@ export function buildTeamSupervisionDecisionUpdate(
     state = {
       status: "succeeded",
       startedAt: requireRunStartedAt(input.run),
-      endedAt: input.timestamp,
+      endedAt: timestamp,
     };
   }
 
@@ -429,21 +427,22 @@ export function buildTeamSupervisionDecisionUpdate(
       revision: input.run.supervision.revision + 1,
       phase,
       workItems,
-      decisions: [...input.run.supervision.decisions, input.decision],
+      decisions: [...input.run.supervision.decisions, decision],
       humanRequest,
-      updatedAt: input.timestamp,
+      updatedAt: timestamp,
     },
   };
 }
 
 function appendDispatchedWorker(
   input: BuildTeamSupervisionDecisionUpdateInput,
+  decision: TeamRunSupervisionDecision,
   steps: PersistedTeamRunRecord["steps"],
   inputArtifactIds: string[],
 ): void {
   if (
     input.action.kind !== "dispatch" ||
-    input.decision.kind !== "dispatch" ||
+    decision.kind !== "dispatch" ||
     input.workerAgentId === null ||
     input.context.outputArtifactId === null
   ) {
@@ -458,7 +457,7 @@ function appendDispatchedWorker(
   steps.push({
     snapshot: {
       ...template,
-      stepId: `worker_${input.decision.attemptId}`,
+      stepId: `worker_${decision.attemptId}`,
       inputArtifactIds,
       outputArtifact: {
         id: input.context.outputArtifactId,
@@ -469,7 +468,7 @@ function appendDispatchedWorker(
       supervision: {
         kind: "worker",
         workItemId: workItem.id,
-        attemptId: input.decision.attemptId,
+        attemptId: decision.attemptId,
         attemptNumber: workItem.attemptIds.length + 1,
         templateStepId: template.stepId,
         revisionParentAttemptId: null,
@@ -478,7 +477,7 @@ function appendDispatchedWorker(
     state: {
       status: "creating",
       plannedAgentId: input.workerAgentId,
-      startedAt: input.timestamp,
+      startedAt: input.context.committedAt,
     },
   });
 }

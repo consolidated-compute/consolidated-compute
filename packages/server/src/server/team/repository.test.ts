@@ -909,7 +909,7 @@ describe("TeamRepository runs", () => {
       {
         runId: admitted.id,
         expectedSupervisionRevision: ready.supervision.revision,
-        decision,
+        decision: { ...decision, createdAt: firstTimestamp },
       },
       () => {
         throw new Error("Idempotent retry must not invoke the updater");

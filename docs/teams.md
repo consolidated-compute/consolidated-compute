@@ -117,8 +117,9 @@ A supervised run creates its frozen supervisor once and reuses that persisted ag
 structured turns. An invalid response receives at most two correction prompts on the same turn. The daemon,
 not the supervisor, creates one requested worker from the named frozen template after the dispatch
 decision and planned agent identity are durable. A worker terminal event is authoritative; finish
-notifications may only wake the executor. The first executor does not redispatch failed work or
-route revision Artifacts.
+notifications may only wake the executor. After `turn_completed`, Artifact or success-settlement
+errors propagate as execution failures; never reinterpret them as a failed worker turn. The first
+executor does not redispatch failed work or route revision Artifacts.
 
 Compose each initial prompt from these bounded sections:
 
