@@ -30,6 +30,9 @@ import {
 import { materializeTeamStepArtifact, TeamArtifactInputError } from "./artifacts.js";
 import {
   PersistedTeamRunRecordSchema,
+  TEAM_INSTRUCTIONS_MAX_CHARS,
+  TEAM_MAX_WORKFLOW_STEPS,
+  TEAM_OBJECTIVE_MAX_CHARS,
   type PersistedTeamDefinition,
   type PersistedTeamRunRecord,
 } from "./model.js";
@@ -46,6 +49,7 @@ import {
   type TeamRunWorkspaceRegistry,
 } from "./service.js";
 import { createInitialTeamRunSupervision, TeamSupervisorRoleInvalidError } from "./supervision.js";
+import { TEAM_SUPERVISOR_PROMPT_MAX_BYTES } from "./supervised-execution.js";
 import { toTeamRunDto } from "./wire.js";
 
 const timestamp = "2026-08-25T12:00:00.000Z";
@@ -868,6 +872,66 @@ describe("TeamRunService", () => {
     });
     repositoryTimestamp = "2026-08-25T12:00:15.000Z";
     serviceTimestamp = repositoryTimestamp;
+    await harness.service.cancelRun(run.id);
+  });
+
+  test("bounds the complete supervisor prompt for a maximum-sized Team", async () => {
+    const harness = await createHarness();
+    const maximumInstructions = "🙂".repeat(TEAM_INSTRUCTIONS_MAX_CHARS / 2);
+    harness.daemonConfigStore.agentProfiles.push({
+      id: "profile_supervisor",
+      name: "Supervisor",
+      provider: "codex",
+      model: "gpt-5.6",
+      providerOptions: { features: { multi_agent_v2: false } },
+    });
+    const definition = await harness.repository.updateDefinition({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      patch: {
+        instructions: maximumInstructions,
+        roles: [
+          ...harness.definition.roles.map((role) => ({
+            ...role,
+            instructions: maximumInstructions,
+          })),
+          {
+            id: "role_supervisor",
+            name: "Supervisor",
+            instructions: maximumInstructions,
+            profileId: "profile_supervisor",
+          },
+        ],
+        workflow: Array.from({ length: TEAM_MAX_WORKFLOW_STEPS }, (_, index) => ({
+          id: `step_max_${index + 1}`,
+          roleId: index % 2 === 0 ? "role_builder" : "role_reviewer",
+          instructions: maximumInstructions,
+        })),
+      },
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Maximum supervisor prompt",
+      objective: "o".repeat(TEAM_OBJECTIVE_MAX_CHARS),
+      workItem: null,
+    });
+    const run = await harness.service.admitSupervisedAssignmentRun({
+      teamId: definition.id,
+      expectedRevision: definition.revision,
+      idempotencyKey: "maximum-supervisor-prompt",
+      assignmentId: assignment.id,
+      expectedAssignmentRevision: assignment.revision,
+      workspaceId: "wks_team_service",
+      supervisorRoleId: "role_supervisor",
+    });
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 1);
+    const prompt = harness.runtime.streams[0]!.prompt;
+    expect(Buffer.byteLength(prompt, "utf8")).toBeLessThanOrEqual(TEAM_SUPERVISOR_PROMPT_MAX_BYTES);
+    expect(prompt).toContain("step_max_24");
+    expect(prompt).toContain(
+      `[truncated; originalBytes=${Buffer.byteLength(maximumInstructions, "utf8")}]`,
+    );
+    expect(prompt).not.toContain("�");
     await harness.service.cancelRun(run.id);
   });
 

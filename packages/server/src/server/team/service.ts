@@ -4,7 +4,10 @@ import type { Logger } from "pino";
 import type { TeamRunPreviewDto } from "@getpaseo/protocol/team/types";
 
 import type { AgentRunCancellationResult } from "../agent/agent-manager.js";
-import { getStructuredAgentResponse } from "../agent/agent-response-loop.js";
+import {
+  buildStructuredAgentResponsePrompt,
+  getStructuredAgentResponse,
+} from "../agent/agent-response-loop.js";
 import type { CreateAgentFromMcpInput } from "../agent/create-agent/create.js";
 import type { AssignmentRepository } from "../assignment/repository.js";
 import type { PersistedAssignmentArtifactRecord } from "../assignment/model.js";
@@ -58,6 +61,7 @@ import {
   createTeamSupervisorActionSchema,
   normalizeTeamSupervisorDecision,
   resolveSupervisedWorkItemInputArtifactIds,
+  TEAM_SUPERVISOR_PROMPT_MAX_BYTES,
   type TeamSupervisorAction,
 } from "./supervised-execution.js";
 
@@ -731,11 +735,28 @@ export class TeamRunService {
     const ready = requireSupervisedRun(await this.requireRun(runId));
     const readySupervisor = requireActiveSupervisor(ready);
     const dispatchArtifactIssues = await this.resolveSupervisorDispatchArtifactIssues(ready);
+    const schema = createTeamSupervisorActionSchema(ready, { dispatchArtifactIssues });
+    const prompt = composeTeamSupervisorPrompt(ready, { dispatchArtifactIssues });
+    const structuredPrompt = buildStructuredAgentResponsePrompt({
+      prompt,
+      schema,
+      schemaName: "TeamSupervisorAction",
+    });
+    if (Buffer.byteLength(structuredPrompt, "utf8") > TEAM_SUPERVISOR_PROMPT_MAX_BYTES) {
+      throw new Error(
+        `Team supervisor prompt exceeds ${TEAM_SUPERVISOR_PROMPT_MAX_BYTES} UTF-8 bytes`,
+      );
+    }
     const action = await getStructuredAgentResponse<TeamSupervisorAction>({
-      caller: (prompt) =>
-        this.runSupervisorPrompt(runId, readySupervisor.index, readySupervisor.agentId, prompt),
-      prompt: composeTeamSupervisorPrompt(ready, { dispatchArtifactIssues }),
-      schema: createTeamSupervisorActionSchema(ready, { dispatchArtifactIssues }),
+      caller: (attemptPrompt) =>
+        this.runSupervisorPrompt(
+          runId,
+          readySupervisor.index,
+          readySupervisor.agentId,
+          attemptPrompt,
+        ),
+      prompt,
+      schema,
       maxRetries: 2,
       schemaName: "TeamSupervisorAction",
     });

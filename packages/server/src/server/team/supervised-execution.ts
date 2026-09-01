@@ -66,6 +66,10 @@ export interface TeamSupervisorActionSchemaOptions {
   dispatchArtifactIssues?: ReadonlyMap<string, string>;
 }
 
+export const TEAM_SUPERVISOR_PROMPT_MAX_BYTES = 64 * 1024;
+const TEAM_SUPERVISOR_PROMPT_CONTENT_MAX_BYTES = 48 * 1024;
+const TEAM_SUPERVISOR_TEMPLATE_INSTRUCTION_BYTES = 8 * 1024;
+
 export function createTeamSupervisorActionSchema(
   run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
   options: TeamSupervisorActionSchemaOptions = {},
@@ -233,44 +237,107 @@ export function composeTeamSupervisorPrompt(
   run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
   options: TeamSupervisorActionSchemaOptions = {},
 ): string {
+  const instructionBytes = Math.max(
+    128,
+    Math.min(
+      2_048,
+      Math.floor(
+        TEAM_SUPERVISOR_TEMPLATE_INSTRUCTION_BYTES /
+          Math.max(1, run.supervision.workerTemplates.length * 2),
+      ),
+    ),
+  );
   const templates = run.supervision.workerTemplates.map(
     (template) =>
-      `- ${template.stepId}: role=${template.roleName}; roleInstructions=${JSON.stringify(template.roleInstructions)}; stepInstructions=${JSON.stringify(template.stepInstructions)}`,
+      `- ${template.stepId}: role=${template.roleName}; roleInstructions=${formatPromptString(template.roleInstructions, instructionBytes)}; stepInstructions=${formatPromptString(template.stepInstructions, instructionBytes)}`,
   );
   const workItems = run.supervision.workItems.map((workItem) => {
     const artifactIssue = options.dispatchArtifactIssues?.get(workItem.id);
-    return `- ${workItem.id}: template=${workItem.templateStepId}; status=${workItem.status}; attempts=${workItem.attemptIds.join(",") || "none"}; dispatch=${artifactIssue ? `blocked(${JSON.stringify(artifactIssue)})` : "available"}`;
+    return `- ${workItem.id}: template=${workItem.templateStepId}; status=${workItem.status}; attempts=${workItem.attemptIds.length}; dispatch=${artifactIssue ? `blocked(${formatPromptString(artifactIssue, 256)})` : "available"}`;
   });
   const decisions = run.supervision.decisions.map(
     (decision) =>
-      `- ${decision.sequence}. ${decision.kind}; actionId=${decision.actionId}; summary=${JSON.stringify(decision.summary)}`,
+      `- ${decision.sequence}. ${decision.kind}; actionId=${decision.actionId}; summary=${formatPromptString(decision.summary, 192)}`,
   );
   const humanResolution = run.supervision.humanRequest?.resolution;
   const resolvedHumanRequest = humanResolution
     ? [
         "## Resolved human request",
-        `Request: ${JSON.stringify(run.supervision.humanRequest!.detail)}`,
+        `Request: ${formatPromptString(run.supervision.humanRequest!.detail, 768)}`,
         `Action: ${humanResolution.actionId}`,
-        `Note: ${humanResolution.note === null ? "none" : JSON.stringify(humanResolution.note)}`,
+        `Note: ${humanResolution.note === null ? "none" : formatPromptString(humanResolution.note, 768)}`,
       ].join("\n")
     : null;
-  return [
-    `## Team\nName: ${run.teamSnapshot.name}\n\n${run.teamSnapshot.instructions}`,
-    `## Supervisor role\nName: ${run.supervision.supervisor.roleName}\n\n${run.supervision.supervisor.roleInstructions}`,
-    `## Assignment objective\n${run.objective}`,
-    `## Frozen worker templates\n${templates.join("\n")}`,
-    `## Durable work ledger\n${workItems.length > 0 ? workItems.join("\n") : "No work has been planned."}`,
-    `## Prior durable decisions\n${decisions.length > 0 ? decisions.join("\n") : "No decisions have been committed."}`,
-    ...(resolvedHumanRequest ? [resolvedHumanRequest] : []),
-    [
-      "## Decision rules",
-      "Return exactly one action. Do not create agents or invoke delegation tools yourself.",
-      "Use plan once to map one or more unique work-item IDs to frozen template step IDs. Plan order is execution and Artifact handoff order.",
-      "Use dispatch for the first unfinished planned work item. The daemon creates that worker from its frozen template and supplies every accepted preceding output Artifact.",
-      "Use escalate when a human decision is required. Use complete only after every planned work item succeeded.",
-      `Limits: workItems=${run.supervision.limits.maxWorkItems}; activeWorkers=${run.supervision.limits.maxActiveWorkers}; actions=${run.supervision.limits.maxSupervisorActions}; delegationDepth=${run.supervision.limits.maxDelegationDepth}.`,
-    ].join("\n"),
-  ].join("\n\n");
+  const sections = [
+    boundPromptText(
+      `## Team\nName: ${run.teamSnapshot.name}\n\n${run.teamSnapshot.instructions}`,
+      4 * 1024,
+    ),
+    boundPromptText(
+      `## Supervisor role\nName: ${run.supervision.supervisor.roleName}\n\n${run.supervision.supervisor.roleInstructions}`,
+      4 * 1024,
+    ),
+    boundPromptText(`## Assignment objective\n${run.objective}`, 4 * 1024),
+    boundPromptText(`## Frozen worker templates\n${templates.join("\n")}`, 18 * 1024),
+    boundPromptText(
+      `## Durable work ledger\n${workItems.length > 0 ? workItems.join("\n") : "No work has been planned."}`,
+      9 * 1024,
+    ),
+    boundPromptText(
+      `## Prior durable decisions\n${decisions.length > 0 ? decisions.join("\n") : "No decisions have been committed."}`,
+      3 * 1024,
+    ),
+    ...(resolvedHumanRequest ? [boundPromptText(resolvedHumanRequest, 2 * 1024)] : []),
+    boundPromptText(
+      [
+        "## Decision rules",
+        "Return exactly one action. Do not create agents or invoke delegation tools yourself.",
+        "Use plan once to map one or more unique work-item IDs to frozen template step IDs. Plan order is execution and Artifact handoff order.",
+        "Use dispatch for the first unfinished planned work item. The daemon creates that worker from its frozen template and supplies every accepted preceding output Artifact.",
+        "Use escalate when a human decision is required. Use complete only after every planned work item succeeded.",
+        `Limits: workItems=${run.supervision.limits.maxWorkItems}; activeWorkers=${run.supervision.limits.maxActiveWorkers}; actions=${run.supervision.limits.maxSupervisorActions}; delegationDepth=${run.supervision.limits.maxDelegationDepth}.`,
+      ].join("\n"),
+      2 * 1024,
+    ),
+  ];
+  return boundPromptText(sections.join("\n\n"), TEAM_SUPERVISOR_PROMPT_CONTENT_MAX_BYTES);
+}
+
+function formatPromptString(value: string | null, maxBytes: number): string {
+  if (value === null) return "null";
+  const encoded = JSON.stringify(value);
+  if (Buffer.byteLength(encoded, "utf8") <= maxBytes) return encoded;
+
+  const originalBytes = Buffer.byteLength(value, "utf8");
+  const marker = ` [truncated; originalBytes=${originalBytes}]`;
+  const contentBudget = Math.max(0, maxBytes - Buffer.byteLength(marker, "utf8") - 2);
+  const escaped: string[] = [];
+  let encodedBytes = 0;
+  for (const codePoint of value) {
+    const encodedCodePoint = JSON.stringify(codePoint).slice(1, -1);
+    const codePointBytes = Buffer.byteLength(encodedCodePoint, "utf8");
+    if (encodedBytes + codePointBytes > contentBudget) break;
+    escaped.push(encodedCodePoint);
+    encodedBytes += codePointBytes;
+  }
+  return `"${escaped.join("")}"${marker}`;
+}
+
+function boundPromptText(value: string, maxBytes: number): string {
+  const originalBytes = Buffer.byteLength(value, "utf8");
+  if (originalBytes <= maxBytes) return value;
+
+  const marker = `\n[truncated; originalBytes=${originalBytes}]`;
+  const contentBudget = Math.max(0, maxBytes - Buffer.byteLength(marker, "utf8"));
+  const included: string[] = [];
+  let includedBytes = 0;
+  for (const codePoint of value) {
+    const codePointBytes = Buffer.byteLength(codePoint, "utf8");
+    if (includedBytes + codePointBytes > contentBudget) break;
+    included.push(codePoint);
+    includedBytes += codePointBytes;
+  }
+  return `${included.join("")}${marker}`;
 }
 
 export interface NormalizeTeamSupervisorDecisionInput {

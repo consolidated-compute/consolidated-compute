@@ -124,6 +124,11 @@ continuation only when the frozen ledger has a valid next plan, dispatch, or com
 failed Work Item or blocked Artifact handoff offers cancellation only; reserve those continuation
 paths for a later executor with durable retry or revision semantics.
 
+Cap the complete structured supervisor request at 64 KiB. Supervisor context uses at most 48 KiB
+so the fixed action schema and correction instructions retain headroom. Truncate prose by UTF-8
+bytes with explicit original-size markers, distribute the worker-instruction budget across every
+frozen template, and retain every template and Work Item identity.
+
 Compose each initial prompt from these bounded sections:
 
 1. Team name and instructions.
