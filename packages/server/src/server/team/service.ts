@@ -40,6 +40,7 @@ import {
   TeamRepository,
   TeamRevisionConflictError,
   TeamRunNotFoundError,
+  type ResolveTeamRunSupervisionHumanRequestInput,
   type TeamRunUpdate,
 } from "./repository.js";
 import { materializeTeamStepArtifact, resolveTeamStepInputArtifacts } from "./artifacts.js";
@@ -100,6 +101,9 @@ export interface StartAssignmentTeamRunInput {
 export interface AdmitSupervisedAssignmentTeamRunInput extends StartAssignmentTeamRunInput {
   supervisorRoleId: string;
 }
+
+export type RespondToTeamRunSupervisionHumanRequestInput =
+  ResolveTeamRunSupervisionHumanRequestInput;
 
 export interface TeamRunServiceOptions {
   repository: TeamRepository;
@@ -424,6 +428,22 @@ export class TeamRunService {
       return this.finishTermination(runId, this.terminationRequests.get(runId) ?? "cancel");
     }
     return settled;
+  }
+
+  async respondToSupervisionHumanRequest(
+    input: RespondToTeamRunSupervisionHumanRequestInput,
+  ): Promise<PersistedTeamRunRecord> {
+    const current = await this.requireRun(input.runId);
+    if (!current.supervision?.humanRequest?.resolution) {
+      await this.executions.get(input.runId);
+    }
+    return this.serializeAdmission(async () => {
+      this.requireAcceptingStarts();
+      const resolved = await this.repository.resolveSupervisionHumanRequest(input);
+      if (input.actionId === "cancel") return this.cancelRun(input.runId);
+      this.launchExecution(input.runId);
+      return resolved;
+    });
   }
 
   async waitForRun(runId: string): Promise<PersistedTeamRunRecord> {

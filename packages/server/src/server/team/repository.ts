@@ -134,6 +134,15 @@ export interface BeginTeamRunSupervisionTurnInput {
   decisionId: string;
 }
 
+export interface ResolveTeamRunSupervisionHumanRequestInput {
+  runId: string;
+  requestId: string;
+  expectedRequestRevision: number;
+  actionId: string;
+  note: string | null;
+  idempotencyKey: string;
+}
+
 export interface SettleTeamRunSupervisedWorkerInput {
   runId: string;
   expectedSupervisionRevision: number;
@@ -316,6 +325,34 @@ export class TeamRunSupervisionActionConflictError extends Error {
   ) {
     super(`Supervisor action ${actionId} for Team Run ${runId} conflicts with durable state`);
     this.name = "TeamRunSupervisionActionConflictError";
+  }
+}
+
+export class TeamRunSupervisionHumanRequestConflictError extends Error {
+  readonly code = "team_run_supervision_human_request_conflict";
+
+  constructor(
+    readonly runId: string,
+    readonly requestId: string,
+  ) {
+    super(`Human request ${requestId} for Team Run ${runId} conflicts with durable state`);
+    this.name = "TeamRunSupervisionHumanRequestConflictError";
+  }
+}
+
+export class TeamRunSupervisionHumanRequestRevisionConflictError extends Error {
+  readonly code = "team_run_supervision_human_request_revision_conflict";
+
+  constructor(
+    readonly runId: string,
+    readonly requestId: string,
+    readonly expectedRevision: number,
+    readonly actualRevision: number,
+  ) {
+    super(
+      `Human request revision conflict for ${requestId} in Team Run ${runId}: expected ${expectedRevision}, found ${actualRevision}`,
+    );
+    this.name = "TeamRunSupervisionHumanRequestRevisionConflictError";
   }
 }
 
@@ -855,6 +892,74 @@ export class TeamRepository {
         steps: update.steps,
         state: update.state,
         supervision: { ...update.supervision, updatedAt },
+        updatedAt,
+      });
+      await this.writeJson(this.runPath(run.id), run);
+      this.publish({ type: "run_updated", run });
+      return run;
+    });
+  }
+
+  async resolveSupervisionHumanRequest(
+    input: ResolveTeamRunSupervisionHumanRequestInput,
+  ): Promise<PersistedTeamRunRecord> {
+    return this.serializeMutation(async () => {
+      const current = await this.requireRun(input.runId);
+      if (!current.supervision) throw new TeamRunNotSupervisedError(input.runId);
+      PersistedTeamEntityIdSchema.parse(input.requestId);
+      PersistedTeamEntityIdSchema.parse(input.actionId);
+      const request = current.supervision.humanRequest;
+      if (!request || request.id !== input.requestId) {
+        throw new TeamRunSupervisionHumanRequestConflictError(input.runId, input.requestId);
+      }
+      if (request.resolution) {
+        if (
+          request.resolution.idempotencyKey === input.idempotencyKey &&
+          request.resolution.actionId === input.actionId &&
+          request.resolution.note === input.note
+        ) {
+          return current;
+        }
+        throw new TeamRunSupervisionHumanRequestConflictError(input.runId, input.requestId);
+      }
+      if (request.revision !== input.expectedRequestRevision) {
+        throw new TeamRunSupervisionHumanRequestRevisionConflictError(
+          input.runId,
+          input.requestId,
+          input.expectedRequestRevision,
+          request.revision,
+        );
+      }
+      const action = request.actions.find((candidate) => candidate.id === input.actionId);
+      if (
+        !action ||
+        (action.requiresNote && input.note === null) ||
+        current.state.status !== "running" ||
+        current.supervision.phase !== "awaiting_human" ||
+        current.steps.some((step) => isActiveTeamRunStepStatus(step.state.status))
+      ) {
+        throw new TeamRunSupervisionHumanRequestConflictError(input.runId, input.requestId);
+      }
+
+      const updatedAt = this.now().toISOString();
+      const run = PersistedTeamRunRecordSchema.parse({
+        ...current,
+        supervision: {
+          ...current.supervision,
+          revision: current.supervision.revision + 1,
+          phase: "planning",
+          humanRequest: {
+            ...request,
+            revision: request.revision + 1,
+            resolution: {
+              actionId: input.actionId,
+              note: input.note,
+              idempotencyKey: input.idempotencyKey,
+              resolvedAt: updatedAt,
+            },
+          },
+          updatedAt,
+        },
         updatedAt,
       });
       await this.writeJson(this.runPath(run.id), run);

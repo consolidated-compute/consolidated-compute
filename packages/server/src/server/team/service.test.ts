@@ -959,12 +959,48 @@ describe("TeamRunService", () => {
     });
     expect(harness.runtime.creations.map((creation) => creation.agentId)).toEqual([firstAgentId]);
 
+    const request = waiting.supervision!.humanRequest!;
+    const resumed = await harness.service.respondToSupervisionHumanRequest({
+      runId: run.id,
+      requestId: request.id,
+      expectedRequestRevision: request.revision,
+      actionId: "continue",
+      note: "Proceed with the bounded plan.",
+      idempotencyKey: "continue-supervised-escalation-1",
+    });
+    expect(resumed.supervision).toMatchObject({
+      phase: "planning",
+      humanRequest: {
+        revision: 2,
+        resolution: {
+          actionId: "continue",
+          note: "Proceed with the bounded plan.",
+        },
+      },
+    });
+    await harness.runtime.waitForStreamCount(firstAgentId, 2);
+    expect(
+      harness.runtime.streams.filter((stream) => stream.agentId === firstAgentId)[1]?.prompt,
+    ).toContain("Proceed with the bounded plan.");
+    await expect(
+      harness.service.respondToSupervisionHumanRequest({
+        runId: run.id,
+        requestId: request.id,
+        expectedRequestRevision: request.revision,
+        actionId: "continue",
+        note: "Proceed with the bounded plan.",
+        idempotencyKey: "continue-supervised-escalation-1",
+      }),
+    ).resolves.toMatchObject({
+      supervision: { humanRequest: { resolution: { actionId: "continue" } } },
+    });
+
     const canceled = await harness.service.cancelRun(run.id);
     expect(canceled).toMatchObject({
       state: { status: "canceled" },
       supervision: {
         phase: "canceled",
-        humanRequest: { retirement: { reason: "canceled" } },
+        humanRequest: { resolution: { actionId: "continue" } },
       },
     });
   });

@@ -27,6 +27,8 @@ import {
   TeamRevisionConflictError,
   TeamRunIdempotencyConflictError,
   TeamRunSupervisionActionConflictError,
+  TeamRunSupervisionHumanRequestConflictError,
+  TeamRunSupervisionHumanRequestRevisionConflictError,
   TeamRunSupervisionRevisionConflictError,
   TeamRunPageError,
   TeamStorageCorruptError,
@@ -1569,25 +1571,45 @@ describe("TeamRepository runs", () => {
         },
       }),
     );
-    const resolved = PersistedTeamRunRecordSchema.parse({
-      ...awaitingHuman,
-      supervision: {
-        ...awaitingHuman.supervision!,
-        revision: awaitingHuman.supervision!.revision + 1,
-        phase: "planning",
-        humanRequest: {
-          ...awaitingHuman.supervision!.humanRequest!,
-          resolution: {
-            actionId: "continue",
-            note: null,
-            idempotencyKey: "resolve-preserved-evidence",
-            resolvedAt: secondTimestamp,
-          },
+    await expect(
+      repository.resolveSupervisionHumanRequest({
+        runId: admitted.id,
+        requestId: "human_preserved_evidence",
+        expectedRequestRevision: 2,
+        actionId: "continue",
+        note: null,
+        idempotencyKey: "stale-preserved-evidence",
+      }),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionHumanRequestRevisionConflictError);
+    const response = {
+      runId: admitted.id,
+      requestId: "human_preserved_evidence",
+      expectedRequestRevision: 1,
+      actionId: "continue",
+      note: null,
+      idempotencyKey: "resolve-preserved-evidence",
+    };
+    const resolved = await repository.resolveSupervisionHumanRequest(response);
+    expect(resolved.supervision).toMatchObject({
+      revision: awaitingHuman.supervision!.revision + 1,
+      phase: "planning",
+      humanRequest: {
+        revision: 2,
+        resolution: {
+          actionId: "continue",
+          note: null,
+          idempotencyKey: "resolve-preserved-evidence",
+          resolvedAt: secondTimestamp,
         },
-        updatedAt: secondTimestamp,
       },
     });
-    await writeJsonFileAtomic(join(paseoHome, "teams", "runs", `${admitted.id}.json`), resolved);
+    await expect(repository.resolveSupervisionHumanRequest(response)).resolves.toEqual(resolved);
+    await expect(
+      repository.resolveSupervisionHumanRequest({
+        ...response,
+        actionId: "different_action",
+      }),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionHumanRequestConflictError);
 
     const eraseWorkDecision = {
       id: "decision_erase_work_2",

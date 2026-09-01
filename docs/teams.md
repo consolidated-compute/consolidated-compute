@@ -85,6 +85,10 @@ state payload when its status does not change and retain its start time across t
 Successful terminalization requires `complete` to be the latest decision, and a pending human wait
 requires `escalate` to be the latest decision. The repository stamps the supervision ledger and the
 outer run with the same decision commit time; updater-supplied timestamps are not authoritative.
+Resolving the frozen `continue` action persists the response before the service relaunches
+supervision. The next supervisor prompt includes the request, selected action, and human note. The
+public response RPC, event history, reconnect behavior, and restart-safe human wait belong to the
+human-escalation phase.
 
 The wire projection exposes only a compact optional supervision summary. Existing Team Run and
 step lifecycle values do not change. The daemon does not advertise supervised execution until the

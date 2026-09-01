@@ -229,6 +229,15 @@ export function composeTeamSupervisorPrompt(
     (decision) =>
       `- ${decision.sequence}. ${decision.kind}; actionId=${decision.actionId}; summary=${JSON.stringify(decision.summary)}`,
   );
+  const humanResolution = run.supervision.humanRequest?.resolution;
+  const resolvedHumanRequest = humanResolution
+    ? [
+        "## Resolved human request",
+        `Request: ${JSON.stringify(run.supervision.humanRequest!.detail)}`,
+        `Action: ${humanResolution.actionId}`,
+        `Note: ${humanResolution.note === null ? "none" : JSON.stringify(humanResolution.note)}`,
+      ].join("\n")
+    : null;
   return [
     `## Team\nName: ${run.teamSnapshot.name}\n\n${run.teamSnapshot.instructions}`,
     `## Supervisor role\nName: ${run.supervision.supervisor.roleName}\n\n${run.supervision.supervisor.roleInstructions}`,
@@ -236,6 +245,7 @@ export function composeTeamSupervisorPrompt(
     `## Frozen worker templates\n${templates.join("\n")}`,
     `## Durable work ledger\n${workItems.length > 0 ? workItems.join("\n") : "No work has been planned."}`,
     `## Prior durable decisions\n${decisions.length > 0 ? decisions.join("\n") : "No decisions have been committed."}`,
+    ...(resolvedHumanRequest ? [resolvedHumanRequest] : []),
     [
       "## Decision rules",
       "Return exactly one action. Do not create agents or invoke delegation tools yourself.",
