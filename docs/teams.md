@@ -72,9 +72,12 @@ may append steps but every preserved run and step state must follow the lifecycl
 terminal attempt history cannot be reopened or rewritten. A dispatch atomically appends one new
 `creating` attempt, marks its Work Item active, enters the working phase, and reserves an output
 Artifact ID across stored Team Runs. Active Work Items contain at least one dispatched attempt, and
-an attempt has one dispatch decision. Existing Work Items keep their identity, inputs, and prior
-attempts across decisions. A complete decision atomically moves supervision and the outer run to
-successful terminal states. An escalation atomically enters the human-wait phase with an unresolved
+an attempt has one dispatch decision. The initial executor treats plan order as execution order. A
+dispatch requires every preceding Work Item to have succeeded and freezes their accepted output
+Artifact IDs as the target's inputs. Existing Work Items keep their identity and prior attempts;
+inputs may change only from empty to that exact list on first dispatch. A complete decision atomically
+moves supervision and the outer run to successful terminal states. An escalation atomically enters
+the human-wait phase with an unresolved
 request after every active step has settled. Once that request is resolved or retired, later decisions
 preserve it exactly; the current
 single-request ledger cannot overwrite it with another escalation. Decisions preserve the outer run

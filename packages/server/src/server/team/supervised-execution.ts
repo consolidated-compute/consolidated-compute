@@ -161,6 +161,17 @@ function validateDispatchAction(
       message: "Revision attempts are not available in this executor",
     });
   }
+  const workItemIndex = run.supervision.workItems.indexOf(workItem);
+  const unfinishedPredecessor = run.supervision.workItems
+    .slice(0, workItemIndex)
+    .find((candidate) => candidate.status !== "succeeded");
+  if (unfinishedPredecessor) {
+    context.addIssue({
+      code: "custom",
+      path: ["workItemId"],
+      message: `Dispatch requires preceding work item ${unfinishedPredecessor.id} to succeed`,
+    });
+  }
 }
 
 function validateEscalationAction(
@@ -228,8 +239,8 @@ export function composeTeamSupervisorPrompt(
     [
       "## Decision rules",
       "Return exactly one action. Do not create agents or invoke delegation tools yourself.",
-      "Use plan once to map one or more unique work-item IDs to frozen template step IDs.",
-      "Use dispatch for one planned work item. The daemon creates that worker from its frozen template.",
+      "Use plan once to map one or more unique work-item IDs to frozen template step IDs. Plan order is execution and Artifact handoff order.",
+      "Use dispatch for the first unfinished planned work item. The daemon creates that worker from its frozen template and supplies every accepted preceding output Artifact.",
       "Use escalate when a human decision is required. Use complete only after every planned work item succeeded.",
       `Limits: workItems=${run.supervision.limits.maxWorkItems}; activeWorkers=${run.supervision.limits.maxActiveWorkers}; actions=${run.supervision.limits.maxSupervisorActions}; delegationDepth=${run.supervision.limits.maxDelegationDepth}.`,
     ].join("\n"),
@@ -342,11 +353,13 @@ export function buildTeamSupervisionDecisionUpdate(
   }
   if (input.action.kind === "dispatch") {
     const workItemId = input.action.workItemId;
-    appendDispatchedWorker(input, steps);
+    const inputArtifactIds = resolvePrecedingAcceptedArtifactIds(input.run, workItemId);
+    appendDispatchedWorker(input, steps, inputArtifactIds);
     workItems = input.run.supervision.workItems.map((workItem) =>
       workItem.id === workItemId
         ? {
             ...workItem,
+            inputArtifactIds,
             attemptIds: [...workItem.attemptIds, input.decision.attemptId!],
             status: "active" as const,
           }
@@ -401,6 +414,7 @@ export function buildTeamSupervisionDecisionUpdate(
 function appendDispatchedWorker(
   input: BuildTeamSupervisionDecisionUpdateInput,
   steps: PersistedTeamRunRecord["steps"],
+  inputArtifactIds: string[],
 ): void {
   if (
     input.action.kind !== "dispatch" ||
@@ -420,7 +434,7 @@ function appendDispatchedWorker(
     snapshot: {
       ...template,
       stepId: `worker_${input.decision.attemptId}`,
-      inputArtifactIds: workItem.inputArtifactIds,
+      inputArtifactIds,
       outputArtifact: {
         id: input.context.outputArtifactId,
         kind: "team_step_output",
@@ -441,6 +455,29 @@ function appendDispatchedWorker(
       plannedAgentId: input.workerAgentId,
       startedAt: input.timestamp,
     },
+  });
+}
+
+function resolvePrecedingAcceptedArtifactIds(
+  run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  workItemId: string,
+): string[] {
+  const workItemIndex = run.supervision.workItems.findIndex((item) => item.id === workItemId);
+  if (workItemIndex < 0) throw new Error(`Unknown supervised work item ${workItemId}`);
+  return run.supervision.workItems.slice(0, workItemIndex).map((workItem) => {
+    if (workItem.status !== "succeeded" || workItem.acceptedAttemptId === null) {
+      throw new Error(`Preceding work item ${workItem.id} has no accepted attempt`);
+    }
+    const acceptedStep = run.steps.find(
+      (step) =>
+        step.snapshot.supervision?.kind === "worker" &&
+        step.snapshot.supervision.attemptId === workItem.acceptedAttemptId,
+    );
+    const outputArtifactId = acceptedStep?.snapshot.outputArtifact?.id;
+    if (acceptedStep?.state.status !== "succeeded" || !outputArtifactId) {
+      throw new Error(`Preceding work item ${workItem.id} has no accepted output Artifact`);
+    }
+    return outputArtifactId;
   });
 }
 

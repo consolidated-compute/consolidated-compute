@@ -873,6 +873,11 @@ describe("TeamRunService", () => {
     expect(
       harness.runtime.streams.find((stream) => stream.agentId === secondAgentId)?.prompt,
     ).toContain("Work item: work_build");
+    const reviewPrompt = harness.runtime.streams.find(
+      (stream) => stream.agentId === unusedAgentId,
+    )?.prompt;
+    expect(reviewPrompt).toContain("Work item: work_review");
+    expect(reviewPrompt).toContain("Builder produced a durable result.");
     await expect(
       harness.assignments.listArtifacts({ assignmentId: assignment.id }),
     ).resolves.toMatchObject({
