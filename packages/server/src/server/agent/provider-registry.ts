@@ -58,6 +58,7 @@ import { CodexProviderOptionsSchema } from "./providers/codex/options.js";
 import { projectCodexSecurityPosture } from "./providers/codex/security-posture.js";
 import { CODEX_AGENT_PROFILE_SECURITY_PRESETS } from "./providers/codex/security-controls.js";
 import { OpenCodeProviderOptionsSchema } from "./providers/opencode/options.js";
+import { projectOpenCodeSecurityPosture } from "./providers/opencode/security-posture.js";
 import {
   projectUnavailableProviderSecurityPosture,
   type ProviderSecurityPosture,
@@ -623,6 +624,8 @@ function createRegistryEntry(
     agentProfileSecurityPresets = CODEX_AGENT_PROFILE_SECURITY_PRESETS;
   } else if (resolved.derivedFromProviderId === null && provider === "claude") {
     projectSecurityPosture = projectClaudeSecurityPosture;
+  } else if (resolved.derivedFromProviderId === null && provider === "opencode") {
+    projectSecurityPosture = projectOpenCodeSecurityPosture;
   }
 
   return {

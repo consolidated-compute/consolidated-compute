@@ -265,6 +265,19 @@ describe("createProviderEnv", () => {
     expect(env.CLAUDE_AGENT_SDK_VERSION).toBeUndefined();
     expect(env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING).toBe("true");
   });
+
+  test("does not expose the daemon password to provider processes", () => {
+    const env = createProviderEnv({
+      baseEnv: {
+        PATH: "/usr/bin",
+        PASEO_PASSWORD: "inherited-daemon-secret",
+      },
+      runtimeSettings: { env: { PASEO_PASSWORD: "provider-override" } },
+    });
+
+    expect(env.PATH).toBe("/usr/bin");
+    expect(env.PASEO_PASSWORD).toBeUndefined();
+  });
 });
 
 describe("ProviderOverrideSchema", () => {

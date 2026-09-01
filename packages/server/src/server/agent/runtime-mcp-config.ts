@@ -1,7 +1,18 @@
+import { createHmac } from "node:crypto";
+
 import type { AgentSessionConfig, McpServerConfig } from "./agent-sdk-types.js";
 
 const PASEO_MCP_SERVER_NAME = "paseo";
 const PASEO_MCP_PATHNAME = "/mcp/agents";
+const AGENT_MCP_CAPABILITY_CONTEXT = "paseo-agent-mcp-v1";
+
+export function createAgentMcpCapabilityToken(secret: string, agentId: string): string {
+  return createHmac("sha256", secret)
+    .update(AGENT_MCP_CAPABILITY_CONTEXT)
+    .update("\0")
+    .update(agentId)
+    .digest("base64url");
+}
 
 export function stripInternalPaseoMcpServer(config: AgentSessionConfig): AgentSessionConfig {
   const mcpServers = config.mcpServers;
@@ -49,7 +60,14 @@ export function withRuntimePaseoMcpServer(params: {
         type: "http",
         url: `${params.mcpBaseUrl}?callerAgentId=${params.agentId}`,
         ...(params.mcpAuthToken
-          ? { headers: { Authorization: `Bearer ${params.mcpAuthToken}` } }
+          ? {
+              headers: {
+                Authorization: `Bearer ${createAgentMcpCapabilityToken(
+                  params.mcpAuthToken,
+                  params.agentId,
+                )}`,
+              },
+            }
           : {}),
       },
       ...storedConfig.mcpServers,

@@ -136,6 +136,7 @@ import {
   createPaseoToolCatalog,
   type PaseoToolHostDependencies,
 } from "./agent/tools/paseo-tools.js";
+import { createAgentMcpCapabilityToken } from "./agent/runtime-mcp-config.js";
 import type { PaseoToolRuntimeContext } from "./agent/tools/types.js";
 import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
 import { bootstrapWorkspaceRegistries } from "./workspace-registry-bootstrap.js";
@@ -228,7 +229,7 @@ import { DaemonExecutions } from "./hub/daemon-executions.js";
 import { PluginService } from "./plugins/index.js";
 import { AssignmentRepository } from "./assignment/repository.js";
 import { TeamRepository } from "./team/repository.js";
-import { TeamRunService } from "./team/service.js";
+import { TeamRunService, type TeamSupervisedControlPlaneProtection } from "./team/service.js";
 
 const MAX_MCP_DEBUG_BATCH_ITEMS = 10;
 const REDACTED_LOG_VALUE = "[redacted]";
@@ -435,6 +436,7 @@ export interface PaseoDaemonConfig {
   };
   appBaseUrl?: string;
   auth?: DaemonAuthConfig;
+  authPasswordSource?: "environment" | "persisted";
   openai?: PaseoOpenAIConfig;
   speech?: PaseoSpeechConfig;
   voiceLlmProvider?: AgentProvider | null;
@@ -490,6 +492,14 @@ export interface PaseoDaemonDependencies {
     daemonStatusRpc?: boolean;
     relayConfig?: boolean;
   };
+}
+
+function resolveTeamSupervisedControlPlaneProtection(
+  config: Pick<PaseoDaemonConfig, "auth" | "authPasswordSource">,
+): TeamSupervisedControlPlaneProtection {
+  if (!config.auth?.password) return "passwordless";
+  if (config.authPasswordSource === "environment") return "environment_password";
+  return "authenticated";
 }
 
 function createBootstrapManagedProcessRegistry(
@@ -635,13 +645,11 @@ export async function createPaseoDaemon(
     ttlMs: downloadTokenTtlMs,
   });
 
-  // Capability token authenticating the daemon's own agents to the loopback
-  // Agent MCP endpoint (/mcp/agents). Random per daemon run, injected only into
-  // local agent configs and the daemon's own MCP client — never sent to remote
-  // clients — so it cannot be replayed off-box. This lets the injected MCP
-  // authenticate even when the daemon password is set via the app (hash only,
-  // no plaintext available). Mirrors the /api/files/download capability-token
-  // pattern.
+  // Root secret for identity-bound capabilities authenticating the daemon's own
+  // agents to the loopback Agent MCP endpoint (/mcp/agents). It is random per
+  // daemon run and never sent to remote clients. Each local agent receives only
+  // its derived token, so changing callerAgentId invalidates the credential.
+  // This also works when app auth leaves the daemon with only a password hash.
   const agentMcpAuthToken = randomUUID();
 
   const listenTarget = parseListenString(config.listen);
@@ -1164,6 +1172,7 @@ export async function createPaseoDaemon(
   const teamRunService = new TeamRunService({
     repository: teamRepository,
     assignmentRepository,
+    supervisedControlPlaneProtection: resolveTeamSupervisedControlPlaneProtection(config),
     workspaceRegistry,
     providerCatalog: providerSnapshotManager,
     daemonConfigStore,
@@ -1389,6 +1398,8 @@ export async function createPaseoDaemon(
     paseoHome: config.paseoHome,
     worktreesRoot: config.worktreesRoot,
     callerAgentId: runtime.callerAgentId,
+    resolveSupervisedAgentAuthority: (agentId) =>
+      teamRepository.resolveSupervisedAgentAuthority(agentId),
     enableVoiceTools: runtime.enableVoiceTools,
     voiceOnly: runtime.voiceOnly,
     resolveSpeakHandler: (agentId) => wsServer?.resolveVoiceSpeakHandler(agentId) ?? null,
@@ -1439,14 +1450,23 @@ export async function createPaseoDaemon(
         res.status(404).json({ error: "Agent MCP endpoint disabled" });
         return;
       }
+      const callerAgentIdRaw = req.query.callerAgentId;
+      let callerAgentId: string | undefined;
+      if (typeof callerAgentIdRaw === "string") {
+        callerAgentId = callerAgentIdRaw;
+      } else if (Array.isArray(callerAgentIdRaw) && typeof callerAgentIdRaw[0] === "string") {
+        callerAgentId = callerAgentIdRaw[0];
+      }
       // This route is exempt from the global daemon-password middleware, so it
-      // authenticates here using the injected capability token (or a valid
-      // daemon password). Without this, a password-protected daemon would be
-      // wide open on its agent control plane.
+      // authenticates every request here. Agent-scoped sessions use an
+      // identity-bound capability. Internal identity-less sessions use the root
+      // capability, while external identity-less callers need the daemon password.
       if (
         !(await isAgentMcpRequestAuthorized({
           password: config.auth?.password,
-          capabilityToken: agentMcpAuthToken,
+          capabilityToken: callerAgentId
+            ? createAgentMcpCapabilityToken(agentMcpAuthToken, callerAgentId)
+            : agentMcpAuthToken,
           authorizationHeader: req.header("authorization"),
         }))
       ) {
@@ -1479,13 +1499,6 @@ export async function createPaseoDaemon(
             id: null,
           });
           return;
-        }
-        const callerAgentIdRaw = req.query.callerAgentId;
-        let callerAgentId: string | undefined;
-        if (typeof callerAgentIdRaw === "string") {
-          callerAgentId = callerAgentIdRaw;
-        } else if (Array.isArray(callerAgentIdRaw) && typeof callerAgentIdRaw[0] === "string") {
-          callerAgentId = callerAgentIdRaw[0];
         }
         const { server, transport } = await createAgentMcpSession(callerAgentId);
         res.on("close", () => {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import { createServer } from "node:http";
 import net from "node:net";
@@ -192,6 +193,44 @@ async function waitForDesktopStatus(page) {
   );
 }
 
+async function seedAuthenticatedDesktopHost(page, { daemonPort, daemonPassword, serverId }) {
+  const endpoint = `localhost:${daemonPort}`;
+  const connectionId = `direct:${endpoint}`;
+  const timestamp = new Date().toISOString();
+  const seed = { endpoint, connectionId, daemonPassword, serverId, timestamp };
+  await page.evaluate((input) => {
+    localStorage.setItem(
+      "@paseo:daemon-registry",
+      JSON.stringify([
+        {
+          serverId: input.serverId,
+          connections: [
+            {
+              id: input.connectionId,
+              type: "directTcp",
+              endpoint: input.endpoint,
+              useTls: false,
+              password: input.daemonPassword,
+            },
+          ],
+          preferredConnectionId: input.connectionId,
+          createdAt: input.timestamp,
+          updatedAt: input.timestamp,
+        },
+      ]),
+    );
+  }, seed);
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await page.reload({ waitUntil: "domcontentloaded" });
+      return;
+    } catch (error) {
+      if (!String(error).includes("ERR_ABORTED") || attempt === 3) throw error;
+      await delay(500);
+    }
+  }
+}
+
 async function startTargetPage() {
   const server = createServer((_request, response) => {
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -247,9 +286,14 @@ async function waitForGuestSelector(client, browserId) {
   return false;
 }
 
-async function createCallerAgent(daemonPort) {
+async function createCallerAgent(daemonPort, daemonPassword) {
   const transport = new StreamableHTTPClientTransport(
     new URL(`http://127.0.0.1:${daemonPort}/mcp/agents`),
+    {
+      requestInit: {
+        headers: { Authorization: `Bearer ${daemonPassword}` },
+      },
+    },
   );
   const client = await experimental_createMCPClient({ transport });
   try {
@@ -872,6 +916,7 @@ async function main() {
     reservePort(),
   ]);
   const listen = `127.0.0.1:${daemonPort}`;
+  const daemonPassword = randomUUID();
   seedPaseoHome(paseoHome, listen, workspaceRoot);
   const target = await startTargetPage();
   const children = [];
@@ -883,6 +928,7 @@ async function main() {
       ...process.env,
       PASEO_HOME: paseoHome,
       PASEO_LISTEN: listen,
+      PASEO_PASSWORD: daemonPassword,
       PASEO_DAEMON_ENDPOINT: `localhost:${daemonPort}`,
       PASEO_CORS_ORIGINS: "*",
       PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD: "0",
@@ -933,15 +979,27 @@ async function main() {
 
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`);
     const page = await waitForAppPage(browser, expoPort);
-    const status = await waitForDesktopStatus(page);
+    await page.waitForLoadState("load", { timeout: timeoutMs });
+    let status = await waitForDesktopStatus(page);
+    await seedAuthenticatedDesktopHost(page, {
+      daemonPort,
+      daemonPassword,
+      serverId: status.serverId,
+    });
+    status = await waitForDesktopStatus(page);
 
     await runAppearanceFontSizeRegression(page);
 
-    const callerAgentId = await createCallerAgent(daemonPort);
+    const callerAgentId = await createCallerAgent(daemonPort, daemonPassword);
     const transport = new StreamableHTTPClientTransport(
       new URL(
         `http://127.0.0.1:${daemonPort}/mcp/agents?callerAgentId=${encodeURIComponent(callerAgentId)}`,
       ),
+      {
+        requestInit: {
+          headers: { Authorization: `Bearer ${daemonPassword}` },
+        },
+      },
     );
     client = await experimental_createMCPClient({ transport });
     const report = await runRegression({

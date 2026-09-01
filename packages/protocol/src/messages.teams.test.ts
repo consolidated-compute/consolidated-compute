@@ -13,6 +13,7 @@ import {
   TeamRunStepDtoSchema,
   TeamRunStepSnapshotDtoSchema,
   TeamRunSupervisionStartDtoSchema,
+  TeamSecurityPostureDtoSchema,
 } from "./team/types.js";
 
 const team = {
@@ -82,6 +83,10 @@ const run = {
             toolShell: {
               status: "policy_only" as const,
               summary: "Codex applies provider approval policy to tool and shell use.",
+            },
+            nativeDelegation: {
+              status: "enforced" as const,
+              summary: "Codex native multi-agent delegation is disabled for this launch.",
             },
           },
         },
@@ -230,6 +235,17 @@ describe("Team wire contracts", () => {
     };
 
     expect(TeamRunDtoSchema.parse(legacyRun)).toEqual(legacyRun);
+  });
+
+  test("keeps native delegation posture optional and ignorable by old clients", () => {
+    const posture = publicResolvedLaunch.securityPosture!;
+    const { nativeDelegation: _nativeDelegation, ...legacyPosture } = posture;
+    expect(TeamSecurityPostureDtoSchema.parse(legacyPosture)).toEqual(legacyPosture);
+
+    const LegacySecurityPostureSchema = TeamSecurityPostureDtoSchema.omit({
+      nativeDelegation: true,
+    });
+    expect(LegacySecurityPostureSchema.parse(posture)).toEqual(legacyPosture);
   });
 
   test("keeps compact supervision summaries optional and forward-readable", () => {

@@ -58,6 +58,7 @@ import type { BrowserToolsBroker, BrowserToolsExecuteInput } from "../browser-to
 import type { BrowserToolsResponsePayload } from "../browser-tools/errors.js";
 import { readPaseoWorktreeMetadata } from "../../utils/worktree-metadata.js";
 import { createWorkspaceProvisioningService } from "../session/workspace-provisioning/workspace-provisioning-service.js";
+import type { SupervisedTeamAgentAuthority } from "../team/agent-authority.js";
 
 const REPO_CWD = resolvePath("/tmp/repo");
 const TARGET_CWD = resolvePath("/tmp/target");
@@ -564,18 +565,23 @@ class FakeBrowserToolsBroker {
 }
 
 class BoundaryAgentManagerFake {
-  private readonly agent = createManagedAgent({
+  private readonly caller = createManagedAgent({
     id: "agent-1",
     cwd: REPO_CWD,
     workspaceId: BROWSER_WORKSPACE_ID,
   });
 
+  public constructor(private readonly agents: ManagedAgent[] = []) {}
+
   public getAgent(agentId: string): ManagedAgent | null {
-    return agentId === this.agent.id ? this.agent : null;
+    return (
+      this.agents.find((agent) => agent.id === agentId) ??
+      (agentId === this.caller.id ? this.caller : null)
+    );
   }
 
   public listAgents(): ManagedAgent[] {
-    return [];
+    return this.agents;
   }
 }
 
@@ -811,6 +817,145 @@ function createPaseoWorktreeForMcpTest(options: {
     return result;
   };
 }
+
+describe("supervised Team MCP authority", () => {
+  function authority(role: "supervisor" | "worker"): SupervisedTeamAgentAuthority {
+    return {
+      runId: "trun_authority_01",
+      assignmentId: "asgn_authority_01",
+      workspaceId: BROWSER_WORKSPACE_ID,
+      callerAgentId: "agent-1",
+      role,
+      roleId: role === "supervisor" ? "role-supervisor" : "role-worker",
+      memberAgentIds: ["agent-1", "agent-2"],
+    };
+  }
+
+  function options(
+    resolveSupervisedAgentAuthority: () => Promise<SupervisedTeamAgentAuthority | null>,
+    agentManager: AgentManager = new BoundaryAgentManagerFake() as AgentManager,
+  ) {
+    return {
+      agentManager,
+      agentStorage: new BoundaryAgentStorageFake() as AgentStorage,
+      providerSnapshotManager:
+        new BoundaryProviderSnapshotManagerFake() as unknown as ProviderSnapshotManager,
+      callerAgentId: "agent-1",
+      resolveSupervisedAgentAuthority,
+      logger: createTestLogger(),
+    };
+  }
+
+  it("publishes only run-scoped inspection and permission tools to supervisors", async () => {
+    const server = await createAgentMcpServer(options(async () => authority("supervisor")));
+    const tools: Record<string, RegisteredMcpTool> = Reflect.get(server, "_registeredTools");
+
+    expect(Object.keys(tools).sort()).toEqual([
+      "get_agent_activity",
+      "get_agent_status",
+      "list_agents",
+      "list_pending_permissions",
+      "respond_to_permission",
+    ]);
+    expect(lookupTool(server, "create_agent")).toBeUndefined();
+    expect(lookupTool(server, "send_agent_prompt")).toBeUndefined();
+    expect(lookupTool(server, "create_schedule")).toBeUndefined();
+  });
+
+  it("publishes no Paseo control-plane tools to supervised workers", async () => {
+    const server = await createAgentMcpServer(options(async () => authority("worker")));
+    const tools: Record<string, RegisteredMcpTool> = Reflect.get(server, "_registeredTools");
+
+    expect(Object.keys(tools)).toEqual([]);
+  });
+
+  it("rechecks durable authority inside stale handlers and rejects unrelated targets", async () => {
+    let currentAuthority = authority("supervisor");
+    const server = await createAgentMcpServer(options(async () => currentAuthority));
+
+    await expect(
+      registeredTool(server, "get_agent_status").handler({ agentId: "unrelated-agent" }),
+    ).rejects.toMatchObject({ code: "supervised_team_agent_target_unauthorized" });
+
+    currentAuthority = authority("worker");
+    await expect(registeredTool(server, "list_agents").handler({})).rejects.toMatchObject({
+      code: "supervised_team_tool_unauthorized",
+    });
+  });
+
+  it("rejects concurrent generic agent creation after a caller joins a supervised run", async () => {
+    let currentAuthority: SupervisedTeamAgentAuthority | null = null;
+    const server = await createAgentMcpServer(options(async () => currentAuthority));
+    const createAgent = registeredTool(server, "create_agent");
+    currentAuthority = authority("supervisor");
+    const input = {
+      title: "Unauthorized descendant",
+      provider: "codex/gpt-5.4",
+      initialPrompt: "Do work",
+    };
+
+    const results = await Promise.allSettled([
+      createAgent.handler(input),
+      createAgent.handler(input),
+    ]);
+
+    expect(results).toHaveLength(2);
+    for (const result of results) {
+      expect(result.status).toBe("rejected");
+      if (result.status === "rejected") {
+        expect(result.reason).toMatchObject({
+          code: "supervised_team_tool_unauthorized",
+          toolName: "create_agent",
+        });
+      }
+    }
+  });
+
+  it("limits permission inspection and response to agents in the same run", async () => {
+    const permission = {
+      id: "permission-run-member",
+      provider: "codex" as const,
+      name: "shell",
+      kind: "tool" as const,
+      title: "Run a command",
+      input: {},
+      metadata: {},
+    };
+    const manager = new BoundaryAgentManagerFake([
+      createManagedAgent({ id: "agent-1" }),
+      createManagedAgent({
+        id: "agent-2",
+        provider: "codex",
+        pendingPermissions: new Map([[permission.id, permission]]),
+      }),
+      createManagedAgent({
+        id: "unrelated-agent",
+        provider: "codex",
+        pendingPermissions: new Map([
+          ["permission-unrelated", { ...permission, id: "permission-unrelated" }],
+        ]),
+      }),
+    ]) as unknown as AgentManager;
+    const server = await createAgentMcpServer(
+      options(async () => authority("supervisor"), manager),
+    );
+
+    const listed = await registeredTool(server, "list_pending_permissions").handler({});
+    expect(listed.structuredContent.permissions).toEqual([
+      expect.objectContaining({
+        agentId: "agent-2",
+        request: expect.objectContaining({ id: permission.id, provider: "codex", name: "shell" }),
+      }),
+    ]);
+    await expect(
+      registeredTool(server, "respond_to_permission").handler({
+        agentId: "unrelated-agent",
+        requestId: "permission-unrelated",
+        response: { behavior: "deny" },
+      }),
+    ).rejects.toMatchObject({ code: "supervised_team_agent_target_unauthorized" });
+  });
+});
 
 describe("browser MCP tools", () => {
   const logger = createTestLogger();

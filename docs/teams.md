@@ -42,9 +42,15 @@ facts changed. Provider-native options participate in the fingerprint but never 
 DTO. Older clients may omit the fingerprint for protocol compatibility. Clients connected to an
 older daemon keep the established start path but must label the unavailable preview.
 
-Raw provider-native options remain in daemon-owned run persistence and launch requests. Team Run DTOs do not expose them. New runs also freeze a provider-authored security posture beside each resolved launch. The posture contains bounded, redacted facts for filesystem writes, network access, and tool or shell policy. It reports `enforced` only when the frozen launch proves a fail-closed provider restriction; inherited settings, unsupported controls, and custom providers remain `unavailable` or `policy_only`.
+Raw provider-native options remain in daemon-owned run persistence and launch requests. Team Run DTOs do not expose them. New runs also freeze a provider-authored security posture beside each resolved launch. The posture contains bounded, redacted facts for filesystem writes, network access, tool or shell policy, and native delegation. It reports `enforced` only when the frozen launch proves a fail-closed provider restriction; inherited settings, unsupported controls, and custom providers remain `unavailable` or `policy_only`.
 
 The posture records facts derived from the frozen launch configuration. It does not add enforcement, and it never derives claims about credentials, secrets, repository isolation, production access, or host containment. Instructions and Artifact content are policy context, not technical controls. Runs created before posture snapshots remain without one; never reconstruct history from a current Agent Profile.
+
+Supervised admission requires every selected launch to prove provider-native delegation is disabled.
+Codex requires `features.multi_agent_v2: false` outside auto-review mode. Claude requires `Task`,
+`Agent`, and `Workflow` in `disallowedTools`. OpenCode requires a fail-closed `task` permission.
+Providers without an exact mapping cannot join a supervised run. The frozen launch keeps that control
+unchanged for the run.
 
 Only one Team Run may own a Workspace at a time. The lock covers active, permission-waiting, stopping, and stop-failed runs. It does not isolate the Workspace from people or ordinary Paseo agents.
 
@@ -81,6 +87,20 @@ The wire projection exposes only a compact optional supervision summary. Existin
 step lifecycle values do not change. The daemon does not advertise supervised execution until the
 executor and its server-enforced agent authority are available; the current app continues to start
 sequential runs.
+
+Supervised agent authority comes from persisted run membership by exact preallocated agent ID.
+Correlation labels never grant access. Persist the identity before provider launch so its first tool
+catalog is already restricted. Deliver that catalog through the provider's native host interface
+when available. Claude uses an in-process SDK MCP server so no reusable agent credential enters the
+provider process or its arguments. Other injected MCP credentials are bound to the agent identity,
+and passwordless daemons reject identity-less MCP sessions instead of exposing the top-level catalog.
+Supervised admission also requires a persisted daemon password because a passwordless WebSocket
+treats loopback reachability as full operator authority. `PASEO_PASSWORD` does not qualify: a
+same-user provider process may read the daemon ancestor's startup environment even when the variable
+is removed from its child environment.
+Every handler resolves the current run membership again before acting. Workers receive no Paseo
+control-plane tools. A supervisor can inspect only agents, activity, and permission requests in its
+run, and can answer only those requests. Ordinary agents keep the existing tool catalog.
 
 ## Execution
 

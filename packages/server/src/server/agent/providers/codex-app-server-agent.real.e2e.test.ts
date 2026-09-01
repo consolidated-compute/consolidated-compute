@@ -117,4 +117,42 @@ CHILD_SENTINEL in your own response.
       rmSync(cwd, { recursive: true, force: true });
     }
   }, 300_000);
+
+  test("removes real provider-native delegation when MultiAgentV2 is disabled", async () => {
+    const client = new CodexAppServerAgentClient(createTestLogger());
+    const cwd = mkdtempSync(path.join(os.tmpdir(), "codex-no-multi-agent-v2-e2e-"));
+    try {
+      const { models } = await client.fetchCatalog({ scope: "workspace", cwd, force: false });
+      const model = models.find((candidate) => candidate.isDefault) ?? models[0];
+      if (!model) {
+        throw new Error("Native Codex app-server returned no models");
+      }
+      const session = await client.createSession({
+        provider: "codex",
+        modeId: "full-access",
+        model: model.id,
+        cwd,
+        thinkingOptionId: "medium",
+        providerOptions: { features: { multi_agent_v2: false } },
+      });
+
+      try {
+        const result = await session.run(`
+Try to use collaboration.spawn_agent once. If that tool is unavailable, reply with exactly
+DELEGATION_UNAVAILABLE. Do not use shell commands or MCP tools and do not write files.
+`);
+
+        expect(result.finalText.trim()).toBe("DELEGATION_UNAVAILABLE");
+        expect(
+          result.timeline.some(
+            (item) => item.type === "tool_call" && item.detail.type === "sub_agent",
+          ),
+        ).toBe(false);
+      } finally {
+        await session.close();
+      }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }, 300_000);
 });

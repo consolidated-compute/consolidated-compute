@@ -34,6 +34,7 @@ describe("daemon auth config", () => {
     const config = loadConfig(paseoHome, { env: {} });
 
     expect(config.auth?.password).toBe(CONFIG_PASSWORD_HASH);
+    expect(config.authPasswordSource).toBe("persisted");
     expect(isBearerTokenValid({ password: config.auth?.password, token: "correct-password" })).toBe(
       true,
     );
@@ -52,6 +53,7 @@ describe("daemon auth config", () => {
     });
 
     expect(config.auth?.password).not.toBe(CONFIG_PASSWORD_HASH);
+    expect(config.authPasswordSource).toBe("environment");
     expect(config.auth?.password).toMatch(/^\$2[aby]\$12\$/);
     expect(isBearerTokenValid({ password: config.auth?.password, token: "from-env" })).toBe(true);
   });

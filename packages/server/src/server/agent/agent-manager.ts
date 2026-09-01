@@ -794,10 +794,9 @@ export class AgentManager {
   }
 
   /**
-   * Capability token the daemon's own MCP clients must present to the Agent MCP
-   * endpoint when a daemon password is configured. Read by the per-client
-   * session to authenticate its own MCP connection. Stays in the daemon — never
-   * sent to remote clients.
+   * Root secret used to derive identity-bound Agent MCP capabilities. The root
+   * also authenticates daemon-internal identity-less MCP clients. Stays in the
+   * daemon — never sent to remote clients.
    */
   getMcpAuthToken(): string | null {
     return this.mcpAuthToken;

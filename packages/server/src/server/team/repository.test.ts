@@ -38,6 +38,7 @@ import {
   type TeamRunSupervisionDecision,
   type TeamRunSupervisionUpdate,
 } from "./repository.js";
+import { TeamNativeDelegationUnenforcedError } from "./supervision.js";
 import { toTeamRunDto } from "./wire.js";
 
 const firstTimestamp = "2026-08-25T12:00:00.000Z";
@@ -139,6 +140,25 @@ function createAssignmentRunInput(
 function createSupervision(definition: PersistedTeamDefinition): PersistedTeamRunSupervision {
   const runInput = createRunInput(definition);
   const supervisor = definition.roles.find((role) => role.id === "role_supervisor")!;
+  const workerTemplates: PersistedTeamRunSupervision["workerTemplates"] = [];
+  for (const step of runInput.steps) {
+    workerTemplates.push({
+      ...step.snapshot,
+      resolvedLaunch: {
+        ...step.snapshot.resolvedLaunch,
+        securityPosture: {
+          source: { provider: step.snapshot.resolvedLaunch.provider },
+          filesystemWrite: { status: "unavailable", summary: "Not evaluated by this fixture." },
+          networkAccess: { status: "unavailable", summary: "Not evaluated by this fixture." },
+          toolShell: { status: "unavailable", summary: "Not evaluated by this fixture." },
+          nativeDelegation: {
+            status: "enforced",
+            summary: "Codex native multi-agent delegation is disabled.",
+          },
+        },
+      },
+    });
+  }
   return {
     revision: 1,
     phase: "queued",
@@ -153,10 +173,20 @@ function createSupervision(definition: PersistedTeamDefinition): PersistedTeamRu
         modeId: "workspace-write",
         thinkingOptionId: "high",
         featureValues: {},
+        securityPosture: {
+          source: { provider: "codex" },
+          filesystemWrite: { status: "unavailable", summary: "Not evaluated by this fixture." },
+          networkAccess: { status: "unavailable", summary: "Not evaluated by this fixture." },
+          toolShell: { status: "unavailable", summary: "Not evaluated by this fixture." },
+          nativeDelegation: {
+            status: "enforced",
+            summary: "Codex native multi-agent delegation is disabled.",
+          },
+        },
       },
       agentId: "0c783b8c-1bd7-4d79-863e-63a311742eef",
     },
-    workerTemplates: runInput.steps.map((step) => step.snapshot),
+    workerTemplates,
     limits: {
       maxWorkItems: 24,
       maxActiveWorkers: 1,
@@ -730,6 +760,40 @@ describe("TeamRepository runs", () => {
     await expect(
       repository.createAssignmentRun(sequentialInput, assignments),
     ).rejects.toBeInstanceOf(TeamRunIdempotencyConflictError);
+  });
+
+  test("rejects direct supervised admission when native delegation is not disabled", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const assignment = await assignments.createAssignment({
+      title: "Unsafe supervised Assignment",
+      objective: "Reject native delegation before reserving any run resources.",
+      workItem: null,
+    });
+    const sequentialInput = createAssignmentRunInput(
+      definition,
+      assignment,
+      "unsafe-supervised-start",
+      "wks_unsafe_supervised_1",
+    );
+    const { steps: _steps, ...admission } = sequentialInput;
+    const supervision = createSupervision(definition);
+    supervision.supervisor.resolvedLaunch.securityPosture!.nativeDelegation = {
+      status: "unavailable",
+      summary: "The provider did not expose an exact delegation control.",
+    };
+
+    await expect(
+      repository.createSupervisedAssignmentRun({ ...admission, supervision }, assignments),
+    ).rejects.toMatchObject<TeamNativeDelegationUnenforcedError>({
+      code: "team_native_delegation_unenforced",
+      roleId: "role_supervisor",
+      provider: "codex",
+    });
+    await expect(repository.listRuns()).resolves.toMatchObject({ runs: [], issues: [] });
   });
 
   test("commits supervisor decisions atomically with revision and action idempotency", async () => {
@@ -1671,6 +1735,18 @@ describe("TeamRepository runs", () => {
         };
       },
     );
+    await expect(
+      repository.resolveSupervisedAgentAuthority(creating.supervision!.supervisor.agentId),
+    ).resolves.toMatchObject({
+      runId: admitted.id,
+      role: "supervisor",
+      memberAgentIds: [creating.supervision!.supervisor.agentId, firstAgentId],
+    });
+    await expect(repository.resolveSupervisedAgentAuthority(firstAgentId)).resolves.toMatchObject({
+      runId: admitted.id,
+      role: "worker",
+      memberAgentIds: [creating.supervision!.supervisor.agentId, firstAgentId],
+    });
     const failedSteps: PersistedTeamRunRecord["steps"] = [];
     for (const step of creating.steps) {
       failedSteps.push(
@@ -1702,6 +1778,11 @@ describe("TeamRepository runs", () => {
       },
     });
     await writeJsonFileAtomic(join(paseoHome, "teams", "runs", `${admitted.id}.json`), failed);
+    await expect(repository.resolveSupervisedAgentAuthority(firstAgentId)).resolves.toMatchObject({
+      runId: admitted.id,
+      role: "worker",
+      memberAgentIds: [creating.supervision!.supervisor.agentId, firstAgentId],
+    });
     const redispatchDecision = {
       ...dispatchDecision,
       id: "decision_redispatch_terminal",

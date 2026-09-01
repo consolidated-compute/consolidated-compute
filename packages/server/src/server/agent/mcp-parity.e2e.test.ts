@@ -12,6 +12,7 @@ import { createTestPaseoDaemon, type TestPaseoDaemon } from "../test-utils/paseo
 import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
 import type { AgentClient, AgentProvider, AgentSessionConfig } from "./agent-sdk-types.js";
 import { PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
+import { createAgentMcpCapabilityToken } from "./runtime-mcp-config.js";
 
 interface StructuredContent {
   [key: string]: unknown;
@@ -80,8 +81,11 @@ function getStructuredContent(result: McpToolResult): StructuredContent | null {
   return null;
 }
 
-async function createMcpClient(url: string): Promise<McpClient> {
-  const transport = new StreamableHTTPClientTransport(new URL(url));
+async function createMcpClient(url: string, authToken?: string): Promise<McpClient> {
+  const transport = new StreamableHTTPClientTransport(
+    new URL(url),
+    authToken ? { requestInit: { headers: { Authorization: `Bearer ${authToken}` } } } : undefined,
+  );
   const rawClient = await experimental_createMCPClient({ transport });
   const boundCallTool: McpClient["callTool"] = Reflect.get(rawClient, "callTool").bind(rawClient);
   return { callTool: boundCallTool, close: () => rawClient.close() };
@@ -298,7 +302,10 @@ beforeAll(async () => {
     agentClients: createRecordingAgentClients(),
     agentProfiles: [seededAgentProfile],
   });
-  topLevelClient = await createMcpClient(`http://127.0.0.1:${daemonHandle.port}/mcp/agents`);
+  topLevelClient = await createMcpClient(
+    `http://127.0.0.1:${daemonHandle.port}/mcp/agents`,
+    z.string().parse(daemonHandle.daemon.agentManager.getMcpAuthToken()),
+  );
 
   const parentPayload = await callToolStructured(topLevelClient, "create_agent", {
     relationship: { kind: "detached" },
@@ -313,6 +320,10 @@ beforeAll(async () => {
 
   agentScopedClient = await createMcpClient(
     `http://127.0.0.1:${daemonHandle.port}/mcp/agents?callerAgentId=${parentAgentId}`,
+    createAgentMcpCapabilityToken(
+      z.string().parse(daemonHandle.daemon.agentManager.getMcpAuthToken()),
+      parentAgentId,
+    ),
   );
 
   execSync("git init -b main", { cwd: worktreeRepoCwd, stdio: "pipe" });
@@ -938,6 +949,10 @@ describe("Suite E: Worktree Tools", () => {
         `http://127.0.0.1:${daemonHandle.port}/mcp/agents?callerAgentId=${encodeURIComponent(
           worktreeAgentId,
         )}`,
+        createAgentMcpCapabilityToken(
+          z.string().parse(daemonHandle.daemon.agentManager.getMcpAuthToken()),
+          worktreeAgentId,
+        ),
       );
 
       const archived = await callToolStructured(worktreeScopedClient, "archive_worktree", {

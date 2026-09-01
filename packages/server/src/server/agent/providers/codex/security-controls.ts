@@ -21,18 +21,20 @@ export const CODEX_AGENT_PROFILE_SECURITY_PRESETS: AgentProfileSecurityPreset[] 
   createSecurityPreset({
     id: "fail-closed-read-only",
     label: "Fail-closed read only",
-    description: "Deny filesystem writes, web search, network proxying, and approval escapes.",
+    description:
+      "Deny filesystem writes, web search, network proxying, recursive delegation, and approval escapes.",
     providerOptions: {
       approval_policy: "never",
       sandbox_mode: "read-only",
       web_search: "disabled",
-      features: { network_proxy: false },
+      features: { network_proxy: false, multi_agent_v2: false },
     },
   }),
   createSecurityPreset({
     id: "fail-closed-workspace-write",
     label: "Fail-closed Workspace write",
-    description: "Allow writes only in the Workspace while denying network and approval escapes.",
+    description:
+      "Allow writes only in the Workspace while denying network, recursive delegation, and approval escapes.",
     providerOptions: {
       approval_policy: "never",
       sandbox_mode: "workspace-write",
@@ -43,7 +45,7 @@ export const CODEX_AGENT_PROFILE_SECURITY_PRESETS: AgentProfileSecurityPreset[] 
         exclude_tmpdir_env_var: true,
       },
       web_search: "disabled",
-      features: { network_proxy: false },
+      features: { network_proxy: false, multi_agent_v2: false },
     },
   }),
 ];

@@ -47,6 +47,7 @@ import type {
 } from "./agent-sdk-types.js";
 import type { PaseoToolCatalog } from "./tools/types.js";
 import type { ProviderDefinition } from "./provider-registry.js";
+import { createAgentMcpCapabilityToken } from "./runtime-mcp-config.js";
 
 const DESKTOP_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("desktop-client");
 const MOBILE_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("mobile-client");
@@ -2935,7 +2936,9 @@ test("createAgent allows best-effort internal MCP when the provider session repo
   expect(client.lastConfig?.mcpServers?.paseo).toEqual({
     type: "http",
     url: `http://127.0.0.1:6767/mcp/agents?callerAgentId=${snapshot.id}`,
-    headers: { Authorization: "Bearer cap-token" },
+    headers: {
+      Authorization: `Bearer ${createAgentMcpCapabilityToken("cap-token", snapshot.id)}`,
+    },
   });
 
   rmSync(workdir, { recursive: true, force: true });

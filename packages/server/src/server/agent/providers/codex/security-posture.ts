@@ -23,6 +23,7 @@ export function projectCodexSecurityPosture(
       filesystemWrite: UNAVAILABLE_INHERITED_FACT,
       networkAccess: UNAVAILABLE_INHERITED_FACT,
       toolShell: UNAVAILABLE_INHERITED_FACT,
+      nativeDelegation: projectNativeDelegation(input.modeId, options),
     };
   }
 
@@ -33,6 +34,29 @@ export function projectCodexSecurityPosture(
     filesystemWrite: projectFilesystemWrite(sandbox, approval, options),
     networkAccess: projectNetworkAccess(sandbox, approval, options),
     toolShell: projectToolShell(approval, input.modeId),
+    nativeDelegation: projectNativeDelegation(input.modeId, options),
+  };
+}
+
+function projectNativeDelegation(
+  modeId: string | null,
+  options: CodexProviderOptions,
+): TeamSecurityFactDto {
+  if (modeId === "auto-review") {
+    return {
+      status: "unavailable",
+      summary: "Codex auto-review mode may create a provider-native reviewer agent.",
+    };
+  }
+  if (options.features?.multi_agent_v2 === false) {
+    return {
+      status: "enforced",
+      summary: "Codex native multi-agent delegation is disabled for this launch.",
+    };
+  }
+  return {
+    status: "unavailable",
+    summary: "Codex native multi-agent delegation was not explicitly disabled.",
   };
 }
 

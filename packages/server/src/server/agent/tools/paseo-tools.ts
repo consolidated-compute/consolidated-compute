@@ -97,6 +97,12 @@ import type {
   PaseoToolExecutionContext,
   PaseoToolResult,
 } from "./types.js";
+import type { SupervisedTeamAgentAuthority } from "../../team/agent-authority.js";
+import {
+  isSupervisedTeamToolAllowed,
+  requireSupervisedTeamAgentTarget,
+  requireSupervisedTeamToolAllowed,
+} from "./supervised-team-policy.js";
 
 export interface PaseoToolHostDependencies {
   agentManager: AgentManager;
@@ -140,6 +146,9 @@ export interface PaseoToolHostDependencies {
    * Used for cwd/mode inheritance when agents spawn child agents.
    */
   callerAgentId?: string;
+  resolveSupervisedAgentAuthority?: (
+    agentId: string,
+  ) => Promise<SupervisedTeamAgentAuthority | null>;
   /**
    * Optional resolver for session-bound speak handlers.
    * Used by hidden voice agents to narrate through daemon-managed TTS.
@@ -543,7 +552,9 @@ function resolveTerminalKeyToken(key: string, literal: boolean): string {
   }
 }
 
-export function createPaseoToolCatalog(options: PaseoToolHostDependencies): PaseoToolCatalog {
+export async function createPaseoToolCatalog(
+  options: PaseoToolHostDependencies,
+): Promise<PaseoToolCatalog> {
   const {
     agentManager,
     agentStorage,
@@ -559,6 +570,11 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
   } = options;
   const childLogger = logger.child({ module: "agent", component: "paseo-tool-catalog" });
   const callerContext = callerAgentId ? (resolveCallerContext?.(callerAgentId) ?? null) : null;
+  const resolveSupervisedAuthority = async (): Promise<SupervisedTeamAgentAuthority | null> => {
+    if (!callerAgentId || !options.resolveSupervisedAgentAuthority) return null;
+    return options.resolveSupervisedAgentAuthority(callerAgentId);
+  };
+  const initialSupervisedAuthority = await resolveSupervisedAuthority();
 
   const parseToolInput = async (tool: PaseoToolDefinition, input: unknown): Promise<unknown> => {
     const inputSchema = tool.inputSchema;
@@ -581,13 +597,22 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Tool handlers are schema-validated at registration boundaries.
     handler: (input: any, context: PaseoToolExecutionContext) => Promise<PaseoToolResult>,
   ) => {
+    if (
+      initialSupervisedAuthority &&
+      !isSupervisedTeamToolAllowed(initialSupervisedAuthority, name)
+    ) {
+      return;
+    }
     tools.set(name, {
       name,
       title: config.title,
       description: config.description ?? name,
       inputSchema: config.inputSchema,
       outputSchema: config.outputSchema,
-      handler: handler as PaseoToolDefinition["handler"],
+      handler: (async (input, context) => {
+        requireSupervisedTeamToolAllowed(await resolveSupervisedAuthority(), name);
+        return handler(input, context);
+      }) as PaseoToolDefinition["handler"],
     });
   };
   const toCatalog = (): PaseoToolCatalog => ({
@@ -2064,6 +2089,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       },
     },
     async ({ agentId }) => {
+      requireSupervisedTeamAgentTarget(await resolveSupervisedAuthority(), agentId);
       const snapshot = agentManager.getAgent(agentId);
       if (snapshot) {
         const structuredSnapshot = await serializeSnapshotWithMetadata(
@@ -2122,6 +2148,10 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       },
     },
     async ({ includeArchived = false, cwd, sinceHours = 48, statuses, limit = 50 }) => {
+      const supervisedAuthority = await resolveSupervisedAuthority();
+      const supervisedAgentIds = supervisedAuthority
+        ? new Set(supervisedAuthority.memberAgentIds)
+        : null;
       const callerCwd = callerAgentId ? resolveCallerAgent()?.cwd : undefined;
       const requestedCwd = cwd?.trim() ? expandUserPath(cwd) : callerCwd;
       const statusFilter = statuses && statuses.length > 0 ? new Set(statuses) : null;
@@ -2145,6 +2175,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
         .map((record) => buildStoredAgentPayload(record, registeredProviderIds));
       const agents = [...liveAgents, ...storedAgents]
         .map(toAgentListItemPayload)
+        .filter((agent) => !supervisedAgentIds || supervisedAgentIds.has(agent.id))
         .filter((agent) => !requestedCwd || isSameOrDescendantPath(requestedCwd, agent.cwd))
         .filter((agent) => !statusFilter || statusFilter.has(agent.status))
         .filter((agent) => !agent.archivedAt || resolveAgentListActivityTime(agent) >= sinceMs)
@@ -3128,6 +3159,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       },
     },
     async ({ agentId, limit }) => {
+      requireSupervisedTeamAgentTarget(await resolveSupervisedAuthority(), agentId);
       await ensureAgentLoaded(agentId, {
         agentManager,
         agentStorage,
@@ -3206,7 +3238,12 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       },
     },
     async () => {
+      const supervisedAuthority = await resolveSupervisedAuthority();
+      const supervisedAgentIds = supervisedAuthority
+        ? new Set(supervisedAuthority.memberAgentIds)
+        : null;
       const permissions = agentManager.listAgents().flatMap((agent) => {
+        if (supervisedAgentIds && !supervisedAgentIds.has(agent.id)) return [];
         const payload = toAgentPayload(agent);
         return payload.pendingPermissions.map((request) => ({
           agentId: agent.id,
@@ -3238,6 +3275,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
       },
     },
     async ({ agentId, requestId, response }) => {
+      requireSupervisedTeamAgentTarget(await resolveSupervisedAuthority(), agentId);
       await respondToAgentPermission({
         agentManager,
         agentId,
