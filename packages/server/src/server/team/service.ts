@@ -4,13 +4,16 @@ import type { Logger } from "pino";
 import type { TeamRunPreviewDto } from "@getpaseo/protocol/team/types";
 
 import type { AgentRunCancellationResult } from "../agent/agent-manager.js";
+import { getStructuredAgentResponse } from "../agent/agent-response-loop.js";
 import type { CreateAgentFromMcpInput } from "../agent/create-agent/create.js";
 import type { AssignmentRepository } from "../assignment/repository.js";
 import type { PersistedAssignmentArtifactRecord } from "../assignment/model.js";
 import type { WorkspaceMutation, WorkspaceTerminationBoundary } from "../workspace-registry.js";
 import {
   executeTeamStep,
+  buildTeamAgentCreateInput,
   preflightTeamRun,
+  revalidateTeamRunStep,
   revalidateTeamRunWorkspace,
   TeamExecutionPreflightError,
   type TeamAgentProfileConfigStore,
@@ -20,6 +23,7 @@ import {
   type TeamProviderCatalog,
   type TeamStepExecutionEvent,
   type TeamWorkspaceStore,
+  TeamStepStreamEndedError,
 } from "./execution.js";
 import {
   isTerminalTeamRunStatus,
@@ -27,6 +31,7 @@ import {
   type PersistedTeamRunRecord,
   type PersistedTeamRunState,
   type PersistedTeamRunStepState,
+  type PersistedTeamRunSupervision,
   type PersistedTeamDefinition,
   type TeamRunStepStatus,
 } from "./model.js";
@@ -40,6 +45,14 @@ import {
 import { materializeTeamStepArtifact, resolveTeamStepInputArtifacts } from "./artifacts.js";
 import { buildTeamRunPreview, createTeamRunPreviewFingerprint } from "./security-preview.js";
 import { createInitialTeamRunSupervision } from "./supervision.js";
+import {
+  buildTeamSupervisionDecisionUpdate,
+  composeSupervisedWorkerContext,
+  composeTeamSupervisorPrompt,
+  createTeamSupervisorActionSchema,
+  normalizeTeamSupervisorDecision,
+  type TeamSupervisorAction,
+} from "./supervised-execution.js";
 
 type TeamRunStep = PersistedTeamRunRecord["steps"][number];
 type TeamRunTerminationReason = "cancel" | "workspace" | "shutdown";
@@ -375,7 +388,7 @@ export class TeamRunService {
         this.requireAcceptingStarts();
         this.requireMatchingPreview(input.expectedPreviewFingerprint, accepted);
         await revalidateTeamRunWorkspace(this.workspaceRegistry, accepted.workspace);
-        return this.repository.createSupervisedAssignmentRun(
+        const run = await this.repository.createSupervisedAssignmentRun(
           {
             teamId: input.teamId,
             expectedRevision: input.expectedRevision,
@@ -387,6 +400,8 @@ export class TeamRunService {
           },
           assignments,
         );
+        this.launchExecution(run.id);
+        return run;
       }),
     );
   }
@@ -585,6 +600,10 @@ export class TeamRunService {
 
   private async executeRun(runId: string): Promise<void> {
     let run = await this.requireRun(runId);
+    if (run.supervision) {
+      await this.executeSupervisedRun(runId);
+      return;
+    }
     if (run.state.status === "queued") {
       const reason = this.requestedTerminationReason(run);
       if (reason) {
@@ -620,6 +639,120 @@ export class TeamRunService {
     }
   }
 
+  private async executeSupervisedRun(runId: string): Promise<void> {
+    let run = requireSupervisedRun(await this.requireRun(runId));
+    while (!isTerminalTeamRunStatus(run.state.status)) {
+      if (run.supervision.phase === "awaiting_human") return;
+      const active = findActiveStep(run);
+      if (active?.step.snapshot.supervision?.kind === "worker") {
+        const inputArtifacts = await resolveTeamStepInputArtifacts(
+          this.requireAssignmentRepository(),
+          run,
+          active.index,
+        );
+        const workItemId = active.step.snapshot.supervision.workItemId;
+        const outcome = await this.executeStep(run, active, undefined, inputArtifacts, {
+          supervisionContext: composeSupervisedWorkerContext(run, workItemId),
+        });
+        if (outcome.status === "terminal") return;
+        run = requireSupervisedRun(await this.requireRun(runId));
+        continue;
+      }
+      if (active) {
+        throw new Error(`Supervised Team Run ${run.id} has an unexpected active step`);
+      }
+      run = await this.executeSupervisorDecision(runId, run);
+    }
+  }
+
+  private async executeSupervisorDecision(
+    runId: string,
+    boundary: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  ): Promise<PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision }> {
+    const decisionId = randomUUID();
+    const started = requireSupervisedRun(
+      await this.repository.beginSupervisionTurn({
+        runId,
+        expectedSupervisionRevision: boundary.supervision.revision,
+        decisionId,
+      }),
+    );
+    const supervisor = findActiveStep(started);
+    if (supervisor?.step.snapshot.supervision?.kind !== "supervisor") {
+      throw new Error(`Supervised Team Run ${started.id} did not persist its supervisor turn`);
+    }
+    const workspace = await revalidateTeamRunStep(
+      {
+        workspaceRegistry: this.workspaceRegistry,
+        providerCatalog: this.providerCatalog,
+        featureCatalog: this.agentManager,
+      },
+      started.workspace,
+      supervisor.step.snapshot,
+    );
+    if (supervisor.step.state.status === "creating") {
+      await this.createStepAgent(
+        started,
+        supervisor.index,
+        buildTeamAgentCreateInput({
+          run: started,
+          step: supervisor.step.snapshot,
+          plannedAgentId: started.supervision.supervisor.agentId,
+          workspace,
+        }),
+      );
+    }
+    const ready = requireSupervisedRun(await this.requireRun(runId));
+    const readySupervisor = requireActiveSupervisor(ready);
+    const action = await getStructuredAgentResponse<TeamSupervisorAction>({
+      caller: (prompt) =>
+        this.runSupervisorPrompt(runId, readySupervisor.index, readySupervisor.agentId, prompt),
+      prompt: composeTeamSupervisorPrompt(ready),
+      schema: createTeamSupervisorActionSchema(ready),
+      maxRetries: 2,
+      schemaName: "TeamSupervisorAction",
+    });
+    return this.commitSupervisorAction(runId, decisionId, action);
+  }
+
+  private async commitSupervisorAction(
+    runId: string,
+    decisionId: string,
+    action: TeamSupervisorAction,
+  ): Promise<PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision }> {
+    const beforeCommit = requireSupervisedRun(await this.requireRun(runId));
+    const timestamp = this.timestamp();
+    const attemptId = action.kind === "dispatch" ? randomUUID() : null;
+    const decision = normalizeTeamSupervisorDecision({
+      run: beforeCommit,
+      action,
+      decisionId,
+      attemptId,
+      createdAt: timestamp,
+    });
+    const workerAgentId = action.kind === "dispatch" ? this.createAgentId() : null;
+    const humanRequestId = action.kind === "escalate" ? randomUUID() : null;
+    return requireSupervisedRun(
+      await this.repository.commitSupervisionDecision(
+        {
+          runId,
+          expectedSupervisionRevision: beforeCommit.supervision.revision,
+          decision,
+        },
+        (current, context) =>
+          buildTeamSupervisionDecisionUpdate({
+            run: current,
+            action,
+            decision,
+            context,
+            workerAgentId,
+            humanRequestId,
+            timestamp,
+          }),
+      ),
+    );
+  }
+
   private async beginFirstStep(runId: string): Promise<PersistedTeamRunRecord> {
     const plannedAgentId = this.createAgentId();
     const timestamp = this.timestamp();
@@ -642,6 +775,7 @@ export class TeamRunService {
     active: ActiveStep,
     previousFinalResponse: string | undefined,
     inputArtifacts: PersistedAssignmentArtifactRecord[] | undefined,
+    options: { supervisionContext?: string } = {},
   ): Promise<StepExecutionOutcome> {
     if (active.step.state.status === "stopping" && active.step.state.agentId === null) {
       await this.finishTermination(run.id, this.terminationRequests.get(run.id) ?? "cancel");
@@ -665,6 +799,7 @@ export class TeamRunService {
         plannedAgentId: active.step.state.plannedAgentId,
         previousFinalResponse,
         inputArtifacts,
+        supervisionContext: options.supervisionContext,
       },
     )[Symbol.asyncIterator]();
     let agentCreated = false;
@@ -692,8 +827,65 @@ export class TeamRunService {
       }
     } catch (error) {
       await events.return?.(undefined);
-      return this.handleStepExecutionError(run.id, error);
+      return this.handleStepExecutionError(run.id, active.index, error);
     }
+  }
+
+  private async runSupervisorPrompt(
+    runId: string,
+    stepIndex: number,
+    agentId: string,
+    prompt: string,
+  ): Promise<string> {
+    const admitted = await this.withWorkspaceOperation(
+      (await this.requireRun(runId)).workspace.workspaceId,
+      async () => {
+        const current = await this.requireRun(runId);
+        const reason = this.requestedTerminationReason(current);
+        if (isTerminalTeamRunStatus(current.state.status) || reason) {
+          if (!isTerminalTeamRunStatus(current.state.status)) {
+            await this.finishTermination(runId, reason ?? "cancel");
+          }
+          return false;
+        }
+        const step = current.steps[stepIndex];
+        return Boolean(
+          step?.snapshot.supervision?.kind === "supervisor" &&
+          "agentId" in step.state &&
+          step.state.agentId === agentId,
+        );
+      },
+    );
+    if (!admitted) throw new Error(`Supervisor prompt for Team Run ${runId} was not admitted`);
+
+    const pendingPermissions = new Set<string>();
+    for await (const event of this.agentManager.streamAgent(agentId, prompt)) {
+      if (event.type === "permission_requested") {
+        pendingPermissions.add(event.request.id);
+        await this.persistPermissionState(runId, stepIndex, {
+          ...event,
+          pendingPermissionCount: pendingPermissions.size,
+        });
+        continue;
+      }
+      if (event.type === "permission_resolved") {
+        pendingPermissions.delete(event.requestId);
+        await this.persistPermissionState(runId, stepIndex, {
+          ...event,
+          pendingPermissionCount: pendingPermissions.size,
+        });
+        continue;
+      }
+      if (event.type === "turn_completed") {
+        return (await this.agentManager.getLastAssistantMessage(agentId)) ?? "";
+      }
+      if (event.type === "turn_failed") throw new Error(event.error);
+      if (event.type === "turn_canceled") {
+        await this.finishTermination(runId, this.terminationRequests.get(runId) ?? "cancel");
+        throw new Error(`Supervisor turn for Team Run ${runId} was canceled`);
+      }
+    }
+    throw new TeamStepStreamEndedError(agentId);
   }
 
   private async stopBeforeStreamAdmission(
@@ -739,6 +931,11 @@ export class TeamRunService {
       return { agentCreated: false, outcome };
     }
     if (event.type === "turn_failed") {
+      const current = await this.requireRun(runId);
+      if (current.steps[stepIndex]?.snapshot.supervision?.kind === "worker") {
+        await this.settleSupervisedWorkerFailure(runId, stepIndex, event.error);
+        return { agentCreated: false, outcome: { status: "next" } };
+      }
       await this.failRun(runId, event.error);
       return { agentCreated: false, outcome: { status: "terminal" } };
     }
@@ -751,6 +948,7 @@ export class TeamRunService {
 
   private async handleStepExecutionError(
     runId: string,
+    stepIndex: number,
     error: unknown,
   ): Promise<StepExecutionOutcome> {
     const current = await this.requireRun(runId);
@@ -760,10 +958,20 @@ export class TeamRunService {
       await this.finishTermination(runId, requestedReason);
       return { status: "terminal" };
     }
-    if (!isWorkspaceFailure(error)) throw error;
-    this.requestTermination(runId, "workspace");
-    await this.finishTermination(runId, "workspace");
-    return { status: "terminal" };
+    if (isWorkspaceFailure(error)) {
+      this.requestTermination(runId, "workspace");
+      await this.finishTermination(runId, "workspace");
+      return { status: "terminal" };
+    }
+    const step = current.steps[stepIndex];
+    if (
+      step?.snapshot.supervision?.kind === "worker" &&
+      ACTIVE_STEP_STATUSES.has(step.state.status)
+    ) {
+      await this.settleSupervisedWorkerFailure(runId, stepIndex, errorMessage(error));
+      return { status: "next" };
+    }
+    throw error;
   }
 
   private async persistAgentCreated(
@@ -922,6 +1130,15 @@ export class TeamRunService {
           turnId,
         });
       }
+      if (currentStep.snapshot.supervision?.kind === "worker" && beforeCompletion.supervision) {
+        await this.repository.settleSupervisedWorker({
+          runId,
+          expectedSupervisionRevision: beforeCompletion.supervision.revision,
+          attemptId: currentStep.snapshot.supervision.attemptId,
+          outcome: { status: "succeeded" },
+        });
+        return { status: "next" };
+      }
 
       let advanced = false;
       const timestamp = this.timestamp();
@@ -978,6 +1195,24 @@ export class TeamRunService {
       return beforeCompletion.assignmentId === undefined
         ? { status: "next", finalResponse }
         : { status: "next" };
+    });
+  }
+
+  private async settleSupervisedWorkerFailure(
+    runId: string,
+    stepIndex: number,
+    error: string,
+  ): Promise<PersistedTeamRunRecord> {
+    const current = requireSupervisedRun(await this.requireRun(runId));
+    const step = current.steps[stepIndex];
+    if (step?.snapshot.supervision?.kind !== "worker") {
+      throw new Error(`Team Run ${runId} step ${stepIndex} is not a supervised worker`);
+    }
+    return this.repository.settleSupervisedWorker({
+      runId,
+      expectedSupervisionRevision: current.supervision.revision,
+      attemptId: step.snapshot.supervision.attemptId,
+      outcome: { status: "failed", error: boundedError(error) },
     });
   }
 
@@ -1204,6 +1439,28 @@ function findActiveStep(run: PersistedTeamRunRecord): ActiveStep | null {
   const index = run.steps.findIndex((step) => ACTIVE_STEP_STATUSES.has(step.state.status));
   const step = run.steps[index];
   return step ? { index, step } : null;
+}
+
+function requireSupervisedRun(
+  run: PersistedTeamRunRecord,
+): PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision } {
+  if (!run.supervision) throw new Error(`Team Run ${run.id} is not supervised`);
+  return run as PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision };
+}
+
+function requireActiveSupervisor(run: PersistedTeamRunRecord): {
+  index: number;
+  agentId: string;
+} {
+  const active = findActiveStep(run);
+  if (
+    active?.step.snapshot.supervision?.kind !== "supervisor" ||
+    !("agentId" in active.step.state) ||
+    active.step.state.agentId === null
+  ) {
+    throw new Error(`Supervised Team Run ${run.id} has no admitted supervisor agent`);
+  }
+  return { index: active.index, agentId: active.step.state.agentId };
 }
 
 function replaceStep(steps: TeamRunStep[], index: number, step: TeamRunStep): TeamRunStep[] {

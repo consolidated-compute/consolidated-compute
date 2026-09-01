@@ -64,10 +64,10 @@ unique accepted Artifact IDs. Human requests may cite only created agents and ou
 succeeded steps; planned agent IDs and preallocated output IDs are not evidence. Every durable decision
 belongs to exactly one succeeded supervisor turn. Supervisor turns own decisions, never output
 Artifact descriptors. Repository commands append decisions with revision and action idempotency
-checks before an executor performs external work. Dispatch and revision decisions name one exact work
-item and attempt. A fresh decision is accepted only while the run is queued or running at an idle
-planning boundary; active work, permission waits, cancellation, unresolved human requests, and
-terminal runs reject it. A decision
+checks before an executor performs external work. Before each prompt, the repository appends an
+active supervisor turn with its reserved decision ID. A decision may settle only that exact turn;
+other active work, permission waits, cancellation, unresolved human requests, and terminal runs
+reject it. Dispatch and revision decisions name one exact work item and attempt. A decision
 may append steps but every preserved run and step state must follow the lifecycle transition graph;
 terminal attempt history cannot be reopened or rewritten. A dispatch atomically appends one new
 `creating` attempt, marks its Work Item active, enters the working phase, and reserves an output
@@ -105,6 +105,13 @@ run, and can answer only those requests. Ordinary agents keep the existing tool 
 ## Execution
 
 The daemon service coordinates root Paseo agents. Each reached workflow step creates one agent in the selected Workspace from the frozen launch values; execution never resolves the Agent Profile again. Correlation labels identify the Team, run, role, and step. Do not set `paseo.parent-agent-id`; that label means an agent-created child and carries cascade and archive behavior.
+
+A supervised run creates its frozen supervisor once and reuses that persisted agent for bounded
+structured turns. An invalid response receives at most two correction prompts on the same turn. The daemon,
+not the supervisor, creates one requested worker from the named frozen template after the dispatch
+decision and planned agent identity are durable. A worker terminal event is authoritative; finish
+notifications may only wake the executor. The first executor does not redispatch failed work or
+route revision Artifacts.
 
 Compose each initial prompt from these bounded sections:
 

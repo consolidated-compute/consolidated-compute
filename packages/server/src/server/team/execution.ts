@@ -605,6 +605,7 @@ export interface TeamStepPromptInput {
   objective: string;
   previousFinalResponse?: string;
   inputArtifacts?: PersistedAssignmentArtifactRecord[];
+  supervisionContext?: string;
 }
 
 export function composeTeamStepPrompt(input: TeamStepPromptInput): string {
@@ -616,6 +617,9 @@ export function composeTeamStepPrompt(input: TeamStepPromptInput): string {
     sections.push(`## Step\n${input.step.stepInstructions}`);
   }
   sections.push(`## Objective\n${input.objective}`);
+  if (input.supervisionContext !== undefined) {
+    sections.push(`## Supervisor dispatch\n${input.supervisionContext}`);
+  }
   if (input.inputArtifacts !== undefined) {
     const artifactSections = formatTeamArtifactPromptSections(input.inputArtifacts);
     if (artifactSections) sections.push(artifactSections);
@@ -672,6 +676,7 @@ export interface TeamStepExecutionInput {
   plannedAgentId: string;
   previousFinalResponse?: string;
   inputArtifacts?: PersistedAssignmentArtifactRecord[];
+  supervisionContext?: string;
 }
 
 export async function* executeTeamStep(
@@ -680,7 +685,7 @@ export async function* executeTeamStep(
 ): AsyncGenerator<TeamStepExecutionEvent> {
   const step = input.run.steps.find((candidate) => candidate.snapshot.stepId === input.stepId);
   if (!step) throw new TeamStepNotFoundError(input.run.id, input.stepId);
-  const workspace = await revalidateTeamStep(dependencies, input.run.workspace, step.snapshot);
+  const workspace = await revalidateTeamRunStep(dependencies, input.run.workspace, step.snapshot);
   const prompt = composeTeamStepPrompt({
     teamName: input.run.teamSnapshot.name,
     teamInstructions: input.run.teamSnapshot.instructions,
@@ -688,30 +693,16 @@ export async function* executeTeamStep(
     objective: input.run.objective,
     previousFinalResponse: input.previousFinalResponse,
     inputArtifacts: input.inputArtifacts,
+    supervisionContext: input.supervisionContext,
   });
-  const launch = step.snapshot.resolvedLaunch;
-  await dependencies.createAgent({
-    kind: "mcp",
-    agentId: input.plannedAgentId,
-    provider: formatProviderModel(launch.provider, launch.model),
-    cwd: workspace.cwd,
-    workspaceId: workspace.workspaceId,
-    mode: launch.modeId ?? undefined,
-    thinking: launch.thinkingOptionId ?? undefined,
-    features: nonEmptyFeatureValues(launch.featureValues),
-    ...(launch.providerOptions && Object.keys(launch.providerOptions).length > 0
-      ? { config: { providerOptions: launch.providerOptions } }
-      : {}),
-    title: `${input.run.teamSnapshot.name}: ${step.snapshot.roleName}`,
-    labels: {
-      [TEAM_ID_LABEL]: input.run.teamId,
-      [TEAM_RUN_ID_LABEL]: input.run.id,
-      [TEAM_ROLE_ID_LABEL]: step.snapshot.roleId,
-      [TEAM_STEP_ID_LABEL]: step.snapshot.stepId,
-    },
-    background: true,
-    notifyOnFinish: false,
-  });
+  await dependencies.createAgent(
+    buildTeamAgentCreateInput({
+      run: input.run,
+      step: step.snapshot,
+      plannedAgentId: input.plannedAgentId,
+      workspace,
+    }),
+  );
   yield { type: "agent_created", agentId: input.plannedAgentId };
 
   const pendingPermissions = new Set<string>();
@@ -745,7 +736,42 @@ export async function* executeTeamStep(
   throw new TeamStepStreamEndedError(input.plannedAgentId);
 }
 
-async function revalidateTeamStep(
+export interface BuildTeamAgentCreateInput {
+  run: PersistedTeamRunRecord;
+  step: TeamRunStepSnapshot;
+  plannedAgentId: string;
+  workspace: PersistedWorkspaceRecord;
+}
+
+export function buildTeamAgentCreateInput(
+  input: BuildTeamAgentCreateInput,
+): CreateAgentFromMcpInput {
+  const launch = input.step.resolvedLaunch;
+  return {
+    kind: "mcp",
+    agentId: input.plannedAgentId,
+    provider: formatProviderModel(launch.provider, launch.model),
+    cwd: input.workspace.cwd,
+    workspaceId: input.workspace.workspaceId,
+    mode: launch.modeId ?? undefined,
+    thinking: launch.thinkingOptionId ?? undefined,
+    features: nonEmptyFeatureValues(launch.featureValues),
+    ...(launch.providerOptions && Object.keys(launch.providerOptions).length > 0
+      ? { config: { providerOptions: launch.providerOptions } }
+      : {}),
+    title: `${input.run.teamSnapshot.name}: ${input.step.roleName}`,
+    labels: {
+      [TEAM_ID_LABEL]: input.run.teamId,
+      [TEAM_RUN_ID_LABEL]: input.run.id,
+      [TEAM_ROLE_ID_LABEL]: input.step.roleId,
+      [TEAM_STEP_ID_LABEL]: input.step.stepId,
+    },
+    background: true,
+    notifyOnFinish: false,
+  };
+}
+
+export async function revalidateTeamRunStep(
   dependencies: Pick<
     TeamStepExecutionDependencies,
     "workspaceRegistry" | "providerCatalog" | "featureCatalog"

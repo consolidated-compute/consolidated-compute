@@ -22,9 +22,17 @@ import {
   type WorkspaceMutation,
   type WorkspaceTerminationBoundary,
 } from "../workspace-registry.js";
-import { TeamExecutionPreflightError, type TeamProviderCatalog } from "./execution.js";
+import {
+  preflightTeamRun,
+  TeamExecutionPreflightError,
+  type TeamProviderCatalog,
+} from "./execution.js";
 import { materializeTeamStepArtifact } from "./artifacts.js";
-import type { PersistedTeamDefinition, PersistedTeamRunRecord } from "./model.js";
+import {
+  PersistedTeamRunRecordSchema,
+  type PersistedTeamDefinition,
+  type PersistedTeamRunRecord,
+} from "./model.js";
 import {
   TeamRepository,
   TeamWorkspaceHasActiveRunError,
@@ -37,7 +45,7 @@ import {
   type TeamSupervisedControlPlaneProtection,
   type TeamRunWorkspaceRegistry,
 } from "./service.js";
-import { TeamSupervisorRoleInvalidError } from "./supervision.js";
+import { createInitialTeamRunSupervision, TeamSupervisorRoleInvalidError } from "./supervision.js";
 import { toTeamRunDto } from "./wire.js";
 
 const timestamp = "2026-08-25T12:00:00.000Z";
@@ -316,6 +324,7 @@ class MemoryAgentRuntime {
   readonly streams: Array<{ agentId: string; prompt: AgentPromptInput }> = [];
   readonly finalResponses = new Map<string, string | null>();
   cancellation: AgentRunCancellationResult = { status: "settled" };
+  beforeCreate: ((input: CreateAgentFromMcpInput) => Promise<void>) | null = null;
   blockCreation = false;
   private releaseCreation: (() => void) | null = null;
   private readonly creationWaiters = new Set<() => void>();
@@ -324,6 +333,7 @@ class MemoryAgentRuntime {
   private readonly eventWaiters = new Map<string, Set<() => void>>();
 
   async createAgent(input: CreateAgentFromMcpInput): Promise<void> {
+    await this.beforeCreate?.(input);
     this.creations.push(input);
     for (const waiter of this.creationWaiters) waiter();
     this.creationWaiters.clear();
@@ -384,6 +394,16 @@ class MemoryAgentRuntime {
       waiters.add(resolve);
       this.streamWaiters.set(agentId, waiters);
     });
+  }
+
+  async waitForStreamCount(agentId: string, count: number): Promise<void> {
+    if (this.streams.filter((stream) => stream.agentId === agentId).length >= count) return;
+    await new Promise<void>((resolve) => {
+      const waiters = this.streamWaiters.get(agentId) ?? new Set();
+      waiters.add(resolve);
+      this.streamWaiters.set(agentId, waiters);
+    });
+    await this.waitForStreamCount(agentId, count);
   }
 
   async pushEvent(agentId: string, event: AgentStreamEvent): Promise<void> {
@@ -538,7 +558,7 @@ describe("TeamRunService", () => {
     });
   }
 
-  test("admits a dark supervised snapshot without launching the sequential executor", async () => {
+  test("persists supervised admission before launching its frozen supervisor", async () => {
     const harness = await createHarness();
     harness.daemonConfigStore.agentProfiles.push({
       id: "profile_supervisor",
@@ -581,8 +601,18 @@ describe("TeamRunService", () => {
       workspaceId: "wks_team_service",
       supervisorRoleId: "role_supervisor",
     };
+    harness.runtime.beforeCreate = async (creation) => {
+      const active = (await harness.repository.listRuns()).runs.find(
+        (candidate) => candidate.steps[0]?.state.plannedAgentId === creation.agentId,
+      );
+      expect(active).toMatchObject({
+        steps: [{ state: { status: "creating", plannedAgentId: firstAgentId } }],
+        supervision: { phase: "planning", revision: 2 },
+      });
+    };
 
     const run = await harness.service.admitSupervisedAssignmentRun(input);
+    await harness.runtime.waitForCreations(1);
 
     expect(run).toMatchObject({
       steps: [],
@@ -604,7 +634,27 @@ describe("TeamRunService", () => {
         },
       },
     });
-    expect(harness.runtime.creations).toEqual([]);
+    expect(harness.runtime.creations).toMatchObject([
+      {
+        agentId: firstAgentId,
+        labels: {
+          "paseo.team-id": definition.id,
+          "paseo.team-run-id": run.id,
+          "paseo.team-role-id": "role_supervisor",
+          "paseo.team-step-id": "supervisor_turn_1",
+        },
+      },
+    ]);
+    await expect(harness.repository.getRun(run.id)).resolves.toMatchObject({
+      steps: [
+        {
+          snapshot: { supervision: { kind: "supervisor", decisionId: expect.any(String) } },
+          state: { plannedAgentId: firstAgentId },
+        },
+      ],
+      state: { status: "running" },
+      supervision: { phase: "planning", revision: 2 },
+    });
     expect(toTeamRunDto(run).supervision).toEqual({
       status: "queued",
       supervisorRoleId: "role_supervisor",
@@ -614,13 +664,23 @@ describe("TeamRunService", () => {
       updatedAt: timestamp,
     });
     expect(JSON.stringify(toTeamRunDto(run))).not.toContain("sandbox_mode");
-    await expect(harness.service.admitSupervisedAssignmentRun(input)).resolves.toEqual(run);
+    await expect(harness.service.admitSupervisedAssignmentRun(input)).resolves.toMatchObject({
+      id: run.id,
+      supervision: { supervisor: { agentId: firstAgentId } },
+    });
     await expect(
       harness.service.admitSupervisedAssignmentRun({
         ...input,
         supervisorRoleId: "role_builder",
       }),
     ).rejects.toMatchObject({ code: "team_run_idempotency_conflict" });
+    const canceled = await harness.service.cancelRun(run.id);
+    expect(canceled).toMatchObject({
+      state: { status: "canceled" },
+      steps: [{ state: { status: "canceled", agentId: firstAgentId } }],
+      supervision: { phase: "canceled" },
+    });
+    expect(harness.runtime.cancellations).toEqual([firstAgentId]);
 
     const secondAssignment = await harness.assignments.createAssignment({
       title: "Invalid supervisor role",
@@ -636,6 +696,370 @@ describe("TeamRunService", () => {
         supervisorRoleId: "role_builder",
       }),
     ).rejects.toBeInstanceOf(TeamSupervisorRoleInvalidError);
+  });
+
+  test("executes validated supervisor decisions and one frozen worker at a time", async () => {
+    const harness = await createHarness();
+    harness.daemonConfigStore.agentProfiles.push({
+      id: "profile_supervisor",
+      name: "Supervisor",
+      provider: "codex",
+      model: "gpt-5.6",
+      providerOptions: {
+        sandbox_mode: "workspace-write",
+        approval_policy: "never",
+        features: { multi_agent_v2: false },
+      },
+    });
+    const definition = await harness.repository.updateDefinition({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      patch: {
+        roles: [
+          ...harness.definition.roles,
+          {
+            id: "role_supervisor",
+            name: "Supervisor",
+            instructions: "Plan bounded work, dispatch it, and complete only after success.",
+            profileId: "profile_supervisor",
+          },
+        ],
+      },
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Structured supervised execution",
+      objective: "Build the change and review it through durable supervisor decisions.",
+      workItem: null,
+    });
+    const run = await harness.service.admitSupervisedAssignmentRun({
+      teamId: definition.id,
+      expectedRevision: definition.revision,
+      idempotencyKey: "supervised-execution-1",
+      assignmentId: assignment.id,
+      expectedAssignmentRevision: assignment.revision,
+      workspaceId: "wks_team_service",
+      supervisorRoleId: "role_supervisor",
+    });
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 1);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "complete",
+        actionId: "action_complete_too_early",
+        summary: "This must be rejected before work succeeds.",
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-supervisor-invalid",
+    });
+    await harness.runtime.waitForStreamCount(firstAgentId, 2);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "plan",
+        actionId: "action_plan_delivery",
+        summary: "Build the requested change, then perform the frozen review step.",
+        workItems: [
+          { id: "work_build", templateStepId: "step_build" },
+          { id: "work_review", templateStepId: "step_review" },
+        ],
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-supervisor-plan",
+    });
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 3);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "dispatch",
+        actionId: "action_dispatch_build",
+        summary: "Dispatch the builder from the frozen template.",
+        workItemId: "work_build",
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-supervisor-dispatch-build",
+    });
+
+    await harness.runtime.waitForStream(secondAgentId);
+    harness.runtime.finalResponses.set(secondAgentId, "Builder produced a durable result.");
+    await harness.runtime.pushEvent(secondAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-worker-build",
+    });
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 4);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "dispatch",
+        actionId: "action_dispatch_review",
+        summary: "Dispatch the reviewer from the frozen template.",
+        workItemId: "work_review",
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-supervisor-dispatch-review",
+    });
+
+    await harness.runtime.waitForStream(unusedAgentId);
+    harness.runtime.finalResponses.set(unusedAgentId, "Review passed without defects.");
+    await harness.runtime.pushEvent(unusedAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-worker-review",
+    });
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 5);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "complete",
+        actionId: "action_complete_delivery",
+        summary: "Every planned work item succeeded.",
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-supervisor-complete",
+    });
+
+    const completed = await harness.service.waitForRun(run.id);
+    expect(completed).toMatchObject({
+      state: { status: "succeeded" },
+      supervision: {
+        phase: "completed",
+        workItems: [
+          { id: "work_build", status: "succeeded", acceptedAttemptId: expect.any(String) },
+          { id: "work_review", status: "succeeded", acceptedAttemptId: expect.any(String) },
+        ],
+        decisions: [
+          { kind: "plan", actionId: "action_plan_delivery" },
+          { kind: "dispatch", actionId: "action_dispatch_build" },
+          { kind: "dispatch", actionId: "action_dispatch_review" },
+          { kind: "complete", actionId: "action_complete_delivery" },
+        ],
+      },
+    });
+    expect(completed.steps.map((step) => step.snapshot.supervision?.kind)).toEqual([
+      "supervisor",
+      "supervisor",
+      "worker",
+      "supervisor",
+      "worker",
+      "supervisor",
+    ]);
+    expect(harness.runtime.creations.map((creation) => creation.agentId)).toEqual([
+      firstAgentId,
+      secondAgentId,
+      unusedAgentId,
+    ]);
+    expect(
+      harness.runtime.streams.filter((stream) => stream.agentId === firstAgentId)[1]?.prompt,
+    ).toContain("Complete requires every planned work item to have succeeded");
+    expect(
+      harness.runtime.streams.find((stream) => stream.agentId === secondAgentId)?.prompt,
+    ).toContain("Work item: work_build");
+    await expect(
+      harness.assignments.listArtifacts({ assignmentId: assignment.id }),
+    ).resolves.toMatchObject({
+      artifacts: expect.arrayContaining([
+        expect.objectContaining({ content: "Builder produced a durable result." }),
+        expect.objectContaining({ content: "Review passed without defects." }),
+      ]),
+      issues: [],
+    });
+  });
+
+  test("persists escalation as an idle human wait without launching a worker", async () => {
+    const harness = await createHarness();
+    harness.daemonConfigStore.agentProfiles.push({
+      id: "profile_supervisor",
+      name: "Supervisor",
+      provider: "codex",
+      model: "gpt-5.6",
+      providerOptions: { features: { multi_agent_v2: false } },
+    });
+    const definition = await harness.repository.updateDefinition({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      patch: {
+        roles: [
+          ...harness.definition.roles,
+          {
+            id: "role_supervisor",
+            name: "Supervisor",
+            instructions: "Escalate when the objective requires a human decision.",
+            profileId: "profile_supervisor",
+          },
+        ],
+      },
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Supervised escalation",
+      objective: "Ask a human to choose before any worker starts.",
+      workItem: null,
+    });
+    const run = await harness.service.admitSupervisedAssignmentRun({
+      teamId: definition.id,
+      expectedRevision: definition.revision,
+      idempotencyKey: "supervised-escalation-1",
+      assignmentId: assignment.id,
+      expectedAssignmentRevision: assignment.revision,
+      workspaceId: "wks_team_service",
+      supervisorRoleId: "role_supervisor",
+    });
+    await harness.runtime.waitForStream(firstAgentId);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "escalate",
+        actionId: "action_escalate_scope",
+        summary: "Choose whether this Assignment should proceed.",
+        workItemId: null,
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-supervisor-escalate",
+    });
+
+    const waiting = await harness.service.waitForRun(run.id);
+    expect(waiting).toMatchObject({
+      state: { status: "running" },
+      steps: [{ state: { status: "succeeded", agentId: firstAgentId } }],
+      supervision: {
+        phase: "awaiting_human",
+        decisions: [{ kind: "escalate", actionId: "action_escalate_scope" }],
+        humanRequest: {
+          kind: "supervisor_escalation",
+          detail: "Choose whether this Assignment should proceed.",
+          actions: [{ id: "continue" }, { id: "cancel" }],
+        },
+      },
+    });
+    expect(harness.runtime.creations.map((creation) => creation.agentId)).toEqual([firstAgentId]);
+
+    const canceled = await harness.service.cancelRun(run.id);
+    expect(canceled).toMatchObject({
+      state: { status: "canceled" },
+      supervision: {
+        phase: "canceled",
+        humanRequest: { retirement: { reason: "canceled" } },
+      },
+    });
+  });
+
+  test("does not launch a worker when its dispatch decision fails to persist", async () => {
+    let rejectDispatchWrite = false;
+    const repository = new TeamRepository({
+      paseoHome,
+      now: () => new Date(timestamp),
+      writeJson: async (filePath, value) => {
+        const run = PersistedTeamRunRecordSchema.safeParse(value);
+        if (
+          rejectDispatchWrite &&
+          run.success &&
+          run.data.supervision?.decisions.at(-1)?.kind === "dispatch"
+        ) {
+          throw new Error("simulated dispatch persistence failure");
+        }
+        await writeJsonFileAtomic(filePath, value);
+      },
+    });
+    const harness = await createHarness({ repository });
+    harness.daemonConfigStore.agentProfiles.push({
+      id: "profile_supervisor",
+      name: "Supervisor",
+      provider: "codex",
+      model: "gpt-5.6",
+      providerOptions: { features: { multi_agent_v2: false } },
+    });
+    const definition = await harness.repository.updateDefinition({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      patch: {
+        roles: [
+          ...harness.definition.roles,
+          {
+            id: "role_supervisor",
+            name: "Supervisor",
+            instructions: "Persist every dispatch before its worker starts.",
+            profileId: "profile_supervisor",
+          },
+        ],
+      },
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Dispatch failure boundary",
+      objective: "Never launch from an uncertain dispatch write.",
+      workItem: null,
+    });
+    const run = await harness.service.admitSupervisedAssignmentRun({
+      teamId: definition.id,
+      expectedRevision: definition.revision,
+      idempotencyKey: "supervised-dispatch-failure-1",
+      assignmentId: assignment.id,
+      expectedAssignmentRevision: assignment.revision,
+      workspaceId: "wks_team_service",
+      supervisorRoleId: "role_supervisor",
+    });
+    await harness.runtime.waitForStreamCount(firstAgentId, 1);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "plan",
+        actionId: "action_plan_before_failure",
+        summary: "Run the frozen builder step.",
+        workItems: [{ id: "work_build", templateStepId: "step_build" }],
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-plan-before-failure",
+    });
+    await harness.runtime.waitForStreamCount(firstAgentId, 2);
+    rejectDispatchWrite = true;
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "dispatch",
+        actionId: "action_dispatch_write_fails",
+        summary: "Dispatch the frozen builder.",
+        workItemId: "work_build",
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-dispatch-write-fails",
+    });
+
+    const failed = await harness.service.waitForRun(run.id);
+    expect(failed).toMatchObject({
+      state: { status: "failed", error: "simulated dispatch persistence failure" },
+      supervision: {
+        phase: "failed",
+        decisions: [{ kind: "plan", actionId: "action_plan_before_failure" }],
+        workItems: [{ id: "work_build", status: "failed" }],
+      },
+    });
+    expect(harness.runtime.creations.map((creation) => creation.agentId)).toEqual([firstAgentId]);
   });
 
   test.each([
@@ -1600,6 +2024,84 @@ describe("TeamRunService", () => {
       agentId: null,
     });
     expect(harness.runtime.creations).toEqual([]);
+  });
+
+  test("interrupts a persisted supervisor turn on startup without replaying its prompt", async () => {
+    const harness = await createHarness({ initialize: false });
+    harness.daemonConfigStore.agentProfiles.push({
+      id: "profile_supervisor",
+      name: "Supervisor",
+      provider: "codex",
+      model: "gpt-5.6",
+      providerOptions: { features: { multi_agent_v2: false } },
+    });
+    const definition = await harness.repository.updateDefinition({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      patch: {
+        roles: [
+          ...harness.definition.roles,
+          {
+            id: "role_supervisor",
+            name: "Supervisor",
+            instructions: "Never replay an uncertain prompt after restart.",
+            profileId: "profile_supervisor",
+          },
+        ],
+      },
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Supervisor restart boundary",
+      objective: "Interrupt the active turn without launching its agent.",
+      workItem: null,
+    });
+    const accepted = await preflightTeamRun(
+      {
+        workspaceRegistry: harness.workspaceRegistry,
+        providerCatalog: harness.providerCatalog,
+        featureCatalog: harness.runtime,
+        daemonConfigStore: harness.daemonConfigStore,
+      },
+      { definition, workspaceId: "wks_team_service" },
+    );
+    const admitted = await harness.repository.createSupervisedAssignmentRun(
+      {
+        teamId: definition.id,
+        expectedRevision: definition.revision,
+        idempotencyKey: "supervisor-restart-boundary",
+        assignmentId: assignment.id,
+        expectedAssignmentRevision: assignment.revision,
+        workspace: accepted.workspace,
+        supervision: createInitialTeamRunSupervision({
+          definition,
+          accepted,
+          supervisorRoleId: "role_supervisor",
+          supervisorAgentId: firstAgentId,
+          timestamp,
+        }),
+      },
+      harness.assignments,
+    );
+    await harness.repository.beginSupervisionTurn({
+      runId: admitted.id,
+      expectedSupervisionRevision: 1,
+      decisionId: "decision_before_restart",
+    });
+
+    await harness.service.initialize();
+
+    await expect(harness.repository.getRun(admitted.id)).resolves.toMatchObject({
+      state: { status: "interrupted" },
+      steps: [
+        {
+          snapshot: { supervision: { kind: "supervisor" } },
+          state: { status: "interrupted", agentId: null },
+        },
+      ],
+      supervision: { phase: "interrupted" },
+    });
+    expect(harness.runtime.creations).toEqual([]);
+    expect(harness.runtime.streams).toEqual([]);
   });
 
   test("retains a pre-crash Artifact while interrupting uncertain Assignment work", async () => {
