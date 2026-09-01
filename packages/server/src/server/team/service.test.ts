@@ -540,6 +540,41 @@ describe("TeamRunService", () => {
     });
   }
 
+  test("rejects a human response without waiting when the run has no request", async () => {
+    const harness = await createHarness();
+    const run = await startRun(harness, "human-response-without-request");
+    await harness.runtime.waitForStream(firstAgentId);
+    const executionState = harness.service as unknown as {
+      executions: Map<string, Promise<void>>;
+    };
+    const activeExecution = executionState.executions.get(run.id);
+    if (!activeExecution) throw new Error("Expected the Team Run execution to be active");
+    const poisonExecution = Promise.reject(
+      new Error("Human response waited for an unrelated execution"),
+    );
+    void poisonExecution.catch(() => undefined);
+    executionState.executions.set(run.id, poisonExecution);
+
+    try {
+      await expect(
+        harness.service.respondToSupervisionHumanRequest({
+          runId: run.id,
+          requestId: "human_missing",
+          expectedRequestRevision: 1,
+          actionId: "continue",
+          note: null,
+          idempotencyKey: "human-response-without-request",
+        }),
+      ).rejects.toMatchObject({ code: "team_run_not_supervised" });
+    } finally {
+      executionState.executions.set(run.id, activeExecution);
+    }
+
+    await expect(harness.service.cancelRun(run.id)).resolves.toMatchObject({
+      state: { status: "canceled" },
+    });
+  });
+
   test("accepts Assignment repositories only from its configured persistence boundary", async () => {
     const harness = await createHarness();
     const peer = new AssignmentRepository({
@@ -1361,6 +1396,65 @@ describe("TeamRunService", () => {
       artifacts: [expect.objectContaining({ content: "Authoritative successful worker output." })],
       issues: [],
     });
+  });
+
+  test("does not reinterpret a failed worker when failure persistence throws", async () => {
+    const harness = await createHarness();
+    const { run } = await startSupervisedRun(harness, "supervised-worker-failure-persistence");
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 1);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "plan",
+        actionId: "action_plan_failure_persistence",
+        summary: "Run the frozen builder.",
+        workItems: [{ id: "work_failure_persistence", templateStepId: "step_build" }],
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-plan-failure-persistence",
+    });
+    await harness.runtime.waitForStreamCount(firstAgentId, 2);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "dispatch",
+        actionId: "action_dispatch_failure_persistence",
+        summary: "Dispatch the builder.",
+        workItemId: "work_failure_persistence",
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-dispatch-failure-persistence",
+    });
+
+    await harness.runtime.waitForStream(secondAgentId);
+    const settlementOutcomes: string[] = [];
+    const originalSettle = harness.repository.settleSupervisedWorker.bind(harness.repository);
+    harness.repository.settleSupervisedWorker = async (input) => {
+      settlementOutcomes.push(input.outcome.status);
+      if (input.outcome.status === "failed") {
+        throw new Error("simulated failure settlement persistence failure");
+      }
+      return originalSettle(input);
+    };
+    await harness.runtime.pushEvent(secondAgentId, {
+      type: "turn_failed",
+      provider: "codex",
+      error: "Authoritative provider failure.",
+    });
+
+    const failed = await harness.service.waitForRun(run.id);
+    expect(failed.state).toMatchObject({
+      status: "failed",
+      error: "simulated failure settlement persistence failure",
+    });
+    expect(settlementOutcomes).toEqual(["failed"]);
   });
 
   test("offers only cancellation when escalation follows failed work", async () => {

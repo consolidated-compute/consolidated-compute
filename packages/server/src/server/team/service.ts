@@ -444,7 +444,8 @@ export class TeamRunService {
     input: RespondToTeamRunSupervisionHumanRequestInput,
   ): Promise<PersistedTeamRunRecord> {
     const current = await this.requireRun(input.runId);
-    if (!current.supervision?.humanRequest?.resolution) {
+    const humanRequest = current.supervision?.humanRequest;
+    if (humanRequest && !humanRequest.resolution) {
       await this.executions.get(input.runId);
     }
     return this.serializeAdmission(async () => {
@@ -759,6 +760,7 @@ export class TeamRunService {
       schema,
       maxRetries: 2,
       schemaName: "TeamSupervisorAction",
+      maxPromptBytes: TEAM_SUPERVISOR_PROMPT_MAX_BYTES,
     });
     return this.commitSupervisorAction(
       runId,
@@ -875,7 +877,7 @@ export class TeamRunService {
     )[Symbol.asyncIterator]();
     let agentCreated = false;
     let streamAdmitted = false;
-    let completionObserved = false;
+    let providerTerminalObserved = false;
 
     try {
       for (;;) {
@@ -891,7 +893,10 @@ export class TeamRunService {
             `Team step ${active.step.snapshot.stepId} ended without a terminal event`,
           );
         }
-        completionObserved ||= next.value.type === "turn_completed";
+        providerTerminalObserved ||=
+          next.value.type === "turn_completed" ||
+          next.value.type === "turn_failed" ||
+          next.value.type === "turn_canceled";
         const handled = await this.handleStepEvent(run.id, active.index, next.value);
         agentCreated ||= handled.agentCreated;
         if (!handled.outcome) continue;
@@ -900,7 +905,7 @@ export class TeamRunService {
       }
     } catch (error) {
       await events.return?.(undefined);
-      if (completionObserved) throw error;
+      if (providerTerminalObserved) throw error;
       return this.handleStepExecutionError(run.id, active.index, error);
     }
   }

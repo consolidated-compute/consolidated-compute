@@ -117,8 +117,8 @@ A supervised run creates its frozen supervisor once and reuses that persisted ag
 structured turns. An invalid response receives at most two correction prompts on the same turn. The daemon,
 not the supervisor, creates one requested worker from the named frozen template after the dispatch
 decision and planned agent identity are durable. A worker terminal event is authoritative; finish
-notifications may only wake the executor. After `turn_completed`, Artifact or success-settlement
-errors propagate as execution failures; never reinterpret them as a failed worker turn. The first
+notifications may only wake the executor. Artifact or settlement errors after a provider terminal
+event propagate as execution failures; never reinterpret them as a different worker outcome. The first
 executor does not redispatch failed work or route revision Artifacts. An escalation offers
 continuation only when the frozen ledger has a valid next plan, dispatch, or completion action. A
 failed Work Item or blocked Artifact handoff offers cancellation only; reserve those continuation
@@ -127,7 +127,8 @@ paths for a later executor with durable retry or revision semantics.
 Cap the complete structured supervisor request at 64 KiB. Supervisor context uses at most 48 KiB
 so the fixed action schema and correction instructions retain headroom. Truncate prose by UTF-8
 bytes with explicit original-size markers, distribute the worker-instruction budget across every
-frozen template, and retain every template and Work Item identity.
+frozen template, and retain every template and Work Item identity. Apply the same cap to correction
+prompts and replace excess validation diagnostics with an omitted-count marker.
 
 Compose each initial prompt from these bounded sections:
 
