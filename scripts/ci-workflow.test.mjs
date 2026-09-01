@@ -363,6 +363,8 @@ test("upstream monitor stages stable releases without weakening review controls"
   assert.match(source, /gh api --method GET search\/issues/);
   assert.match(source, /gh issue create/);
   assert.match(source, /docs\/fork-maintenance\.md/);
+  assert.match(source, /docs\/fork-maintenance\.md#classify-review-findings/);
+  assert.match(source, /The playbook owns the categories and dispositions/);
   assert.doesNotMatch(source, /contents: write|pull-requests: write|git push|gh pr create/);
   assert.doesNotMatch(source, /--limit 100/);
   assert.doesNotMatch(source, /refs\/heads\/main|upstream\/main/);

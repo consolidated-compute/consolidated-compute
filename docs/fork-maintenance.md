@@ -50,6 +50,29 @@ Resolve conflicts before creating the signed merge commit. Run the affected chec
 
 Favor the current upstream structure during conflict resolution. Reapply the smallest Consolidated Compute change that preserves the feature. Do not accept either whole file without reviewing both sides. Record each conflicted file and the chosen resolution in the pull request.
 
+### Classify review findings
+
+A sync pull request contains upstream changes, existing fork changes, and merge resolutions. Establish which one owns a finding before changing code. Use the signed sync merge commit for the comparison; its first parent is the fork tip and its second parent is the selected Paseo release.
+
+```bash
+sync_merge=<signed-sync-merge-sha>
+git diff "$sync_merge^1" "$sync_merge" -- path/to/file
+git diff "$sync_merge^2" "$sync_merge" -- path/to/file
+git show --remerge-diff "$sync_merge" -- path/to/file
+git blame "$sync_merge" -L start,end -- path/to/file
+```
+
+Classify every review finding and record its disposition in the pull request:
+
+| Provenance                         | Disposition                                                                            |
+| ---------------------------------- | -------------------------------------------------------------------------------------- |
+| Fork adaptation or conflict        | Fix it in the sync pull request.                                                       |
+| Upstream-inherited release blocker | Patch it locally and link an upstream issue or pull request.                           |
+| Upstream-inherited non-blocker     | Track it separately. Do not expand the sync pull request.                              |
+| Pre-existing fork issue            | Keep it out of scope. Link an existing issue or create one when the issue is material. |
+
+An upstream-inherited finding can still block the fork release when it breaks a compatibility, security, data, or required-platform contract. State that impact separately from provenance. Review comments that do not establish provenance are incomplete for a sync pull request.
+
 ## Measure divergence
 
 Fetch `origin/main` and the selected stable tag immediately before measuring. Compare the release tag with the remote fork branch rather than a local branch or `HEAD`.
@@ -95,6 +118,7 @@ Every upstream sync pull request includes:
 - upstream-only and fork-only commit counts before and after;
 - the merge-base SHA and fork patch summary;
 - conflicted files and their resolutions;
+- review findings classified by provenance, with upstream links and dispositions where applicable;
 - exact format, lint, typecheck, build, and targeted test results;
 - affected platforms tested and gaps assigned for follow-up.
 

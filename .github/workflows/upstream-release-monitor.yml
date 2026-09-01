@@ -96,6 +96,8 @@ jobs:
 
           Follow [the fork-maintenance playbook](https://github.com/${FORK_REPOSITORY}/blob/${DEFAULT_BRANCH}/docs/fork-maintenance.md) to prepare a signed draft sync pull request. Preserve upstream ancestry, record divergence and conflict evidence, and keep inherited delivery workflows quarantined.
 
+          Before changing code for review feedback, classify every finding and record its disposition using the playbook's [review finding policy](https://github.com/${FORK_REPOSITORY}/blob/${DEFAULT_BRANCH}/docs/fork-maintenance.md#classify-review-findings). The playbook owns the categories and dispositions.
+
           This issue was opened by the scheduled upstream stable-release monitor. It does not sync prereleases or upstream \`main\`.
           EOF
 
