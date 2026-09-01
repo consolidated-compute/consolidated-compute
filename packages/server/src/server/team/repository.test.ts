@@ -988,6 +988,7 @@ describe("TeamRepository runs", () => {
       summary: "Dispatch one bounded worker attempt.",
       workItemId: "work_inactive_dispatch",
       attemptId: "attempt_inactive_dispatch",
+      inputArtifactIds: [],
     };
     await expect(
       repository.commitSupervisionDecision(
@@ -1717,6 +1718,7 @@ describe("TeamRepository runs", () => {
       summary: "Dispatch the bounded worker attempt.",
       workItemId,
       attemptId,
+      inputArtifactIds: [],
       createdAt: secondTimestamp,
     };
     currentTimestamp = secondTimestamp;

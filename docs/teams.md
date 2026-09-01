@@ -71,11 +71,14 @@ reject it. Dispatch and revision decisions name one exact work item and attempt.
 may append steps but every preserved run and step state must follow the lifecycle transition graph;
 terminal attempt history cannot be reopened or rewritten. A dispatch atomically appends one new
 `creating` attempt, marks its Work Item active, enters the working phase, and reserves an output
-Artifact ID across stored Team Runs. Active Work Items contain at least one dispatched attempt, and
-an attempt has one dispatch decision. The initial executor treats plan order as execution order. A
-dispatch requires every preceding Work Item to have succeeded and freezes their accepted output
-Artifact IDs as the target's inputs. Existing Work Items keep their identity and prior attempts;
-inputs may change only from empty to that exact list on first dispatch. A complete decision atomically
+Artifact ID across stored Team Runs. Active Work Items contain at least one launched attempt, and
+an attempt has one dispatch or revision decision. The executor treats plan order as initial execution
+order. A first dispatch requires every preceding Work Item to have succeeded and names their accepted
+output Artifact IDs exactly. A revision requires a succeeded Work Item, includes its accepted output,
+and may name other accepted run-local outputs explicitly. It appends a fresh attempt, agent,
+and output Artifact ID; it never reopens an old step. Each attempt snapshot and normalized decision
+freeze the exact input list. The Work Item projects its latest attempt's inputs and explicitly selects
+the accepted successful attempt. A complete decision atomically
 moves supervision and the outer run to successful terminal states. An escalation atomically enters
 the human-wait phase with an unresolved
 request after every active step has settled. Once that request is resolved or retired, later decisions
@@ -118,11 +121,10 @@ structured turns. An invalid response receives at most two correction prompts on
 not the supervisor, creates one requested worker from the named frozen template after the dispatch
 decision and planned agent identity are durable. A worker terminal event is authoritative; finish
 notifications may only wake the executor. Artifact or settlement errors after a provider terminal
-event propagate as execution failures; never reinterpret them as a different worker outcome. The first
-executor does not redispatch failed work or route revision Artifacts. An escalation offers
-continuation only when the frozen ledger has a valid next plan, dispatch, or completion action. A
-failed Work Item or blocked Artifact handoff offers cancellation only; reserve those continuation
-paths for a later executor with durable retry or revision semantics.
+event propagate as execution failures; never reinterpret them as a different worker outcome. The
+executor may request a bounded revision only from a succeeded Work Item. It does not redispatch failed
+or interrupted work. An escalation offers continuation only when the frozen ledger has a valid next
+plan, dispatch, revision, or completion action. A failed Work Item offers cancellation only.
 
 Cap the complete structured supervisor request at 64 KiB. Supervisor context uses at most 48 KiB
 so the fixed action schema and correction instructions retain headroom. Truncate prose by UTF-8
@@ -138,7 +140,7 @@ Compose each initial prompt from these bounded sections:
 4. Objective.
 5. Exact frozen input Artifacts for Assignment-backed runs, or the immediately previous final response for objective-only runs.
 
-For an Assignment-backed step, persist its bounded final response under the preallocated output ID before committing step success or creating the next agent. Reject blank output. Resolve downstream inputs by their frozen IDs and verify the Assignment revision, Team Run, producing step, role, agent, success state, and descriptor before agent creation. Artifact content is capped at 32 KiB each and 32 KiB total per prompt. Validate that cumulative budget before a supervised dispatch becomes durable; an impossible handoff remains planned so the supervisor can choose another bounded action. Delimit accepted content as untrusted context with identity, provenance, and truncation facts.
+For an Assignment-backed step, persist its bounded final response under the preallocated output ID before committing step success or creating the next agent. Reject blank output. Resolve downstream inputs by their frozen IDs and verify the Assignment revision, Team Run, producing step, role, agent, success state, and descriptor before agent creation. Artifact content is capped at 32 KiB each and 32 KiB total per prompt. Validate that cumulative budget before a supervised dispatch or revision becomes durable; an impossible handoff does not create an attempt, agent, or output reservation. Delimit accepted content as untrusted context with identity, provenance, and truncation facts.
 
 For an objective-only step, delimit the previous response as untrusted handoff context. Cap it at 4 KiB of UTF-8 and state when it was truncated. An empty final response gets an explicit empty marker. Do not pass the full transcript.
 
@@ -172,4 +174,4 @@ are rejected, and late callbacks cannot rewrite a terminal record.
 
 Stored v0.2 runs remain objective-only: their Objective is not a durable Assignment and their bounded inline handoff is not an Artifact. [Assignments and Artifacts](assignments.md) own the v0.3 path; stored runs and older clients keep the legacy behavior.
 
-Teams still add no generic policy engine, sandbox, public supervisor flow, conditional revision loop, retry, fan-out, new scheduler, or Team-owned Workspace creation. The frozen security posture reports provider behavior already selected by the Agent Profile; it does not create a new boundary.
+Teams still add no generic policy engine, sandbox, public supervisor flow, failed-attempt retry, fan-out, new scheduler, or Team-owned Workspace creation. The frozen security posture reports provider behavior already selected by the Agent Profile; it does not create a new boundary.

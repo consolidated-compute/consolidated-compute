@@ -38,6 +38,7 @@ import {
 } from "./model.js";
 import {
   TeamRepository,
+  TeamRunSupervisionActionConflictError,
   TeamWorkspaceHasActiveRunError,
   type CreateTeamDefinitionInput,
 } from "./repository.js";
@@ -56,6 +57,45 @@ const timestamp = "2026-08-25T12:00:00.000Z";
 const firstAgentId = "00000000-0000-4000-8000-000000000401";
 const secondAgentId = "00000000-0000-4000-8000-000000000402";
 const unusedAgentId = "00000000-0000-4000-8000-000000000403";
+const revisionAgentId = "00000000-0000-4000-8000-000000000404";
+
+function requireSupervision(run: PersistedTeamRunRecord) {
+  if (!run.supervision) throw new Error("Expected supervised Team Run state");
+  return run.supervision;
+}
+
+function requireWorkerStep(run: PersistedTeamRunRecord, workItemId: string, attemptIndex = 0) {
+  const steps = run.steps.filter(
+    (step) =>
+      step.snapshot.supervision?.kind === "worker" &&
+      step.snapshot.supervision.workItemId === workItemId,
+  );
+  const step = steps[attemptIndex];
+  if (!step) throw new Error(`Expected worker attempt ${attemptIndex + 1} for ${workItemId}`);
+  return step;
+}
+
+function requireWorkerMetadata(step: PersistedTeamRunRecord["steps"][number]) {
+  const metadata = step.snapshot.supervision;
+  if (metadata?.kind !== "worker") throw new Error("Expected worker attempt lineage");
+  return metadata;
+}
+
+function requireOutputArtifactId(step: PersistedTeamRunRecord["steps"][number]): string {
+  const artifactId = step.snapshot.outputArtifact?.id;
+  if (!artifactId) throw new Error("Expected worker output Artifact ID");
+  return artifactId;
+}
+
+function requireRevisionDecision(run: PersistedTeamRunRecord) {
+  const decision = requireSupervision(run).decisions.find(
+    (candidate) => candidate.kind === "request_revision",
+  );
+  if (!decision || decision.kind !== "request_revision") {
+    throw new Error("Expected a durable revision decision");
+  }
+  return decision;
+}
 
 function createDefinitionInput(): CreateTeamDefinitionInput {
   return {
@@ -496,7 +536,7 @@ describe("TeamRunService", () => {
     const providerCatalog = new MemoryProviderCatalog();
     const daemonConfigStore = new MemoryDaemonConfigStore();
     const runtime = new MemoryAgentRuntime();
-    const ids = [firstAgentId, secondAgentId, unusedAgentId];
+    const ids = [firstAgentId, secondAgentId, unusedAgentId, revisionAgentId];
     const service = new TeamRunService({
       repository,
       assignmentRepository: assignments,
@@ -1054,6 +1094,7 @@ describe("TeamRunService", () => {
         actionId: "action_dispatch_build",
         summary: "Dispatch the builder from the frozen template.",
         workItemId: "work_build",
+        inputArtifactIds: [],
       }),
     );
     await harness.runtime.pushEvent(firstAgentId, {
@@ -1071,6 +1112,10 @@ describe("TeamRunService", () => {
     });
 
     await harness.runtime.waitForStreamCount(firstAgentId, 4);
+    const buildArtifactId = (await harness.repository.getRun(run.id))?.steps.find(
+      (step) => step.snapshot.supervision?.kind === "worker",
+    )?.snapshot.outputArtifact?.id;
+    if (!buildArtifactId) throw new Error("Expected the build output Artifact ID");
     harness.runtime.finalResponses.set(
       firstAgentId,
       JSON.stringify({
@@ -1078,6 +1123,7 @@ describe("TeamRunService", () => {
         actionId: "action_dispatch_review",
         summary: "Dispatch the reviewer from the frozen template.",
         workItemId: "work_review",
+        inputArtifactIds: [buildArtifactId],
       }),
     );
     await harness.runtime.pushEvent(firstAgentId, {
@@ -1164,6 +1210,197 @@ describe("TeamRunService", () => {
     });
   });
 
+  test("routes exact immutable Artifacts into a fresh revision attempt", async () => {
+    const harness = await createHarness();
+    const { assignment, run } = await startSupervisedRun(
+      harness,
+      "supervised-exact-revision-lineage",
+    );
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 1);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "plan",
+        actionId: "action_plan_revision",
+        summary: "Build the change, review it, then revise the build from exact evidence.",
+        workItems: [
+          { id: "work_build_revision", templateStepId: "step_build" },
+          { id: "work_review_revision", templateStepId: "step_review" },
+        ],
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-plan-revision",
+    });
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 2);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "dispatch",
+        actionId: "action_dispatch_initial_build",
+        summary: "Dispatch the initial build without implicit inputs.",
+        workItemId: "work_build_revision",
+        inputArtifactIds: [],
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-dispatch-initial-build",
+    });
+    await harness.runtime.waitForStream(secondAgentId);
+    harness.runtime.finalResponses.set(secondAgentId, "INITIAL_BUILD_ARTIFACT");
+    await harness.runtime.pushEvent(secondAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-initial-build",
+    });
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 3);
+    const afterBuild = (await harness.repository.getRun(run.id))!;
+    const initialBuildStep = requireWorkerStep(afterBuild, "work_build_revision");
+    const initialBuildArtifactId = requireOutputArtifactId(initialBuildStep);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "dispatch",
+        actionId: "action_dispatch_revision_review",
+        summary: "Review the exact initial build Artifact.",
+        workItemId: "work_review_revision",
+        inputArtifactIds: [initialBuildArtifactId],
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-dispatch-revision-review",
+    });
+    await harness.runtime.waitForStream(unusedAgentId);
+    harness.runtime.finalResponses.set(unusedAgentId, "REVIEW_FEEDBACK_ARTIFACT");
+    await harness.runtime.pushEvent(unusedAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-revision-review",
+    });
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 4);
+    const afterReview = (await harness.repository.getRun(run.id))!;
+    const initialBuildAttemptId = requireWorkerMetadata(initialBuildStep);
+    const reviewArtifactId = requireOutputArtifactId(
+      requireWorkerStep(afterReview, "work_review_revision"),
+    );
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "request_revision",
+        actionId: "action_request_build_revision",
+        summary: "Revise the build using its prior output and the exact review feedback.",
+        workItemId: "work_build_revision",
+        inputArtifactIds: [initialBuildArtifactId, reviewArtifactId],
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-request-build-revision",
+    });
+
+    await harness.runtime.waitForStream(revisionAgentId);
+    const revisionPrompt = harness.runtime.streams.find(
+      (stream) => stream.agentId === revisionAgentId,
+    )?.prompt;
+    expect(revisionPrompt).toContain("INITIAL_BUILD_ARTIFACT");
+    expect(revisionPrompt).toContain("REVIEW_FEEDBACK_ARTIFACT");
+    expect(revisionPrompt).toContain(`Revision parent attempt: ${initialBuildAttemptId.attemptId}`);
+    harness.runtime.finalResponses.set(revisionAgentId, "REVISED_BUILD_ARTIFACT");
+    await harness.runtime.pushEvent(revisionAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-revised-build",
+    });
+
+    await harness.runtime.waitForStreamCount(firstAgentId, 5);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "complete",
+        actionId: "action_complete_revision",
+        summary: "The exact revision completed successfully.",
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-complete-revision",
+    });
+
+    const completed = await harness.service.waitForRun(run.id);
+    const completedSupervision = requireSupervision(completed);
+    const buildWorkItem = completedSupervision.workItems.find(
+      (workItem) => workItem.id === "work_build_revision",
+    );
+    const buildAttempts = completed.steps.filter(
+      (step) =>
+        step.snapshot.supervision?.kind === "worker" &&
+        step.snapshot.supervision.workItemId === "work_build_revision",
+    );
+    const revisedBuildAttempt = buildAttempts[1]!;
+    const revisedBuildMetadata = requireWorkerMetadata(revisedBuildAttempt);
+    expect(completed.state.status).toBe("succeeded");
+    expect(completedSupervision.decisions.map((decision) => decision.kind)).toEqual([
+      "plan",
+      "dispatch",
+      "dispatch",
+      "request_revision",
+      "complete",
+    ]);
+    expect(buildAttempts).toHaveLength(2);
+    expect(revisedBuildAttempt).toMatchObject({
+      snapshot: {
+        inputArtifactIds: [initialBuildArtifactId, reviewArtifactId],
+        supervision: {
+          attemptNumber: 2,
+          revisionParentAttemptId: initialBuildAttemptId.attemptId,
+        },
+      },
+      state: { status: "succeeded", agentId: revisionAgentId },
+    });
+    expect(requireOutputArtifactId(revisedBuildAttempt)).not.toBe(initialBuildArtifactId);
+    expect(buildWorkItem).toMatchObject({
+      status: "succeeded",
+      attemptIds: [initialBuildAttemptId.attemptId, revisedBuildMetadata.attemptId],
+      acceptedAttemptId: revisedBuildMetadata.attemptId,
+      inputArtifactIds: [initialBuildArtifactId, reviewArtifactId],
+    });
+    const revisionDecision = requireRevisionDecision(completed);
+    await expect(
+      harness.repository.commitSupervisionDecision(
+        {
+          runId: run.id,
+          expectedSupervisionRevision: 1,
+          decision: { ...revisionDecision, inputArtifactIds: [reviewArtifactId] },
+        },
+        () => {
+          throw new Error("Conflicting Artifact inputs must not invoke the updater");
+        },
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    await expect(
+      harness.assignments.listArtifacts({ assignmentId: assignment.id }),
+    ).resolves.toMatchObject({
+      artifacts: expect.arrayContaining([
+        expect.objectContaining({ id: initialBuildArtifactId, content: "INITIAL_BUILD_ARTIFACT" }),
+        expect.objectContaining({ id: reviewArtifactId, content: "REVIEW_FEEDBACK_ARTIFACT" }),
+        expect.objectContaining({ content: "REVISED_BUILD_ARTIFACT" }),
+      ]),
+      issues: [],
+    });
+  });
+
   test("rejects an over-budget cumulative Artifact handoff before dispatch", async () => {
     const harness = await createHarness();
     harness.daemonConfigStore.agentProfiles.push({
@@ -1229,6 +1466,7 @@ describe("TeamRunService", () => {
         actionId: "action_dispatch_build_budget",
         summary: "Dispatch the builder.",
         workItemId: "work_build_budget",
+        inputArtifactIds: [],
       }),
     );
     await harness.runtime.pushEvent(firstAgentId, {
@@ -1237,6 +1475,10 @@ describe("TeamRunService", () => {
       turnId: "turn-dispatch-build-budget",
     });
     await harness.runtime.waitForStream(secondAgentId);
+    const budgetBuildArtifactId = (await harness.repository.getRun(run.id))?.steps.find(
+      (step) => step.snapshot.supervision?.kind === "worker",
+    )?.snapshot.outputArtifact?.id;
+    if (!budgetBuildArtifactId) throw new Error("Expected the budget build output Artifact ID");
     const originalGetArtifact = harness.assignments.getArtifact.bind(harness.assignments);
     harness.assignments.getArtifact = async (artifactId) => {
       const artifact = await originalGetArtifact(artifactId);
@@ -1264,6 +1506,7 @@ describe("TeamRunService", () => {
         actionId: "action_dispatch_review_over_budget",
         summary: "Dispatch the reviewer.",
         workItemId: "work_review_budget",
+        inputArtifactIds: [budgetBuildArtifactId],
       }),
     );
     await harness.runtime.pushEvent(firstAgentId, {
@@ -1359,6 +1602,7 @@ describe("TeamRunService", () => {
         actionId: "action_dispatch_success_persistence",
         summary: "Dispatch the builder.",
         workItemId: "work_success_persistence",
+        inputArtifactIds: [],
       }),
     );
     await harness.runtime.pushEvent(firstAgentId, {
@@ -1425,6 +1669,7 @@ describe("TeamRunService", () => {
         actionId: "action_dispatch_failure_persistence",
         summary: "Dispatch the builder.",
         workItemId: "work_failure_persistence",
+        inputArtifactIds: [],
       }),
     );
     await harness.runtime.pushEvent(firstAgentId, {
@@ -1484,6 +1729,7 @@ describe("TeamRunService", () => {
         actionId: "action_dispatch_failed_worker",
         summary: "Dispatch the builder.",
         workItemId: "work_failed_builder",
+        inputArtifactIds: [],
       }),
     );
     await harness.runtime.pushEvent(firstAgentId, {
@@ -1748,6 +1994,7 @@ describe("TeamRunService", () => {
         actionId: "action_dispatch_write_fails",
         summary: "Dispatch the frozen builder.",
         workItemId: "work_build",
+        inputArtifactIds: [],
       }),
     );
     await harness.runtime.pushEvent(firstAgentId, {
