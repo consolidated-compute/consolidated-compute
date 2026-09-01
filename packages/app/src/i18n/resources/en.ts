@@ -2011,6 +2011,7 @@ export const en = {
       helper: "Connect to a Paseo daemon running on the remote host.",
       fields: {
         target: "SSH host",
+        daemonPassword: "Daemon password",
       },
       actions: {
         cancel: "Cancel",

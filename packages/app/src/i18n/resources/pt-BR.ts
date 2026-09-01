@@ -1802,6 +1802,7 @@ export const ptBR: TranslationResources = {
       helper: "Conecte-se a um daemon Paseo no host remoto.",
       fields: {
         target: "Host SSH",
+        daemonPassword: "Senha do daemon",
       },
       actions: {
         cancel: "Cancelar",

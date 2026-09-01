@@ -45,7 +45,7 @@ paseo ls -a --host 'ssh://user@host?daemonPort=7777'
 
 `--host` belongs after the command. `paseo daemon status` checks only the local daemon; use `paseo ls --host ...` to verify a remote connection. `paseo run --host ...` also requires `--cwd` with a path that exists on the remote host.
 
-In Paseo Desktop, open **Settings → Add host → Remote SSH** and enter the same `ssh://` destination.
+In Paseo Desktop, open **Settings → Add host → Remote SSH** and enter the same `ssh://` destination. If the remote daemon requires authentication, enter its daemon password separately; SSH authentication still comes from your local OpenSSH configuration.
 
 ## Paseo relay
 

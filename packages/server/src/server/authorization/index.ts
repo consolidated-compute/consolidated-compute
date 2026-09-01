@@ -55,9 +55,16 @@ export class SessionAuthorization {
 
 const LEGACY_HUB_EXECUTION_SCOPE = "hub.execution.*";
 
+export function legacyHubScopesForPermissions(
+  permissions: readonly DaemonPermission[],
+): readonly string[] {
+  // COMPAT(semanticHubPermissions): added in v0.7.0, remove after 2027-03-01 once client and daemon floors are >= v0.7.0.
+  return permissions.includes("hub.execute") ? [LEGACY_HUB_EXECUTION_SCOPE] : [];
+}
+
 export function permissionsForLegacyHubScopes(
   scopes: readonly string[],
 ): readonly DaemonPermission[] {
-  // COMPAT(semanticHubPermissions): added in v0.7, remove after Hub enrollment uses permissions.
+  // COMPAT(semanticHubPermissions): added in v0.7.0, remove after 2027-03-01 once client and daemon floors are >= v0.7.0.
   return scopes.includes(LEGACY_HUB_EXECUTION_SCOPE) ? ["hub.execute"] : [];
 }

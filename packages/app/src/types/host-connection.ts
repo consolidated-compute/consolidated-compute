@@ -38,6 +38,7 @@ export interface RemoteSshHostConnection {
   host: string;
   sshPort?: number;
   daemonPort?: number;
+  daemonPassword?: string;
 }
 
 export interface RelayHostConnection {
@@ -158,7 +159,8 @@ function remoteSshConnectionEquals(
   return (
     left.host === right.host &&
     left.sshPort === right.sshPort &&
-    left.daemonPort === right.daemonPort
+    left.daemonPort === right.daemonPort &&
+    left.daemonPassword === right.daemonPassword
   );
 }
 
@@ -326,6 +328,7 @@ export function createRemoteSshHostConnection(input: {
   host: string;
   sshPort?: number;
   daemonPort?: number;
+  daemonPassword?: string;
 }): RemoteSshHostConnection {
   const host = validateSshHost(input.host);
   const sshPort = input.sshPort === undefined ? undefined : validatePort(input.sshPort, "SSH port");
@@ -334,6 +337,7 @@ export function createRemoteSshHostConnection(input: {
     input.daemonPort === undefined || input.daemonPort === DEFAULT_SSH_DAEMON_PORT
       ? undefined
       : validatePort(input.daemonPort, "Daemon port");
+  const daemonPassword = input.daemonPassword?.trim();
 
   const id = [
     "ssh",
@@ -348,6 +352,7 @@ export function createRemoteSshHostConnection(input: {
     host,
     ...(sshPort !== undefined ? { sshPort } : {}),
     ...(daemonPort !== undefined ? { daemonPort } : {}),
+    ...(daemonPassword ? { daemonPassword } : {}),
   };
 }
 
@@ -375,6 +380,7 @@ const StoredHostConnectionSchema = z.discriminatedUnion("type", [
     host: z.string(),
     sshPort: z.number().optional(),
     daemonPort: z.number().optional(),
+    daemonPassword: z.string().optional(),
   }),
   z.strictObject({
     id: z.string().optional(),
@@ -426,6 +432,9 @@ function normalizeStoredConnection(connection: StoredHostConnection): HostConnec
         host: connection.host,
         ...(connection.sshPort !== undefined ? { sshPort: connection.sshPort } : {}),
         ...(connection.daemonPort !== undefined ? { daemonPort: connection.daemonPort } : {}),
+        ...(connection.daemonPassword !== undefined
+          ? { daemonPassword: connection.daemonPassword }
+          : {}),
       });
     } catch {
       return null;

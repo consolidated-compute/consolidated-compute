@@ -1787,6 +1787,7 @@ export const ja: TranslationResources = {
       helper: "リモートホストで動作する Paseo デーモンに接続します。",
       fields: {
         target: "SSH ホスト",
+        daemonPassword: "デーモンのパスワード",
       },
       actions: {
         cancel: "キャンセル",

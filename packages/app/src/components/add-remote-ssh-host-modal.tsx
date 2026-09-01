@@ -51,14 +51,18 @@ export function AddRemoteSshHostModal({
   const isCompact = useIsCompactFormFactor();
   const { probeAndUpsertRemoteSshConnection } = useHostMutations();
   const targetRef = useRef("");
-  const inputRef = useRef<EditingTextInputHandle>(null);
+  const targetInputRef = useRef<EditingTextInputHandle>(null);
+  const daemonPasswordRef = useRef("");
+  const daemonPasswordInputRef = useRef<EditingTextInputHandle>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const header = useMemo<SheetHeader>(() => ({ title: t("pairing.remoteSsh.title") }), [t]);
 
   const clear = useCallback(() => {
     targetRef.current = "";
-    inputRef.current?.replaceText("");
+    targetInputRef.current?.replaceText("");
+    daemonPasswordRef.current = "";
+    daemonPasswordInputRef.current?.replaceText("");
     setErrorMessage("");
   }, []);
 
@@ -94,7 +98,10 @@ export function AddRemoteSshHostModal({
     try {
       setIsSaving(true);
       setErrorMessage("");
-      result = await probeAndUpsertRemoteSshConnection(target);
+      result = await probeAndUpsertRemoteSshConnection({
+        ...target,
+        daemonPassword: daemonPasswordRef.current,
+      });
     } catch (error) {
       const message =
         error instanceof DaemonConnectionTestError
@@ -116,6 +123,9 @@ export function AddRemoteSshHostModal({
   const handleTargetChange = useCallback((value: string) => {
     targetRef.current = value;
   }, []);
+  const handleDaemonPasswordChange = useCallback((value: string) => {
+    daemonPasswordRef.current = value;
+  }, []);
   const handleSubmit = useCallback(() => void handleSave(), [handleSave]);
 
   return (
@@ -132,7 +142,7 @@ export function AddRemoteSshHostModal({
         testID="remote-ssh-target"
       >
         <FormTextInput
-          ref={inputRef}
+          ref={targetInputRef}
           size={isCompact ? "md" : "sm"}
           testID="remote-ssh-target-input"
           accessibilityLabel={t("pairing.remoteSsh.fields.target")}
@@ -141,6 +151,26 @@ export function AddRemoteSshHostModal({
           placeholder="ssh://user@host"
           autoCapitalize="none"
           autoCorrect={false}
+          editable={!isSaving}
+          returnKeyType="done"
+          onSubmitEditing={handleSubmit}
+        />
+      </Field>
+      <Field
+        label={t("pairing.remoteSsh.fields.daemonPassword")}
+        hint={t("pairing.direct.fields.optional")}
+        testID="remote-ssh-daemon-password"
+      >
+        <FormTextInput
+          ref={daemonPasswordInputRef}
+          size={isCompact ? "md" : "sm"}
+          testID="remote-ssh-daemon-password-input"
+          accessibilityLabel={t("pairing.remoteSsh.fields.daemonPassword")}
+          initialValue=""
+          onChangeText={handleDaemonPasswordChange}
+          autoCapitalize="none"
+          autoCorrect={false}
+          secureTextEntry
           editable={!isSaving}
           returnKeyType="done"
           onSubmitEditing={handleSubmit}

@@ -7,6 +7,7 @@ import { ensurePrivateFile, writePrivateFileAtomicSync } from "../private-files.
 import type { WebSocketLike } from "../websocket-server.js";
 import {
   isDaemonPermission,
+  legacyHubScopesForPermissions,
   parseDaemonPermissions,
   permissionsForLegacyHubScopes,
   type DaemonPermission,
@@ -124,6 +125,7 @@ export interface HubRelationshipStatus {
   state: HubConnectionState;
   daemonId: string | null;
   hubOrigin: string | null;
+  scopes: string[];
   permissions: DaemonPermission[];
   connectedAt: string | null;
   lastError: string | null;
@@ -270,11 +272,13 @@ export class HubRelationshipController implements HubRelationshipManagement {
   }
 
   status(): HubRelationshipStatus {
+    const permissions = this.record?.relationship.permissions.slice() ?? [];
     return {
       state: this.state,
       daemonId: this.record?.relationship.daemonId ?? null,
       hubOrigin: this.record?.relationship.hubOrigin ?? null,
-      permissions: this.record?.relationship.permissions.slice() ?? [],
+      scopes: [...legacyHubScopesForPermissions(permissions)],
+      permissions,
       connectedAt: this.connectedAt,
       lastError: this.lastError,
     };

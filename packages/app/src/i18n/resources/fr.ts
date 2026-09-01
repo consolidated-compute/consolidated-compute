@@ -1821,6 +1821,7 @@ export const fr: TranslationResources = {
       helper: "Connectez-vous à un daemon Paseo sur l’hôte distant.",
       fields: {
         target: "Hôte SSH",
+        daemonPassword: "Mot de passe du daemon",
       },
       actions: {
         cancel: "Annuler",

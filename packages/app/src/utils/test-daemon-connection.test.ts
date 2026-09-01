@@ -154,6 +154,7 @@ describe("test-daemon-connection connectToDaemon", () => {
         host: "deploy@example.com",
         sshPort: 2222,
         daemonPort: 7777,
+        daemonPassword: "daemon-secret",
       },
       undefined,
       {
@@ -166,6 +167,7 @@ describe("test-daemon-connection connectToDaemon", () => {
     expect(probe.createdConfigs()[0]).toMatchObject({
       url: "paseo+desktop://ssh?host=deploy%40example.com",
       transportFactory,
+      password: "daemon-secret",
     });
   });
 

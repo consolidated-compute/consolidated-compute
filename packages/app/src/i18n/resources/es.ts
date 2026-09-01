@@ -1818,6 +1818,7 @@ export const es: TranslationResources = {
       helper: "Conéctate a un daemon de Paseo en el host remoto.",
       fields: {
         target: "Host SSH",
+        daemonPassword: "Contraseña del daemon",
       },
       actions: {
         cancel: "Cancelar",

@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { z } from "zod";
 
 import {
+  HubRelationshipStatusSchema,
   HubMessageCorrelationError,
   SessionInboundMessageSchema,
   SessionOutboundMessageSchema,
@@ -64,6 +65,23 @@ const PreviousHubAgentCreateWithAutoArchiveRequestSchema =
       .optional(),
     autoArchive: z.boolean().optional(),
   });
+
+// Frozen at the Hub relationship status shape shipped before semantic permissions.
+const PreviousHubRelationshipStatusSchema = z.object({
+  state: z.enum([
+    "not_connected",
+    "connecting",
+    "connected",
+    "reconnecting",
+    "disconnecting",
+    "revoked",
+  ]),
+  daemonId: z.string().nullable(),
+  hubOrigin: z.string().nullable(),
+  scopes: z.array(z.string()),
+  connectedAt: z.string().nullable(),
+  lastError: z.string().nullable(),
+});
 
 describe("Hub session protocol", () => {
   test("round-trips named-agent validation", () => {
@@ -358,6 +376,7 @@ describe("Hub session protocol", () => {
           state: "connected",
           daemonId: "daemon-1",
           hubOrigin: "https://hub.example",
+          scopes: ["hub.execution.*"],
           permissions: ["hub.execute"],
           connectedAt: "2026-07-13T00:00:00.000Z",
           lastError: null,
@@ -372,6 +391,7 @@ describe("Hub session protocol", () => {
           state: "not_connected",
           daemonId: null,
           hubOrigin: null,
+          scopes: [],
           permissions: [],
           connectedAt: null,
           lastError: null,
@@ -386,6 +406,7 @@ describe("Hub session protocol", () => {
           state: "disconnecting",
           daemonId: "daemon-1",
           hubOrigin: "https://hub.example",
+          scopes: ["hub.execution.*"],
           permissions: ["hub.execute"],
           connectedAt: null,
           lastError: "offline",
@@ -401,6 +422,7 @@ describe("Hub session protocol", () => {
           state: "connected",
           daemonId: "daemon-1",
           hubOrigin: "https://hub.example",
+          scopes: ["hub.execution.*"],
           permissions: ["hub.execute"],
           connectedAt: "2026-07-13T00:00:00.000Z",
           lastError: null,
@@ -409,5 +431,23 @@ describe("Hub session protocol", () => {
     },
   ])("accepts trusted management response $type", (message) => {
     expect(SessionOutboundMessageSchema.parse(message)).toEqual(message);
+  });
+
+  test("keeps Hub relationship status compatible across semantic permissions", () => {
+    const oldStatus = {
+      state: "connected" as const,
+      daemonId: "daemon-1",
+      hubOrigin: "https://hub.example",
+      scopes: ["hub.execution.*"],
+      connectedAt: "2026-07-13T00:00:00.000Z",
+      lastError: null,
+    };
+    const currentStatus = {
+      ...oldStatus,
+      permissions: ["hub.execute"] as const,
+    };
+
+    expect(HubRelationshipStatusSchema.parse(oldStatus)).toEqual(oldStatus);
+    expect(PreviousHubRelationshipStatusSchema.parse(currentStatus)).toEqual(oldStatus);
   });
 });

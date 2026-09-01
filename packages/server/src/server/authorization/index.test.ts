@@ -7,6 +7,7 @@ import {
 } from "../messages.js";
 import {
   DAEMON_PERMISSIONS,
+  legacyHubScopesForPermissions,
   OWNER_PERMISSIONS,
   SessionAuthorization,
   permissionsForLegacyHubScopes,
@@ -78,6 +79,8 @@ describe("SessionAuthorization", () => {
   test("legacy Hub authority is translated at one compatibility boundary", () => {
     expect(permissionsForLegacyHubScopes(["hub.execution.*"])).toEqual(["hub.execute"]);
     expect(permissionsForLegacyHubScopes(["*"])).toEqual([]);
+    expect(legacyHubScopesForPermissions(["hub.execute"])).toEqual(["hub.execution.*"]);
+    expect(legacyHubScopesForPermissions(["workspace.read"])).toEqual([]);
   });
 
   test("permission names are semantic", () => {

@@ -45,6 +45,11 @@ describe("Hub relationship", () => {
       "hub.management.daemon.get_status.response",
       "hub.management.daemon.disconnect.response",
     ]);
+    expect(responses).toMatchObject([
+      { payload: { status: { scopes: [], permissions: [] } } },
+      { payload: { status: { scopes: [], permissions: [] } } },
+      { payload: { status: { scopes: [], permissions: [] } } },
+    ]);
     expect(relationship.enrollmentAttempts()).toHaveLength(1);
     expect(relationship.relationshipFile()).toBeNull();
   });

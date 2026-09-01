@@ -152,6 +152,7 @@ describe("normalizeStoredHostProfile", () => {
           host: " deploy@example.com ",
           sshPort: 2222,
           daemonPort: 7777,
+          daemonPassword: " daemon-secret ",
         },
       ],
     });
@@ -162,6 +163,7 @@ describe("normalizeStoredHostProfile", () => {
       host: "deploy@example.com",
       sshPort: 2222,
       daemonPort: 7777,
+      daemonPassword: "daemon-secret",
     });
   });
 });
@@ -172,6 +174,17 @@ describe("createRemoteSshHostConnection", () => {
       id: "ssh:build-box::",
       type: "remoteSsh",
       host: "build-box",
+    });
+  });
+
+  it("stores a daemon password separately from the SSH destination identity", () => {
+    expect(
+      createRemoteSshHostConnection({ host: "build-box", daemonPassword: " daemon-secret " }),
+    ).toEqual({
+      id: "ssh:build-box::",
+      type: "remoteSsh",
+      host: "build-box",
+      daemonPassword: "daemon-secret",
     });
   });
 

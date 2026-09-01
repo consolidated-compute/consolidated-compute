@@ -531,6 +531,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
         return new DaemonClient({
           ...base,
           transportFactory: desktopTransportFactory,
+          ...(connection.daemonPassword ? { password: connection.daemonPassword } : {}),
           url: buildDesktopDaemonTransportUrl({
             transportType: "ssh",
             host: connection.host,
@@ -1783,6 +1784,7 @@ export class HostRuntimeStore {
     host: string;
     sshPort?: number;
     daemonPort?: number;
+    daemonPassword?: string;
     label?: string;
   }): Promise<{ profile: HostProfile; serverId: string; hostname: string | null }> {
     return this.probeAndUpsertConnection({
@@ -2530,6 +2532,7 @@ export interface HostMutations {
     host: string;
     sshPort?: number;
     daemonPort?: number;
+    daemonPassword?: string;
     label?: string;
   }) => Promise<{ profile: HostProfile; serverId: string; hostname: string | null }>;
   upsertRelayConnection: (input: {

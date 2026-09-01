@@ -4738,10 +4738,13 @@ export const HubRelationshipStatusSchema = z.object({
   ]),
   daemonId: z.string().nullable(),
   hubOrigin: z.string().nullable(),
-  permissions: z.array(DaemonPermissionSchema),
+  // COMPAT(semanticHubPermissions): added in v0.7.0, remove after 2027-03-01 once client and daemon floors are >= v0.7.0.
+  scopes: z.array(z.string()),
+  permissions: z.array(DaemonPermissionSchema).optional(),
   connectedAt: z.string().nullable(),
   lastError: z.string().nullable(),
 });
+export type HubRelationshipStatus = z.infer<typeof HubRelationshipStatusSchema>;
 export const HubManagementDaemonConnectResponseSchema = z.object({
   type: z.literal("hub.management.daemon.connect.response"),
   payload: z.object({ requestId: z.string(), status: HubRelationshipStatusSchema }),

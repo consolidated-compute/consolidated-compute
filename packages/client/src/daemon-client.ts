@@ -17,6 +17,7 @@ import {
   type ServerInfoStatusPayload,
 } from "@getpaseo/protocol/messages";
 import { validateWSOutboundMessage } from "@getpaseo/protocol/validation/ws-outbound";
+import { normalizeHubRelationshipPayload } from "./compat/normalize-hub-relationship.js";
 import type {
   AgentStreamEventPayload,
   AgentSnapshotPayload,
@@ -4794,6 +4795,7 @@ export class DaemonClient {
       requestId,
       message: { type: "hub.management.daemon.connect.request", hubUrl, token, permissions },
       responseType: "hub.management.daemon.connect.response",
+      selectPayload: normalizeHubRelationshipPayload,
     });
   }
 
@@ -4810,6 +4812,7 @@ export class DaemonClient {
         revoke: input.revoke ?? [],
       },
       responseType: "hub.management.daemon.permissions.update.response",
+      selectPayload: normalizeHubRelationshipPayload,
     });
   }
 
@@ -4819,6 +4822,7 @@ export class DaemonClient {
       requestId,
       message: { type: "hub.management.daemon.get_status.request" },
       responseType: "hub.management.daemon.get_status.response",
+      selectPayload: normalizeHubRelationshipPayload,
     });
   }
 
@@ -4828,6 +4832,7 @@ export class DaemonClient {
       requestId,
       message: { type: "hub.management.daemon.disconnect.request", force },
       responseType: "hub.management.daemon.disconnect.response",
+      selectPayload: normalizeHubRelationshipPayload,
     });
   }
 

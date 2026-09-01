@@ -49,6 +49,7 @@ function buildRemoteSshClientConfig(input: {
   return {
     ...input.base,
     transportFactory: input.desktopTransportFactory,
+    ...(input.connection.daemonPassword ? { password: input.connection.daemonPassword } : {}),
     url: input.buildDesktopTransportUrl({
       transportType: "ssh",
       host: input.connection.host,

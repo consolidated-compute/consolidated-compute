@@ -1771,6 +1771,7 @@ export const ar: TranslationResources = {
       helper: "الاتصال بخادم Paseo يعمل على المضيف البعيد.",
       fields: {
         target: "مضيف SSH",
+        daemonPassword: "كلمة مرور الخادم",
       },
       actions: {
         cancel: "إلغاء",
