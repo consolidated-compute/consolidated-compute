@@ -96,6 +96,15 @@ jobs:
 
           Follow [the fork-maintenance playbook](https://github.com/${FORK_REPOSITORY}/blob/${DEFAULT_BRANCH}/docs/fork-maintenance.md) to prepare a signed draft sync pull request. Preserve upstream ancestry, record divergence and conflict evidence, and keep inherited delivery workflows quarantined.
 
+          Classify every sync review finding before changing code:
+
+          - **Fork adaptation or conflict:** fix it in the sync pull request.
+          - **Upstream-inherited release blocker:** patch it locally and link an upstream issue or pull request.
+          - **Upstream-inherited non-blocker:** track it separately; do not expand the sync.
+          - **Pre-existing fork issue:** keep it out of scope and link a follow-up when material.
+
+          Compare the signed merge result with both parents and record each finding's provenance and disposition in the pull request. Impact and provenance are separate: inherited compatibility, security, data, or required-platform failures can still block the fork release.
+
           This issue was opened by the scheduled upstream stable-release monitor. It does not sync prereleases or upstream \`main\`.
           EOF
 

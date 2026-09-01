@@ -363,6 +363,12 @@ test("upstream monitor stages stable releases without weakening review controls"
   assert.match(source, /gh api --method GET search\/issues/);
   assert.match(source, /gh issue create/);
   assert.match(source, /docs\/fork-maintenance\.md/);
+  assert.match(source, /Classify every sync review finding/);
+  assert.match(source, /Fork adaptation or conflict/);
+  assert.match(source, /Upstream-inherited release blocker/);
+  assert.match(source, /Upstream-inherited non-blocker/);
+  assert.match(source, /Pre-existing fork issue/);
+  assert.match(source, /Compare the signed merge result with both parents/);
   assert.doesNotMatch(source, /contents: write|pull-requests: write|git push|gh pr create/);
   assert.doesNotMatch(source, /--limit 100/);
   assert.doesNotMatch(source, /refs\/heads\/main|upstream\/main/);
