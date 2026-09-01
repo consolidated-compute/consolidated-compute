@@ -9,6 +9,7 @@ import type { CreateAssignmentArtifactInput } from "../assignment/repository.js"
 import type { PersistedTeamRunRecord } from "./model.js";
 import {
   materializeTeamStepArtifact,
+  resolveTeamRunArtifactInputs,
   resolveTeamStepInputArtifacts,
   TeamArtifactInputError,
   TeamArtifactOutputEmptyError,
@@ -343,5 +344,60 @@ describe("Team Assignment Artifacts", () => {
     expect(() => formatTeamArtifactPromptSections(oversizedTotal)).toThrow(
       "Artifact prompt inputs exceed",
     );
+  });
+
+  test("rejects cumulative accepted outputs before a later supervised dispatch", async () => {
+    const store = new MemoryArtifactStore();
+    const run = createAssignmentRun();
+    run.steps[0]!.state = {
+      status: "succeeded",
+      plannedAgentId: firstAgentId,
+      agentId: firstAgentId,
+      startedAt: timestamp,
+      endedAt: timestamp,
+    };
+    run.steps[1]!.state = {
+      status: "succeeded",
+      plannedAgentId: secondAgentId,
+      agentId: secondAgentId,
+      startedAt: timestamp,
+      endedAt: timestamp,
+    };
+    for (const [index, content] of ["a".repeat(20_000), "b".repeat(20_000)].entries()) {
+      const step = run.steps[index]!;
+      const output = step.snapshot.outputArtifact!;
+      store.records.set(
+        output.id,
+        PersistedAssignmentArtifactRecordSchema.parse({
+          id: output.id,
+          assignmentId: run.assignmentId,
+          assignmentRevision: run.assignmentRevision,
+          kind: output.kind,
+          title: output.title,
+          mediaType: output.mediaType,
+          content,
+          includedBytes: Buffer.byteLength(content, "utf8"),
+          originalBytes: Buffer.byteLength(content, "utf8"),
+          truncated: false,
+          producer: {
+            kind: "team_run_step",
+            teamRunId: run.id,
+            stepId: step.snapshot.stepId,
+            roleId: step.snapshot.roleId,
+            agentId: step.state.agentId,
+            turnId: null,
+          },
+          createdAt: timestamp,
+        }),
+      );
+    }
+
+    await expect(
+      resolveTeamRunArtifactInputs(
+        store,
+        run,
+        run.steps.map((step) => step.snapshot.outputArtifact!.id),
+      ),
+    ).rejects.toMatchObject({ kind: "input_budget_exceeded", artifactId: null });
   });
 });

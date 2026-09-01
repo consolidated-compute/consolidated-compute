@@ -27,6 +27,8 @@ import {
   TeamRevisionConflictError,
   TeamRunIdempotencyConflictError,
   TeamRunSupervisionActionConflictError,
+  TeamRunSupervisionHumanRequestConflictError,
+  TeamRunSupervisionHumanRequestRevisionConflictError,
   TeamRunSupervisionRevisionConflictError,
   TeamRunPageError,
   TeamStorageCorruptError,
@@ -255,6 +257,41 @@ function createActiveSupervisorTurn(
             startedAt: timestamp,
           },
   };
+}
+
+async function beginRunningSupervisionTurn(
+  repository: TeamRepository,
+  run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  decisionId: string,
+): Promise<PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision }> {
+  await repository.beginSupervisionTurn({
+    runId: run.id,
+    expectedSupervisionRevision: run.supervision.revision,
+    decisionId,
+  });
+  const ready = await repository.updateRun(run.id, (current) => {
+    const activeStepIndex = current.steps.findIndex(
+      (step) =>
+        step.snapshot.supervision?.kind === "supervisor" &&
+        step.snapshot.supervision.decisionId === decisionId,
+    );
+    const activeStep = current.steps[activeStepIndex];
+    if (!activeStep || !("plannedAgentId" in activeStep.state)) {
+      throw new Error(`Missing persisted supervisor turn ${decisionId}`);
+    }
+    const steps = current.steps.slice();
+    steps[activeStepIndex] = {
+      ...activeStep,
+      state: {
+        status: "running",
+        plannedAgentId: activeStep.state.plannedAgentId,
+        agentId: current.supervision!.supervisor.agentId,
+        startedAt: activeStep.state.startedAt,
+      },
+    };
+    return { steps, state: current.state };
+  });
+  return ready as PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision };
 }
 
 function createWorkerDispatchUpdate(
@@ -824,41 +861,39 @@ describe("TeamRepository runs", () => {
       attemptId: null,
       createdAt: secondTimestamp,
     };
+    await expect(
+      repository.commitSupervisionDecision(
+        { runId: admitted.id, expectedSupervisionRevision: 1, decision },
+        () => {
+          throw new Error("An idle run must reject a decision before invoking its updater");
+        },
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
+    const ready = await beginRunningSupervisionTurn(repository, admitted, decision.id);
+    await expect(
+      repository.commitSupervisionDecision(
+        {
+          runId: admitted.id,
+          expectedSupervisionRevision: ready.supervision.revision,
+          decision: { ...decision, id: "decision_unreserved_1", actionId: "action_unreserved_1" },
+        },
+        () => {
+          throw new Error("A mismatched reserved turn must reject before invoking its updater");
+        },
+      ),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
     const committed = await repository.commitSupervisionDecision(
       {
         runId: admitted.id,
-        expectedSupervisionRevision: 1,
+        expectedSupervisionRevision: ready.supervision.revision,
         decision,
       },
       (current) => ({
-        state: { status: "running", startedAt: secondTimestamp },
-        steps: [
-          {
-            snapshot: {
-              stepId: "supervisor_turn_1",
-              roleId: current.supervision.supervisor.roleId,
-              roleName: current.supervision.supervisor.roleName,
-              roleInstructions: current.supervision.supervisor.roleInstructions,
-              stepInstructions: null,
-              resolvedLaunch: current.supervision.supervisor.resolvedLaunch,
-              supervision: {
-                kind: "supervisor",
-                turn: 1,
-                decisionId: decision.id,
-              },
-            },
-            state: {
-              status: "succeeded",
-              plannedAgentId: current.supervision.supervisor.agentId,
-              agentId: current.supervision.supervisor.agentId,
-              startedAt: secondTimestamp,
-              endedAt: secondTimestamp,
-            },
-          },
-        ],
+        state: current.state,
+        steps: [createSucceededSupervisorTurn(current, decision.id, 1, secondTimestamp)],
         supervision: {
           ...current.supervision,
-          revision: 2,
+          revision: current.supervision.revision + 1,
           phase: "planning",
           decisions: [decision],
         },
@@ -867,14 +902,14 @@ describe("TeamRepository runs", () => {
 
     expect(committed).toMatchObject({
       state: { status: "running" },
-      supervision: { revision: 2, decisions: [decision], updatedAt: secondTimestamp },
+      supervision: { revision: 3, decisions: [decision], updatedAt: secondTimestamp },
       updatedAt: secondTimestamp,
     });
     const repeated = await repository.commitSupervisionDecision(
       {
         runId: admitted.id,
-        expectedSupervisionRevision: 1,
-        decision,
+        expectedSupervisionRevision: ready.supervision.revision,
+        decision: { ...decision, createdAt: firstTimestamp },
       },
       () => {
         throw new Error("Idempotent retry must not invoke the updater");
@@ -893,7 +928,7 @@ describe("TeamRepository runs", () => {
       repository.commitSupervisionDecision(
         {
           runId: admitted.id,
-          expectedSupervisionRevision: 2,
+          expectedSupervisionRevision: committed.supervision!.revision,
           decision: mutationDecision,
         },
         (current) => {
@@ -958,7 +993,7 @@ describe("TeamRepository runs", () => {
       repository.commitSupervisionDecision(
         {
           runId: admitted.id,
-          expectedSupervisionRevision: 2,
+          expectedSupervisionRevision: committed.supervision!.revision,
           decision: inactiveWorkItemDispatch,
         },
         (current) =>
@@ -982,7 +1017,7 @@ describe("TeamRepository runs", () => {
       repository.commitSupervisionDecision(
         {
           runId: admitted.id,
-          expectedSupervisionRevision: 2,
+          expectedSupervisionRevision: committed.supervision!.revision,
           decision: planningPhaseDispatch,
         },
         (current) =>
@@ -1020,7 +1055,7 @@ describe("TeamRepository runs", () => {
       repository.commitSupervisionDecision(
         {
           runId: admitted.id,
-          expectedSupervisionRevision: 2,
+          expectedSupervisionRevision: committed.supervision!.revision,
           decision: collidingOutputDispatch,
         },
         (current) =>
@@ -1044,7 +1079,7 @@ describe("TeamRepository runs", () => {
       repository.commitSupervisionDecision(
         {
           runId: admitted.id,
-          expectedSupervisionRevision: 2,
+          expectedSupervisionRevision: committed.supervision!.revision,
           decision: stateRewriteDecision,
         },
         (current) => ({
@@ -1075,7 +1110,7 @@ describe("TeamRepository runs", () => {
       repository.commitSupervisionDecision(
         {
           runId: admitted.id,
-          expectedSupervisionRevision: 2,
+          expectedSupervisionRevision: committed.supervision!.revision,
           decision: transitionRewriteDecision,
         },
         (current) => ({
@@ -1115,7 +1150,7 @@ describe("TeamRepository runs", () => {
       repository.commitSupervisionDecision(
         {
           runId: admitted.id,
-          expectedSupervisionRevision: 2,
+          expectedSupervisionRevision: committed.supervision!.revision,
           decision: unauthorizedCompletionDecision,
         },
         (current) => ({
@@ -1156,7 +1191,7 @@ describe("TeamRepository runs", () => {
       repository.commitSupervisionDecision(
         {
           runId: admitted.id,
-          expectedSupervisionRevision: 2,
+          expectedSupervisionRevision: committed.supervision!.revision,
           decision: incompleteEscalationDecision,
         },
         (current) => ({
@@ -1191,7 +1226,7 @@ describe("TeamRepository runs", () => {
       repository.commitSupervisionDecision(
         {
           runId: admitted.id,
-          expectedSupervisionRevision: 2,
+          expectedSupervisionRevision: committed.supervision!.revision,
           decision: unauthorizedHumanWaitDecision,
         },
         (current) => ({
@@ -1248,7 +1283,7 @@ describe("TeamRepository runs", () => {
         repository.commitSupervisionDecision(
           {
             runId: admitted.id,
-            expectedSupervisionRevision: 2,
+            expectedSupervisionRevision: committed.supervision!.revision,
             decision: activeSupervisorEscalation,
           },
           (current) => ({
@@ -1294,16 +1329,21 @@ describe("TeamRepository runs", () => {
       ).rejects.toBeInstanceOf(TeamRunSupervisionActionConflictError);
       await expect(repository.getRun(admitted.id)).resolves.toEqual(committed);
     }
+    const escalationReady = await beginRunningSupervisionTurn(
+      repository,
+      committed as PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+      escalationDecision.id,
+    );
     const awaitingHuman = await repository.commitSupervisionDecision(
       {
         runId: admitted.id,
-        expectedSupervisionRevision: 2,
+        expectedSupervisionRevision: escalationReady.supervision.revision,
         decision: escalationDecision,
       },
       (current) => ({
         state: current.state,
         steps: [
-          ...current.steps,
+          ...current.steps.slice(0, -1),
           {
             snapshot: {
               stepId: "supervisor_turn_2",
@@ -1329,7 +1369,7 @@ describe("TeamRepository runs", () => {
         ],
         supervision: {
           ...current.supervision,
-          revision: 3,
+          revision: current.supervision.revision + 1,
           phase: "awaiting_human",
           decisions: [...current.supervision.decisions, escalationDecision],
           workItems: [
@@ -1395,7 +1435,7 @@ describe("TeamRepository runs", () => {
     }));
 
     expect(canceled.supervision).toMatchObject({
-      revision: 4,
+      revision: awaitingHuman.supervision!.revision + 1,
       phase: "canceled",
       workItems: [{ id: "work_pending_review", status: "canceled" }],
       humanRequest: {
@@ -1485,18 +1525,23 @@ describe("TeamRepository runs", () => {
       attemptId: null,
       createdAt: secondTimestamp,
     };
+    const escalationReady = await beginRunningSupervisionTurn(
+      repository,
+      admitted as PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+      escalationDecision.id,
+    );
     const awaitingHuman = await repository.commitSupervisionDecision(
       {
         runId: admitted.id,
-        expectedSupervisionRevision: 1,
+        expectedSupervisionRevision: escalationReady.supervision.revision,
         decision: escalationDecision,
       },
       (current) => ({
-        state: { status: "running", startedAt: secondTimestamp },
+        state: current.state,
         steps: [createSucceededSupervisorTurn(current, escalationDecision.id, 1, secondTimestamp)],
         supervision: {
           ...current.supervision,
-          revision: 2,
+          revision: current.supervision.revision + 1,
           phase: "awaiting_human",
           workItems: [
             {
@@ -1526,25 +1571,45 @@ describe("TeamRepository runs", () => {
         },
       }),
     );
-    const resolved = PersistedTeamRunRecordSchema.parse({
-      ...awaitingHuman,
-      supervision: {
-        ...awaitingHuman.supervision!,
-        revision: 3,
-        phase: "planning",
-        humanRequest: {
-          ...awaitingHuman.supervision!.humanRequest!,
-          resolution: {
-            actionId: "continue",
-            note: null,
-            idempotencyKey: "resolve-preserved-evidence",
-            resolvedAt: secondTimestamp,
-          },
+    await expect(
+      repository.resolveSupervisionHumanRequest({
+        runId: admitted.id,
+        requestId: "human_preserved_evidence",
+        expectedRequestRevision: 2,
+        actionId: "continue",
+        note: null,
+        idempotencyKey: "stale-preserved-evidence",
+      }),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionHumanRequestRevisionConflictError);
+    const response = {
+      runId: admitted.id,
+      requestId: "human_preserved_evidence",
+      expectedRequestRevision: 1,
+      actionId: "continue",
+      note: null,
+      idempotencyKey: "resolve-preserved-evidence",
+    };
+    const resolved = await repository.resolveSupervisionHumanRequest(response);
+    expect(resolved.supervision).toMatchObject({
+      revision: awaitingHuman.supervision!.revision + 1,
+      phase: "planning",
+      humanRequest: {
+        revision: 2,
+        resolution: {
+          actionId: "continue",
+          note: null,
+          idempotencyKey: "resolve-preserved-evidence",
+          resolvedAt: secondTimestamp,
         },
-        updatedAt: secondTimestamp,
       },
     });
-    await writeJsonFileAtomic(join(paseoHome, "teams", "runs", `${admitted.id}.json`), resolved);
+    await expect(repository.resolveSupervisionHumanRequest(response)).resolves.toEqual(resolved);
+    await expect(
+      repository.resolveSupervisionHumanRequest({
+        ...response,
+        actionId: "different_action",
+      }),
+    ).rejects.toBeInstanceOf(TeamRunSupervisionHumanRequestConflictError);
 
     const eraseWorkDecision = {
       id: "decision_erase_work_2",
@@ -1560,7 +1625,7 @@ describe("TeamRepository runs", () => {
       repository.commitSupervisionDecision(
         {
           runId: admitted.id,
-          expectedSupervisionRevision: 3,
+          expectedSupervisionRevision: resolved.supervision!.revision,
           decision: eraseWorkDecision,
         },
         (current) => ({
@@ -1599,7 +1664,7 @@ describe("TeamRepository runs", () => {
       repository.commitSupervisionDecision(
         {
           runId: admitted.id,
-          expectedSupervisionRevision: 3,
+          expectedSupervisionRevision: resolved.supervision!.revision,
           decision: eraseHumanDecision,
         },
         (current) => ({
@@ -1655,39 +1720,23 @@ describe("TeamRepository runs", () => {
       createdAt: secondTimestamp,
     };
     currentTimestamp = secondTimestamp;
+    const dispatchReady = await beginRunningSupervisionTurn(
+      repository,
+      admitted as PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+      dispatchDecision.id,
+    );
     const creating = await repository.commitSupervisionDecision(
       {
         runId: admitted.id,
-        expectedSupervisionRevision: 1,
+        expectedSupervisionRevision: dispatchReady.supervision.revision,
         decision: dispatchDecision,
       },
       (current) => {
         const template = current.supervision.workerTemplates[0]!;
         return {
-          state: { status: "running", startedAt: secondTimestamp },
+          state: current.state,
           steps: [
-            {
-              snapshot: {
-                stepId: "supervisor_turn_terminal_1",
-                roleId: current.supervision.supervisor.roleId,
-                roleName: current.supervision.supervisor.roleName,
-                roleInstructions: current.supervision.supervisor.roleInstructions,
-                stepInstructions: null,
-                resolvedLaunch: current.supervision.supervisor.resolvedLaunch,
-                supervision: {
-                  kind: "supervisor",
-                  turn: 1,
-                  decisionId: dispatchDecision.id,
-                },
-              },
-              state: {
-                status: "succeeded",
-                plannedAgentId: current.supervision.supervisor.agentId,
-                agentId: current.supervision.supervisor.agentId,
-                startedAt: secondTimestamp,
-                endedAt: secondTimestamp,
-              },
-            },
+            createSucceededSupervisorTurn(current, dispatchDecision.id, 1, secondTimestamp),
             {
               snapshot: {
                 ...template,
@@ -1717,7 +1766,7 @@ describe("TeamRepository runs", () => {
           ],
           supervision: {
             ...current.supervision,
-            revision: 2,
+            revision: current.supervision.revision + 1,
             phase: "working",
             workItems: [
               {
@@ -1794,7 +1843,7 @@ describe("TeamRepository runs", () => {
       repository.commitSupervisionDecision(
         {
           runId: admitted.id,
-          expectedSupervisionRevision: 2,
+          expectedSupervisionRevision: failed.supervision!.revision,
           decision: redispatchDecision,
         },
         (current) => ({
@@ -1849,7 +1898,7 @@ describe("TeamRepository runs", () => {
       repository.commitSupervisionDecision(
         {
           runId: admitted.id,
-          expectedSupervisionRevision: 2,
+          expectedSupervisionRevision: failed.supervision!.revision,
           decision: replayDecision,
         },
         (current) => {

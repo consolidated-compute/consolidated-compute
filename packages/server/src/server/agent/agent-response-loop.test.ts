@@ -54,6 +54,30 @@ describe("getStructuredAgentResponse", () => {
     expect(prompts[1]).toContain("count");
   });
 
+  it("bounds retry prompts when validation emits many issues", async () => {
+    const schema = z.object({ items: z.array(z.literal("valid")) });
+    const invalid = JSON.stringify({
+      items: Array.from({ length: 500 }, (_, index) => `invalid-${index}`),
+    });
+    const { caller, prompts } = createScriptedCaller([invalid, '{"items":[]}']);
+    const maxPromptBytes = 4 * 1024;
+
+    const result = await getStructuredAgentResponse({
+      caller,
+      prompt: "Provide valid items",
+      schema,
+      maxRetries: 1,
+      maxPromptBytes,
+    });
+
+    expect(result).toEqual({ items: [] });
+    expect(prompts).toHaveLength(2);
+    expect(prompts.every((prompt) => Buffer.byteLength(prompt, "utf8") <= maxPromptBytes)).toBe(
+      true,
+    );
+    expect(prompts[1]).toContain("validation errors omitted");
+  });
+
   it("fails after maxRetries with last response and validation errors", async () => {
     const schema = z.object({ count: z.number() });
     const { caller } = createScriptedCaller(['{"count":"nope"}', '{"count":"still"}']);

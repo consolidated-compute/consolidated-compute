@@ -67,6 +67,7 @@ export interface StructuredAgentResponseOptions<T> {
   schema: z.ZodType<T> | JsonSchema;
   maxRetries?: number;
   schemaName?: string;
+  maxPromptBytes?: number;
 }
 
 export interface StructuredAgentGenerationOptions<T> {
@@ -191,16 +192,62 @@ export function buildStructuredAgentResponsePrompt(options: {
   return buildBasePrompt(options.prompt, validator.jsonSchema);
 }
 
-function buildRetryPrompt(basePrompt: string, errors: string[]): string {
-  const formattedErrors = errors.map((error) => `- ${error}`).join("\n");
-  return [
-    basePrompt,
-    "",
-    "Previous response was invalid with validation errors:",
-    formattedErrors.length > 0 ? formattedErrors : "- Unknown validation error",
-    "",
-    "Respond again with JSON only that matches the schema.",
-  ].join("\n");
+function buildRetryPrompt(basePrompt: string, errors: string[], maxPromptBytes?: number): string {
+  const prefix = [basePrompt, "", "Previous response was invalid with validation errors:"].join(
+    "\n",
+  );
+  const suffix = "Respond again with JSON only that matches the schema.";
+  if (maxPromptBytes === undefined) {
+    const formattedErrors = errors.map((error) => `- ${error}`).join("\n");
+    return [
+      prefix,
+      formattedErrors.length > 0 ? formattedErrors : "- Unknown validation error",
+      "",
+      suffix,
+    ].join("\n");
+  }
+
+  const fixedBytes = Buffer.byteLength(`${prefix}\n\n\n${suffix}`, "utf8");
+  const diagnosticsBudget = maxPromptBytes - fixedBytes;
+  if (diagnosticsBudget <= 0) {
+    throw new StructuredAgentResponseError("Structured retry prompt exceeds its byte budget", {
+      lastResponse: "",
+      validationErrors: errors,
+    });
+  }
+  const diagnostics = formatBoundedValidationErrors(errors, diagnosticsBudget);
+  return [prefix, diagnostics, "", suffix].join("\n");
+}
+
+function formatBoundedValidationErrors(errors: string[], maxBytes: number): string {
+  const source = errors.length > 0 ? errors : ["Unknown validation error"];
+  const included: string[] = [];
+  for (const error of source) {
+    const line = `- ${error}`;
+    const omitted = source.length - included.length - 1;
+    const marker = omitted > 0 ? `\n- [${omitted} validation errors omitted]` : "";
+    const candidate = [...included, line].join("\n") + marker;
+    if (Buffer.byteLength(candidate, "utf8") > maxBytes) break;
+    included.push(line);
+  }
+  const omitted = source.length - included.length;
+  if (omitted === 0) return included.join("\n");
+  const marker = `- [${omitted} validation errors omitted]`;
+  const candidate = [...included, marker].join("\n");
+  if (Buffer.byteLength(candidate, "utf8") <= maxBytes) return candidate;
+  return truncateUtf8(marker, maxBytes);
+}
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  const included: string[] = [];
+  let includedBytes = 0;
+  for (const codePoint of value) {
+    const codePointBytes = Buffer.byteLength(codePoint, "utf8");
+    if (includedBytes + codePointBytes > maxBytes) break;
+    included.push(codePoint);
+    includedBytes += codePointBytes;
+  }
+  return included.join("");
 }
 
 function extractJsonFromMarkdown(text: string): string {
@@ -307,9 +354,22 @@ function extractFirstJsonSnippet(text: string): string | null {
 export async function getStructuredAgentResponse<T>(
   options: StructuredAgentResponseOptions<T>,
 ): Promise<T> {
-  const { caller, prompt, schema, maxRetries = 2, schemaName = "Response" } = options;
+  const {
+    caller,
+    prompt,
+    schema,
+    maxRetries = 2,
+    schemaName = "Response",
+    maxPromptBytes,
+  } = options;
   const validator = buildValidator(schema, schemaName);
   const basePrompt = buildBasePrompt(prompt, validator.jsonSchema);
+  if (maxPromptBytes !== undefined && Buffer.byteLength(basePrompt, "utf8") > maxPromptBytes) {
+    throw new StructuredAgentResponseError("Structured prompt exceeds its byte budget", {
+      lastResponse: "",
+      validationErrors: [],
+    });
+  }
 
   let attemptPrompt = basePrompt;
   let lastResponse = "";
@@ -329,7 +389,7 @@ export async function getStructuredAgentResponse<T>(
       if (attempt === maxRetries) {
         break;
       }
-      attemptPrompt = buildRetryPrompt(basePrompt, lastErrors);
+      attemptPrompt = buildRetryPrompt(basePrompt, lastErrors, maxPromptBytes);
       continue;
     }
 
@@ -342,7 +402,7 @@ export async function getStructuredAgentResponse<T>(
     if (attempt === maxRetries) {
       break;
     }
-    attemptPrompt = buildRetryPrompt(basePrompt, lastErrors);
+    attemptPrompt = buildRetryPrompt(basePrompt, lastErrors, maxPromptBytes);
   }
 
   throw new StructuredAgentResponseError("Agent response did not match the required JSON schema", {

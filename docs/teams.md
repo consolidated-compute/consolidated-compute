@@ -64,17 +64,20 @@ unique accepted Artifact IDs. Human requests may cite only created agents and ou
 succeeded steps; planned agent IDs and preallocated output IDs are not evidence. Every durable decision
 belongs to exactly one succeeded supervisor turn. Supervisor turns own decisions, never output
 Artifact descriptors. Repository commands append decisions with revision and action idempotency
-checks before an executor performs external work. Dispatch and revision decisions name one exact work
-item and attempt. A fresh decision is accepted only while the run is queued or running at an idle
-planning boundary; active work, permission waits, cancellation, unresolved human requests, and
-terminal runs reject it. A decision
+checks before an executor performs external work. Before each prompt, the repository appends an
+active supervisor turn with its reserved decision ID. A decision may settle only that exact turn;
+other active work, permission waits, cancellation, unresolved human requests, and terminal runs
+reject it. Dispatch and revision decisions name one exact work item and attempt. A decision
 may append steps but every preserved run and step state must follow the lifecycle transition graph;
 terminal attempt history cannot be reopened or rewritten. A dispatch atomically appends one new
 `creating` attempt, marks its Work Item active, enters the working phase, and reserves an output
 Artifact ID across stored Team Runs. Active Work Items contain at least one dispatched attempt, and
-an attempt has one dispatch decision. Existing Work Items keep their identity, inputs, and prior
-attempts across decisions. A complete decision atomically moves supervision and the outer run to
-successful terminal states. An escalation atomically enters the human-wait phase with an unresolved
+an attempt has one dispatch decision. The initial executor treats plan order as execution order. A
+dispatch requires every preceding Work Item to have succeeded and freezes their accepted output
+Artifact IDs as the target's inputs. Existing Work Items keep their identity and prior attempts;
+inputs may change only from empty to that exact list on first dispatch. A complete decision atomically
+moves supervision and the outer run to successful terminal states. An escalation atomically enters
+the human-wait phase with an unresolved
 request after every active step has settled. Once that request is resolved or retired, later decisions
 preserve it exactly; the current
 single-request ledger cannot overwrite it with another escalation. Decisions preserve the outer run
@@ -82,6 +85,10 @@ state payload when its status does not change and retain its start time across t
 Successful terminalization requires `complete` to be the latest decision, and a pending human wait
 requires `escalate` to be the latest decision. The repository stamps the supervision ledger and the
 outer run with the same decision commit time; updater-supplied timestamps are not authoritative.
+Resolving the frozen `continue` action persists the response before the service relaunches
+supervision. The next supervisor prompt includes the request, selected action, and human note. The
+public response RPC, event history, reconnect behavior, and restart-safe human wait belong to the
+human-escalation phase.
 
 The wire projection exposes only a compact optional supervision summary. Existing Team Run and
 step lifecycle values do not change. The daemon does not advertise supervised execution until the
@@ -106,6 +113,23 @@ run, and can answer only those requests. Ordinary agents keep the existing tool 
 
 The daemon service coordinates root Paseo agents. Each reached workflow step creates one agent in the selected Workspace from the frozen launch values; execution never resolves the Agent Profile again. Correlation labels identify the Team, run, role, and step. Do not set `paseo.parent-agent-id`; that label means an agent-created child and carries cascade and archive behavior.
 
+A supervised run creates its frozen supervisor once and reuses that persisted agent for bounded
+structured turns. An invalid response receives at most two correction prompts on the same turn. The daemon,
+not the supervisor, creates one requested worker from the named frozen template after the dispatch
+decision and planned agent identity are durable. A worker terminal event is authoritative; finish
+notifications may only wake the executor. Artifact or settlement errors after a provider terminal
+event propagate as execution failures; never reinterpret them as a different worker outcome. The first
+executor does not redispatch failed work or route revision Artifacts. An escalation offers
+continuation only when the frozen ledger has a valid next plan, dispatch, or completion action. A
+failed Work Item or blocked Artifact handoff offers cancellation only; reserve those continuation
+paths for a later executor with durable retry or revision semantics.
+
+Cap the complete structured supervisor request at 64 KiB. Supervisor context uses at most 48 KiB
+so the fixed action schema and correction instructions retain headroom. Truncate prose by UTF-8
+bytes with explicit original-size markers, distribute the worker-instruction budget across every
+frozen template, and retain every template and Work Item identity. Apply the same cap to correction
+prompts and replace excess validation diagnostics with an omitted-count marker.
+
 Compose each initial prompt from these bounded sections:
 
 1. Team name and instructions.
@@ -114,7 +138,7 @@ Compose each initial prompt from these bounded sections:
 4. Objective.
 5. Exact frozen input Artifacts for Assignment-backed runs, or the immediately previous final response for objective-only runs.
 
-For an Assignment-backed step, persist its bounded final response under the preallocated output ID before committing step success or creating the next agent. Reject blank output. Resolve downstream inputs by their frozen IDs and verify the Assignment revision, Team Run, producing step, role, agent, success state, and descriptor before agent creation. Artifact content is capped at 32 KiB each and 32 KiB total per prompt. Delimit it as untrusted context with identity, provenance, and truncation facts.
+For an Assignment-backed step, persist its bounded final response under the preallocated output ID before committing step success or creating the next agent. Reject blank output. Resolve downstream inputs by their frozen IDs and verify the Assignment revision, Team Run, producing step, role, agent, success state, and descriptor before agent creation. Artifact content is capped at 32 KiB each and 32 KiB total per prompt. Validate that cumulative budget before a supervised dispatch becomes durable; an impossible handoff remains planned so the supervisor can choose another bounded action. Delimit accepted content as untrusted context with identity, provenance, and truncation facts.
 
 For an objective-only step, delimit the previous response as untrusted handoff context. Cap it at 4 KiB of UTF-8 and state when it was truncated. An empty final response gets an explicit empty marker. Do not pass the full transcript.
 
@@ -122,7 +146,12 @@ The Artifact handoff is not a security or context-isolation boundary. Provider-n
 
 ## Lifecycle
 
-One foreground stream owns a step from prompt admission through completion, failure, or cancellation. A permission request is an intermediate checkpoint. Persist `waiting_for_permission`, hold the Workspace lock, surface the ordinary agent permission UI, and resume the same turn after the response. A denied permission is not itself a failed step; classify the eventual terminal event.
+One foreground stream owns a step from prompt admission through completion, failure, or cancellation.
+Register that stream while holding the Workspace operation fence so cancellation cannot observe an
+idle agent between the final termination check and prompt admission. A permission request is an
+intermediate checkpoint. Persist `waiting_for_permission`, hold the Workspace lock, surface the
+ordinary agent permission UI, and resume the same turn after the response. A denied permission is
+not itself a failed step; classify the eventual terminal event.
 
 The active step and outer run use the same `waiting_for_permission`, `stopping`, or `stop_failed`
 checkpoint. Never persist one side without the other.
