@@ -136,7 +136,12 @@ The Artifact handoff is not a security or context-isolation boundary. Provider-n
 
 ## Lifecycle
 
-One foreground stream owns a step from prompt admission through completion, failure, or cancellation. A permission request is an intermediate checkpoint. Persist `waiting_for_permission`, hold the Workspace lock, surface the ordinary agent permission UI, and resume the same turn after the response. A denied permission is not itself a failed step; classify the eventual terminal event.
+One foreground stream owns a step from prompt admission through completion, failure, or cancellation.
+Register that stream while holding the Workspace operation fence so cancellation cannot observe an
+idle agent between the final termination check and prompt admission. A permission request is an
+intermediate checkpoint. Persist `waiting_for_permission`, hold the Workspace lock, surface the
+ordinary agent permission UI, and resume the same turn after the response. A denied permission is
+not itself a failed step; classify the eventual terminal event.
 
 The active step and outer run use the same `waiting_for_permission`, `stopping`, or `stop_failed`
 checkpoint. Never persist one side without the other.

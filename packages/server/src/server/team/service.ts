@@ -857,7 +857,7 @@ export class TeamRunService {
     agentId: string,
     prompt: string,
   ): Promise<string> {
-    const admitted = await this.withWorkspaceOperation(
+    const events = await this.withWorkspaceOperation(
       (await this.requireRun(runId)).workspace.workspaceId,
       async () => {
         const current = await this.requireRun(runId);
@@ -866,20 +866,25 @@ export class TeamRunService {
           if (!isTerminalTeamRunStatus(current.state.status)) {
             await this.finishTermination(runId, reason ?? "cancel");
           }
-          return false;
+          return null;
         }
         const step = current.steps[stepIndex];
-        return Boolean(
-          step?.snapshot.supervision?.kind === "supervisor" &&
-          "agentId" in step.state &&
-          step.state.agentId === agentId,
-        );
+        if (
+          step?.snapshot.supervision?.kind !== "supervisor" ||
+          !("agentId" in step.state) ||
+          step.state.agentId !== agentId
+        ) {
+          return null;
+        }
+        // AgentManager registers the pending foreground run synchronously here. Keep that
+        // registration under the Workspace fence so cancellation cannot observe an idle agent.
+        return this.agentManager.streamAgent(agentId, prompt);
       },
     );
-    if (!admitted) throw new Error(`Supervisor prompt for Team Run ${runId} was not admitted`);
+    if (!events) throw new Error(`Supervisor prompt for Team Run ${runId} was not admitted`);
 
     const pendingPermissions = new Set<string>();
-    for await (const event of this.agentManager.streamAgent(agentId, prompt)) {
+    for await (const event of events) {
       if (event.type === "permission_requested") {
         pendingPermissions.add(event.request.id);
         await this.persistPermissionState(runId, stepIndex, {

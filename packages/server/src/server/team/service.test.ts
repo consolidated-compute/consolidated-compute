@@ -324,6 +324,7 @@ class MemoryAgentRuntime {
   readonly streams: Array<{ agentId: string; prompt: AgentPromptInput }> = [];
   readonly finalResponses = new Map<string, string | null>();
   cancellation: AgentRunCancellationResult = { status: "settled" };
+  requireRegisteredCancellation = false;
   beforeCreate: ((input: CreateAgentFromMcpInput) => Promise<void>) | null = null;
   blockCreation = false;
   private releaseCreation: (() => void) | null = null;
@@ -331,6 +332,7 @@ class MemoryAgentRuntime {
   private readonly streamWaiters = new Map<string, Set<() => void>>();
   private readonly eventQueues = new Map<string, QueuedEvent[]>();
   private readonly eventWaiters = new Map<string, Set<() => void>>();
+  private readonly registeredStreams = new Set<string>();
 
   async createAgent(input: CreateAgentFromMcpInput): Promise<void> {
     await this.beforeCreate?.(input);
@@ -355,16 +357,12 @@ class MemoryAgentRuntime {
     if (this.creations.length < count) await this.waitForCreations(count);
   }
 
-  async *streamAgent(agentId: string, prompt: AgentPromptInput): AsyncGenerator<AgentStreamEvent> {
+  streamAgent(agentId: string, prompt: AgentPromptInput): AsyncGenerator<AgentStreamEvent> {
     this.streams.push({ agentId, prompt });
+    this.registeredStreams.add(agentId);
     for (const waiter of this.streamWaiters.get(agentId) ?? []) waiter();
     this.streamWaiters.delete(agentId);
-    for (;;) {
-      const queued = await this.nextEvent(agentId);
-      queued.resolveConsumed();
-      if (queued.event === null) return;
-      yield queued.event;
-    }
+    return this.readRegisteredStream(agentId);
   }
 
   async getLastAssistantMessage(agentId: string): Promise<string | null> {
@@ -377,6 +375,9 @@ class MemoryAgentRuntime {
 
   async cancelAgentRun(agentId: string): Promise<AgentRunCancellationResult> {
     this.cancellations.push(agentId);
+    if (this.requireRegisteredCancellation && !this.registeredStreams.has(agentId)) {
+      return { status: "not_running" };
+    }
     if (this.cancellation.status === "settled") {
       void this.pushEvent(agentId, {
         type: "turn_canceled",
@@ -414,6 +415,19 @@ class MemoryAgentRuntime {
       for (const waiter of this.eventWaiters.get(agentId) ?? []) waiter();
       this.eventWaiters.delete(agentId);
     });
+  }
+
+  private async *readRegisteredStream(agentId: string): AsyncGenerator<AgentStreamEvent> {
+    try {
+      for (;;) {
+        const queued = await this.nextEvent(agentId);
+        queued.resolveConsumed();
+        if (queued.event === null) return;
+        yield queued.event;
+      }
+    } finally {
+      this.registeredStreams.delete(agentId);
+    }
   }
 
   private async nextEvent(agentId: string): Promise<QueuedEvent> {
@@ -696,6 +710,77 @@ describe("TeamRunService", () => {
         supervisorRoleId: "role_builder",
       }),
     ).rejects.toBeInstanceOf(TeamSupervisorRoleInvalidError);
+  });
+
+  test("registers a supervisor prompt before releasing its cancellation fence", async () => {
+    const harness = await createHarness();
+    harness.daemonConfigStore.agentProfiles.push({
+      id: "profile_supervisor",
+      name: "Supervisor",
+      provider: "codex",
+      model: "gpt-5.6",
+      providerOptions: { features: { multi_agent_v2: false } },
+    });
+    const definition = await harness.repository.updateDefinition({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      patch: {
+        roles: [
+          ...harness.definition.roles,
+          {
+            id: "role_supervisor",
+            name: "Supervisor",
+            instructions: "Coordinate bounded work.",
+            profileId: "profile_supervisor",
+          },
+        ],
+      },
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Supervisor prompt cancellation fence",
+      objective: "Cancel before the supervisor prompt can escape admission.",
+      workItem: null,
+    });
+    harness.runtime.requireRegisteredCancellation = true;
+    const originalGetRun = harness.repository.getRun.bind(harness.repository);
+    let activeSupervisorReads = 0;
+    let canceling: Promise<PersistedTeamRunRecord> | undefined;
+    let reportCancellationStarted: (() => void) | undefined;
+    const cancellationStarted = new Promise<void>((resolve) => {
+      reportCancellationStarted = resolve;
+    });
+    harness.repository.getRun = async (runId) => {
+      const current = await originalGetRun(runId);
+      const activeSupervisor = current?.steps.find(
+        (step) =>
+          step.snapshot.supervision?.kind === "supervisor" && step.state.status === "running",
+      );
+      if (activeSupervisor && !canceling && ++activeSupervisorReads === 3) {
+        canceling = harness.service.cancelRun(runId);
+        reportCancellationStarted?.();
+      }
+      return current;
+    };
+
+    const run = await harness.service.admitSupervisedAssignmentRun({
+      teamId: definition.id,
+      expectedRevision: definition.revision,
+      idempotencyKey: "supervisor-prompt-cancel-fence",
+      assignmentId: assignment.id,
+      expectedAssignmentRevision: assignment.revision,
+      workspaceId: "wks_team_service",
+      supervisorRoleId: "role_supervisor",
+    });
+    await cancellationStarted;
+    const canceled = await canceling;
+
+    expect(canceled).toMatchObject({
+      id: run.id,
+      state: { status: "canceled" },
+      supervision: { phase: "canceled", decisions: [] },
+    });
+    expect(harness.runtime.streams).toHaveLength(1);
+    expect(harness.runtime.cancellations).toEqual([firstAgentId]);
   });
 
   test("executes validated supervisor decisions and one frozen worker at a time", async () => {
