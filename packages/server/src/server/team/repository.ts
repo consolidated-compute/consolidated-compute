@@ -1457,7 +1457,15 @@ function decisionPreservesWorkItemLedger(
   decision: TeamRunSupervisionCommitDecision,
 ): boolean {
   const preservedWorkItems = preserved.supervision!.workItems;
-  if (update.supervision.workItems.length < preservedWorkItems.length) return false;
+  if (
+    !canSupervisionDecisionChangeWorkItemCount(
+      preservedWorkItems.length,
+      update.supervision.workItems.length,
+      decision.kind,
+    )
+  ) {
+    return false;
+  }
   return preservedWorkItems.every((workItem, index) => {
     const updatedWorkItem = update.supervision.workItems[index];
     if (!updatedWorkItem) return false;
@@ -1474,6 +1482,16 @@ function decisionPreservesWorkItemLedger(
     );
     return identityMatches && attemptHistoryMatches && updatedWorkItem.acceptedAttemptId === null;
   });
+}
+
+export function canSupervisionDecisionChangeWorkItemCount(
+  preservedCount: number,
+  updatedCount: number,
+  decisionKind: TeamRunSupervisionDecision["kind"],
+): boolean {
+  return (
+    updatedCount >= preservedCount && (decisionKind === "plan" || updatedCount === preservedCount)
+  );
 }
 
 function resolvePrecedingAcceptedArtifactIds(

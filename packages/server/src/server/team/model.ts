@@ -287,7 +287,7 @@ export const PersistedTeamRunSupervisionDecisionSchema = z.discriminatedUnion("k
     kind: z.literal("dispatch"),
     workItemId: PersistedTeamEntityIdSchema,
     attemptId: PersistedTeamEntityIdSchema,
-    // Older supervised runs freeze these inputs only on the matching worker snapshot.
+    // COMPAT(supervisedDispatchInputs): added in v0.7.0, review after 2027-03-01; remove once pre-v0.7.0 Team Run records are migrated or retired.
     inputArtifactIds: PersistedTeamRunArtifactInputIdsSchema.optional(),
   }).strict(),
   PersistedTeamRunSupervisionDecisionBaseSchema.extend({

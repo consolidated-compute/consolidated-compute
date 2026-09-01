@@ -20,6 +20,7 @@ import {
 } from "./model.js";
 import {
   TEAM_RUN_PAGE_MAX_LIMIT,
+  canSupervisionDecisionChangeWorkItemCount,
   TeamRepository,
   TeamHasActiveRunError,
   TeamAssignmentHasActiveRunError,
@@ -292,6 +293,57 @@ async function beginRunningSupervisionTurn(
     return { steps, state: current.state };
   });
   return ready as PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision };
+}
+
+async function commitSingleWorkItemPlan(
+  repository: TeamRepository,
+  run: PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+  workItemId: string,
+): Promise<PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision }> {
+  const sequence = run.supervision.decisions.length + 1;
+  const decision = {
+    id: `decision_plan_${workItemId}`,
+    sequence,
+    actionId: `action_plan_${workItemId}`,
+    kind: "plan" as const,
+    summary: "Freeze one bounded worker attempt.",
+    workItemId: null,
+    attemptId: null,
+    createdAt: secondTimestamp,
+  };
+  const ready = await beginRunningSupervisionTurn(repository, run, decision.id);
+  return repository.commitSupervisionDecision(
+    {
+      runId: run.id,
+      expectedSupervisionRevision: ready.supervision.revision,
+      decision,
+    },
+    (current, context) => ({
+      state: current.state,
+      steps: [
+        ...current.steps.slice(0, -1),
+        createSucceededSupervisorTurn(current, decision.id, sequence, context.committedAt),
+      ],
+      supervision: {
+        ...current.supervision,
+        revision: current.supervision.revision + 1,
+        phase: "planning",
+        workItems: [
+          ...current.supervision.workItems,
+          {
+            id: workItemId,
+            templateStepId: current.supervision.workerTemplates[0]!.stepId,
+            inputArtifactIds: [],
+            attemptIds: [],
+            acceptedAttemptId: null,
+            status: "planned",
+          },
+        ],
+        decisions: [...current.supervision.decisions, context.decision],
+        updatedAt: context.committedAt,
+      },
+    }),
+  ) as Promise<PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision }>;
 }
 
 function createWorkerDispatchUpdate(
@@ -680,6 +732,13 @@ describe("TeamRepository runs", () => {
     await rm(paseoHome, { recursive: true, force: true });
   });
 
+  test("allows only plan decisions to append to the frozen Work Item ledger", () => {
+    expect(canSupervisionDecisionChangeWorkItemCount(1, 2, "plan")).toBe(true);
+    expect(canSupervisionDecisionChangeWorkItemCount(1, 2, "request_revision")).toBe(false);
+    expect(canSupervisionDecisionChangeWorkItemCount(1, 0, "request_revision")).toBe(false);
+    expect(canSupervisionDecisionChangeWorkItemCount(1, 1, "request_revision")).toBe(true);
+  });
+
   test("durably creates a queued run with the accepted Team snapshot", async () => {
     const run = await repository.createRun(createRunInput(definition));
 
@@ -895,6 +954,16 @@ describe("TeamRepository runs", () => {
           ...current.supervision,
           revision: current.supervision.revision + 1,
           phase: "planning",
+          workItems: [
+            {
+              id: "work_pending_review",
+              templateStepId: current.supervision.workerTemplates[0]!.stepId,
+              inputArtifactIds: [],
+              attemptIds: [],
+              acceptedAttemptId: null,
+              status: "planned",
+            },
+          ],
           decisions: [decision],
         },
       }),
@@ -1373,16 +1442,6 @@ describe("TeamRepository runs", () => {
           revision: current.supervision.revision + 1,
           phase: "awaiting_human",
           decisions: [...current.supervision.decisions, escalationDecision],
-          workItems: [
-            {
-              id: "work_pending_review",
-              templateStepId: current.supervision.workerTemplates[0]!.stepId,
-              inputArtifactIds: [],
-              attemptIds: [],
-              acceptedAttemptId: null,
-              status: "planned",
-            },
-          ],
           humanRequest: {
             id: "human_review_1",
             revision: 1,
@@ -1516,9 +1575,14 @@ describe("TeamRepository runs", () => {
     );
     currentTimestamp = secondTimestamp;
     const plannedWorkItemId = "work_preserved_plan";
+    const planned = await commitSingleWorkItemPlan(
+      repository,
+      admitted as PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+      plannedWorkItemId,
+    );
     const escalationDecision = {
       id: "decision_preserve_evidence_1",
-      sequence: 1,
+      sequence: planned.supervision.decisions.length + 1,
       actionId: "action_preserve_evidence_1",
       kind: "escalate" as const,
       summary: "Ask the human before continuing planned work.",
@@ -1528,7 +1592,7 @@ describe("TeamRepository runs", () => {
     };
     const escalationReady = await beginRunningSupervisionTurn(
       repository,
-      admitted as PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+      planned as PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
       escalationDecision.id,
     );
     const awaitingHuman = await repository.commitSupervisionDecision(
@@ -1537,24 +1601,17 @@ describe("TeamRepository runs", () => {
         expectedSupervisionRevision: escalationReady.supervision.revision,
         decision: escalationDecision,
       },
-      (current) => ({
+      (current, context) => ({
         state: current.state,
-        steps: [createSucceededSupervisorTurn(current, escalationDecision.id, 1, secondTimestamp)],
+        steps: [
+          ...current.steps.slice(0, -1),
+          createSucceededSupervisorTurn(current, escalationDecision.id, 2, context.committedAt),
+        ],
         supervision: {
           ...current.supervision,
           revision: current.supervision.revision + 1,
           phase: "awaiting_human",
-          workItems: [
-            {
-              id: plannedWorkItemId,
-              templateStepId: current.supervision.workerTemplates[0]!.stepId,
-              inputArtifactIds: [],
-              attemptIds: [],
-              acceptedAttemptId: null,
-              status: "planned",
-            },
-          ],
-          decisions: [escalationDecision],
+          decisions: [...current.supervision.decisions, context.decision],
           humanRequest: {
             id: "human_preserved_evidence",
             revision: 1,
@@ -1566,9 +1623,9 @@ describe("TeamRepository runs", () => {
             agentIds: [current.supervision.supervisor.agentId],
             stepIds: [],
             artifactIds: [],
-            createdAt: secondTimestamp,
+            createdAt: context.committedAt,
           },
-          updatedAt: secondTimestamp,
+          updatedAt: context.committedAt,
         },
       }),
     );
@@ -1710,9 +1767,15 @@ describe("TeamRepository runs", () => {
     );
     const workItemId = "work_terminal_attempt";
     const attemptId = "attempt_terminal_1";
+    currentTimestamp = secondTimestamp;
+    const planned = await commitSingleWorkItemPlan(
+      repository,
+      admitted as PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+      workItemId,
+    );
     const dispatchDecision = {
       id: "decision_dispatch_terminal",
-      sequence: 1,
+      sequence: planned.supervision.decisions.length + 1,
       actionId: "action_dispatch_terminal",
       kind: "dispatch" as const,
       summary: "Dispatch the bounded worker attempt.",
@@ -1721,10 +1784,9 @@ describe("TeamRepository runs", () => {
       inputArtifactIds: [],
       createdAt: secondTimestamp,
     };
-    currentTimestamp = secondTimestamp;
     const dispatchReady = await beginRunningSupervisionTurn(
       repository,
-      admitted as PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
+      planned as PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision },
       dispatchDecision.id,
     );
     const creating = await repository.commitSupervisionDecision(
@@ -1733,12 +1795,20 @@ describe("TeamRepository runs", () => {
         expectedSupervisionRevision: dispatchReady.supervision.revision,
         decision: dispatchDecision,
       },
-      (current) => {
+      (current, context) => {
         const template = current.supervision.workerTemplates[0]!;
+        const workItem = current.supervision.workItems[0];
+        if (!workItem) throw new Error("Expected planned work item");
         return {
           state: current.state,
           steps: [
-            createSucceededSupervisorTurn(current, dispatchDecision.id, 1, secondTimestamp),
+            ...current.steps.slice(0, -1),
+            createSucceededSupervisorTurn(
+              current,
+              dispatchDecision.id,
+              dispatchDecision.sequence,
+              context.committedAt,
+            ),
             {
               snapshot: {
                 ...template,
@@ -1762,7 +1832,7 @@ describe("TeamRepository runs", () => {
               state: {
                 status: "creating",
                 plannedAgentId: firstAgentId,
-                startedAt: secondTimestamp,
+                startedAt: context.committedAt,
               },
             },
           ],
@@ -1772,16 +1842,14 @@ describe("TeamRepository runs", () => {
             phase: "working",
             workItems: [
               {
-                id: workItemId,
-                templateStepId: template.stepId,
-                inputArtifactIds: [],
+                ...workItem,
                 attemptIds: [attemptId],
                 acceptedAttemptId: null,
                 status: "active",
               },
             ],
-            decisions: [dispatchDecision],
-            updatedAt: secondTimestamp,
+            decisions: [...current.supervision.decisions, context.decision],
+            updatedAt: context.committedAt,
           },
         };
       },
