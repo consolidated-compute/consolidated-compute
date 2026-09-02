@@ -1399,10 +1399,39 @@ test("gates and sends supervised Assignment-backed Team run admission", async ()
     supervision: { supervisorRoleId: "supervisor" },
     requestId: "req-supervised-assignment-run-1",
   };
+  const { supervision: _supervision, requestId: _requestId, ...sequentialInput } = input;
+  const sequentialResponse = legacyClient.startAssignmentTeamRun({
+    ...sequentialInput,
+    requestId: "req-sequential-assignment-run-1",
+  });
+  expect(parseSentFrame(legacyTransport.sent[0])).toEqual({
+    type: "assignment.team_run.start.request",
+    teamId: "team-1",
+    expectedRevision: 1,
+    idempotencyKey: "retry-supervised-assignment-1",
+    assignmentId: "asgn_0123456789abcdef",
+    expectedAssignmentRevision: 2,
+    workspaceId: "workspace-1",
+    requestId: "req-sequential-assignment-run-1",
+  });
+  legacyTransport.triggerMessage(
+    wrapSessionMessage({
+      type: "rpc_error",
+      payload: {
+        requestId: "req-sequential-assignment-run-1",
+        requestType: "assignment.team_run.start.request",
+        error: "Legacy sequential admission reached the daemon",
+      },
+    }),
+  );
+  await expect(sequentialResponse).rejects.toThrow(
+    "Legacy sequential admission reached the daemon",
+  );
+
   await expect(legacyClient.startAssignmentTeamRun(input)).rejects.toThrow(
     "Update the host to use supervised Team Runs.",
   );
-  expect(legacyTransport.sent).toEqual([]);
+  expect(legacyTransport.sent).toHaveLength(1);
 
   const supportedTransport = createMockTransport();
   const supportedClient = new DaemonClient({
