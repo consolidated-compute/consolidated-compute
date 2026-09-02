@@ -3616,6 +3616,8 @@ export const ServerInfoStatusPayloadSchema = z
         teamSupervision: z.boolean().optional(),
         // COMPAT(teamSupervisionAdmission): added in v0.7.0, remove gate after 2027-03-02.
         teamSupervisionAdmission: TeamSupervisionAdmissionStatusSchema.optional(),
+        // COMPAT(assignmentTeamSchedules): added in v0.8.0, remove gate after 2027-03-02.
+        assignmentTeamSchedules: z.boolean().optional(),
         // COMPAT(assignments): added in v0.6.x, remove gate after 2027-02-27.
         assignments: z.boolean().optional(),
         // COMPAT(agentConfigApply): added in v0.3.2, remove gate after 2027-02-11.
@@ -7140,6 +7142,7 @@ export const WSHelloMessageSchema = z.object({
       [CLIENT_CAPS.projectUpdates]: z.boolean().optional(),
       [CLIENT_CAPS.compactProviderSnapshots]: z.boolean().optional(),
       [CLIENT_CAPS.timelineReplacementInvalidation]: z.boolean().optional(),
+      [CLIENT_CAPS.assignmentTeamSchedules]: z.boolean().optional(),
       [CLIENT_CAPS.browserHost]: BrowserAutomationHostCapabilitySchema.optional(),
     })
     .passthrough()

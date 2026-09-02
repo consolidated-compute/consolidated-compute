@@ -938,9 +938,13 @@ export class Session {
       logger: this.sessionLogger,
     });
     this.scheduleSession = new ScheduleSession({
-      host: { emit: (msg) => this.emit(msg) },
+      host: {
+        emit: (msg) => this.emit(msg),
+        supportsAssignmentTeamSchedules: () => this.supports(CLIENT_CAPS.assignmentTeamSchedules),
+      },
       scheduleService,
       logger: this.sessionLogger,
+      assignmentTeamSchedulesAvailable: false,
     });
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {

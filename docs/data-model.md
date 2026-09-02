@@ -361,22 +361,22 @@ Paseo uses these paths under the configured OpenAI base URL:
 
 One file per schedule. ID is 8 hex characters.
 
-| Field       | Type                                  | Description                      |
-| ----------- | ------------------------------------- | -------------------------------- |
-| `id`        | `string`                              | 8-char hex ID                    |
-| `name`      | `string?`                             | Human-readable name              |
-| `prompt`    | `string`                              | The prompt to send               |
-| `cadence`   | `ScheduleCadence`                     | Timing (see below)               |
-| `target`    | `ScheduleTarget`                      | What to run (see below)          |
-| `status`    | `"active" \| "paused" \| "completed"` | Current state                    |
-| `createdAt` | `string` (ISO 8601)                   |                                  |
-| `updatedAt` | `string` (ISO 8601)                   |                                  |
-| `nextRunAt` | `string?` (ISO 8601)                  | Next scheduled execution         |
-| `lastRunAt` | `string?` (ISO 8601)                  | Last execution time              |
-| `pausedAt`  | `string?` (ISO 8601)                  | When paused                      |
-| `expiresAt` | `string?` (ISO 8601)                  | Auto-expire time                 |
-| `maxRuns`   | `number?`                             | Max executions before completing |
-| `runs`      | `ScheduleRun[]`                       | Execution history                |
+| Field       | Type                                  | Description                                                         |
+| ----------- | ------------------------------------- | ------------------------------------------------------------------- |
+| `id`        | `string`                              | 8-char hex ID                                                       |
+| `name`      | `string?`                             | Human-readable name                                                 |
+| `prompt`    | `string`                              | The prompt to send to agent targets; Assignment Team Runs ignore it |
+| `cadence`   | `ScheduleCadence`                     | Timing (see below)                                                  |
+| `target`    | `ScheduleTarget`                      | What to run (see below)                                             |
+| `status`    | `"active" \| "paused" \| "completed"` | Current state                                                       |
+| `createdAt` | `string` (ISO 8601)                   |                                                                     |
+| `updatedAt` | `string` (ISO 8601)                   |                                                                     |
+| `nextRunAt` | `string?` (ISO 8601)                  | Next scheduled execution                                            |
+| `lastRunAt` | `string?` (ISO 8601)                  | Last execution time                                                 |
+| `pausedAt`  | `string?` (ISO 8601)                  | When paused                                                         |
+| `expiresAt` | `string?` (ISO 8601)                  | Auto-expire time                                                    |
+| `maxRuns`   | `number?`                             | Max executions before completing                                    |
+| `runs`      | `ScheduleRun[]`                       | Execution history                                                   |
 
 ### Nested: ScheduleCadence (discriminated union on `type`)
 
@@ -387,19 +387,23 @@ One file per schedule. ID is 8 hex characters.
 
 - `{ type: "agent", agentId: string }` — send to existing agent
 - `{ type: "new-agent", config: { provider, cwd, modeId?, model?, thinkingOptionId?, title?, providerOptions?, featureValues?, systemPrompt?, mcpServers? } }` — create a new agent
+- `{ type: "assignment-team-run", teamId, assignmentId, workspaceId }` — admit a fresh Team Run against the current saved Team and Assignment
+
+The Assignment Team Run target is capability-projected from schedule responses. A daemon does not emit it to a client that lacks `assignment_team_schedules`, because older clients parse the target as a closed discriminated union.
 
 ### Nested: ScheduleRun
 
-| Field          | Type                                   | Description             |
-| -------------- | -------------------------------------- | ----------------------- |
-| `id`           | `string`                               | Run ID                  |
-| `scheduledFor` | `string` (ISO 8601)                    | Intended execution time |
-| `startedAt`    | `string` (ISO 8601)                    |                         |
-| `endedAt`      | `string?` (ISO 8601)                   |                         |
-| `status`       | `"running" \| "succeeded" \| "failed"` |                         |
-| `agentId`      | `string?` (UUID)                       | Agent used for this run |
-| `output`       | `string?`                              | Agent output text       |
-| `error`        | `string?`                              | Error message if failed |
+| Field          | Type                                   | Description                          |
+| -------------- | -------------------------------------- | ------------------------------------ |
+| `id`           | `string`                               | Run ID                               |
+| `scheduledFor` | `string` (ISO 8601)                    | Intended execution time              |
+| `startedAt`    | `string` (ISO 8601)                    |                                      |
+| `endedAt`      | `string?` (ISO 8601)                   |                                      |
+| `status`       | `"running" \| "succeeded" \| "failed"` |                                      |
+| `agentId`      | `string?` (UUID)                       | Agent used for this run              |
+| `teamRunId`    | `string?`                              | Team Run admitted by this occurrence |
+| `output`       | `string?`                              | Agent output text                    |
+| `error`        | `string?`                              | Error message if failed              |
 
 ---
 

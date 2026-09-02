@@ -4,23 +4,27 @@ import type { ScheduleService } from "../../schedule/service.js";
 
 export interface ScheduleSessionHost {
   emit(msg: SessionOutboundMessage): void;
+  supportsAssignmentTeamSchedules(): boolean;
 }
 
 export interface ScheduleSessionOptions {
   host: ScheduleSessionHost;
   scheduleService: ScheduleService;
   logger: pino.Logger;
+  assignmentTeamSchedulesAvailable: boolean;
 }
 
 export class ScheduleSession {
   private readonly host: ScheduleSessionHost;
   private readonly scheduleService: ScheduleService;
   private readonly logger: pino.Logger;
+  private readonly assignmentTeamSchedulesAvailable: boolean;
 
   constructor(options: ScheduleSessionOptions) {
     this.host = options.host;
     this.scheduleService = options.scheduleService;
     this.logger = options.logger;
+    this.assignmentTeamSchedulesAvailable = options.assignmentTeamSchedulesAvailable;
   }
 
   private toScheduleSummary(
@@ -31,6 +35,22 @@ export class ScheduleSession {
   >["payload"]["schedules"][number] {
     const { runs: _runs, ...summary } = schedule;
     return summary;
+  }
+
+  private supportsSchedule(schedule: Awaited<ReturnType<ScheduleService["inspect"]>>): boolean {
+    return (
+      schedule.target.type !== "assignment-team-run" || this.host.supportsAssignmentTeamSchedules()
+    );
+  }
+
+  private async requireSupportedSchedule(
+    scheduleId: string,
+  ): Promise<Awaited<ReturnType<ScheduleService["inspect"]>>> {
+    const schedule = await this.scheduleService.inspect(scheduleId);
+    if (!this.supportsSchedule(schedule)) {
+      throw new Error(`Schedule not found: ${scheduleId}`);
+    }
+    return schedule;
   }
 
   private emitScheduleRpcError(
@@ -68,6 +88,15 @@ export class ScheduleSession {
     request: Extract<SessionInboundMessage, { type: "schedule/create" }>,
   ): Promise<void> {
     try {
+      if (request.target.type === "assignment-team-run" && !this.assignmentTeamSchedulesAvailable) {
+        throw new Error("Update the host to create Assignment Team Run schedules");
+      }
+      if (
+        request.target.type === "assignment-team-run" &&
+        !this.host.supportsAssignmentTeamSchedules()
+      ) {
+        throw new Error("Update the client to create Assignment Team Run schedules");
+      }
       const target =
         request.target.type === "self"
           ? { type: "agent" as const, agentId: request.target.agentId }
@@ -103,7 +132,9 @@ export class ScheduleSession {
         type: "schedule/list/response",
         payload: {
           requestId: request.requestId,
-          schedules: schedules.map((schedule) => this.toScheduleSummary(schedule)),
+          schedules: schedules
+            .filter((schedule) => this.supportsSchedule(schedule))
+            .map((schedule) => this.toScheduleSummary(schedule)),
           error: null,
         },
       });
@@ -116,7 +147,7 @@ export class ScheduleSession {
     request: Extract<SessionInboundMessage, { type: "schedule/inspect" }>,
   ): Promise<void> {
     try {
-      const schedule = await this.scheduleService.inspect(request.scheduleId);
+      const schedule = await this.requireSupportedSchedule(request.scheduleId);
       this.host.emit({
         type: "schedule/inspect/response",
         payload: {
@@ -134,6 +165,7 @@ export class ScheduleSession {
     request: Extract<SessionInboundMessage, { type: "schedule/logs" }>,
   ): Promise<void> {
     try {
+      await this.requireSupportedSchedule(request.scheduleId);
       const runs = await this.scheduleService.logs(request.scheduleId);
       this.host.emit({
         type: "schedule/logs/response",
@@ -152,6 +184,7 @@ export class ScheduleSession {
     request: Extract<SessionInboundMessage, { type: "schedule/pause" }>,
   ): Promise<void> {
     try {
+      await this.requireSupportedSchedule(request.scheduleId);
       const schedule = await this.scheduleService.pause(request.scheduleId);
       this.host.emit({
         type: "schedule/pause/response",
@@ -170,6 +203,7 @@ export class ScheduleSession {
     request: Extract<SessionInboundMessage, { type: "schedule/resume" }>,
   ): Promise<void> {
     try {
+      await this.requireSupportedSchedule(request.scheduleId);
       const schedule = await this.scheduleService.resume(request.scheduleId);
       this.host.emit({
         type: "schedule/resume/response",
@@ -188,6 +222,7 @@ export class ScheduleSession {
     request: Extract<SessionInboundMessage, { type: "schedule/delete" }>,
   ): Promise<void> {
     try {
+      await this.requireSupportedSchedule(request.scheduleId);
       await this.scheduleService.delete(request.scheduleId);
       this.host.emit({
         type: "schedule/delete/response",
@@ -206,6 +241,7 @@ export class ScheduleSession {
     request: Extract<SessionInboundMessage, { type: "schedule/run-once" }>,
   ): Promise<void> {
     try {
+      await this.requireSupportedSchedule(request.scheduleId);
       const schedule = await this.scheduleService.runOnce(request.scheduleId);
       this.host.emit({
         type: "schedule/run-once/response",
@@ -224,6 +260,7 @@ export class ScheduleSession {
     request: Extract<SessionInboundMessage, { type: "schedule/update" }>,
   ): Promise<void> {
     try {
+      await this.requireSupportedSchedule(request.scheduleId);
       const schedule = await this.scheduleService.update({
         id: request.scheduleId,
         ...(request.name !== undefined ? { name: request.name } : {}),

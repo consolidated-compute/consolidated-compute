@@ -51,17 +51,25 @@ function normalizeOptionalScheduleName(name: string | null): string | null {
 }
 
 function targetIdentity(target: ScheduleTarget): unknown {
-  if (target.type === "agent") {
-    return {
-      type: target.type,
-      agentId: target.agentId,
-    };
+  switch (target.type) {
+    case "agent":
+      return {
+        type: target.type,
+        agentId: target.agentId,
+      };
+    case "new-agent":
+      return {
+        type: target.type,
+        config: target.config,
+      };
+    case "assignment-team-run":
+      return {
+        type: target.type,
+        teamId: target.teamId,
+        assignmentId: target.assignmentId,
+        workspaceId: target.workspaceId,
+      };
   }
-
-  return {
-    type: target.type,
-    config: target.config,
-  };
 }
 
 function nameTargetIdentityKey(name: string, target: ScheduleTarget): string {

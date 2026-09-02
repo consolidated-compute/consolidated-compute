@@ -2,9 +2,21 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   compileEveryPresetToCron,
+  formatTarget,
   parseScheduleCreateInput,
   parseScheduleUpdateInput,
 } from "./shared.js";
+
+test("formats Assignment Team Run targets without assuming an agent config", () => {
+  expect(
+    formatTarget({
+      type: "assignment-team-run",
+      teamId: "team-1234567890",
+      assignmentId: "assignment-1234567890",
+      workspaceId: "workspace-1",
+    }),
+  ).toBe("assignment:assignment-1/team:team-1234567");
+});
 
 const baseOptions = {
   prompt: "do the thing",

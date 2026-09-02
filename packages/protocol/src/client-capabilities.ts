@@ -27,6 +27,9 @@ export const CLIENT_CAPS = {
   // COMPAT(timelineReplacementInvalidation): added in v0.5.0, remove legacy
   // reconstructed timeline replay after 2027-02-21 once the client floor supports invalidation.
   timelineReplacementInvalidation: "timeline_replacement_invalidation",
+  // COMPAT(assignmentTeamSchedules): added in v0.8.0, remove response projection
+  // after 2027-03-02 once the supported client floor understands Team schedule targets.
+  assignmentTeamSchedules: "assignment_team_schedules",
   browserHost: "browser_host",
 } as const;
 

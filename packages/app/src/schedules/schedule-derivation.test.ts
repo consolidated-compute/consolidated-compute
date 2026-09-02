@@ -130,4 +130,17 @@ describe("resolveSchedule target line", () => {
     });
     expect(resolve(unmatched).target).toEqual({ label: "~/work/api", provider: "codex" });
   });
+
+  it("keeps an Assignment Team Run target renderable before catalog hydration", () => {
+    const schedule = makeSchedule({
+      target: {
+        type: "assignment-team-run",
+        teamId: "team-1",
+        assignmentId: "assignment-1",
+        workspaceId: "workspace-1",
+      },
+    });
+
+    expect(resolve(schedule).target).toEqual({ label: "Assignment Team Run", provider: null });
+  });
 });
