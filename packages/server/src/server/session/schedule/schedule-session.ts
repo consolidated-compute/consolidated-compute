@@ -41,6 +41,8 @@ export class ScheduleSession {
     schedule: Awaited<ReturnType<ScheduleService["inspect"]>>,
     source?: object,
   ): boolean {
+    // COMPAT(assignmentTeamScheduleProjection): added in v0.7.2, remove after 2027-03-02
+    // once the supported app floor advertises assignment_team_schedules.
     return (
       schedule.target.type !== "assignment-team-run" ||
       this.host.supportsAssignmentTeamSchedules(source)
