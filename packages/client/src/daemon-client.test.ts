@@ -1179,6 +1179,41 @@ test("keeps Team run admission pending beyond the default session RPC deadline",
   await expect(responsePromise).rejects.toThrow("Admission response received");
 });
 
+test("rejects Team supervision requests when the daemon lacks the capability", async () => {
+  const logger = createMockLogger();
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_team_supervision_legacy_test",
+    logger,
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+
+  const connectPromise = client.connect();
+  mock.triggerOpen({ features: { teams: true } });
+  await connectPromise;
+
+  await expect(client.getTeamRunSupervision("run-1")).rejects.toThrow(
+    "Update the host to use supervised Team Runs.",
+  );
+  await expect(client.listTeamRunSupervisionEvents({ runId: "run-1" })).rejects.toThrow(
+    "Update the host to use supervised Team Runs.",
+  );
+  await expect(
+    client.respondToTeamRunSupervisionHumanRequest({
+      runId: "run-1",
+      humanRequestId: "human-1",
+      expectedRevision: 1,
+      actionId: "continue",
+      note: null,
+      idempotencyKey: "response-1",
+    }),
+  ).rejects.toThrow("Update the host to use supervised Team Runs.");
+  expect(mock.sent).toEqual([]);
+});
+
 test("sends correlated Team supervision state, event, and response requests", async () => {
   const logger = createMockLogger();
   const mock = createMockTransport();
@@ -1192,7 +1227,7 @@ test("sends correlated Team supervision state, event, and response requests", as
   clients.push(client);
 
   const connectPromise = client.connect();
-  mock.triggerOpen({ features: { teams: true } });
+  mock.triggerOpen({ features: { teams: true, teamSupervision: true } });
   await connectPromise;
 
   const statePromise = client.getTeamRunSupervision("run-1", "req-supervision-state");

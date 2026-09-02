@@ -1883,6 +1883,11 @@ describe("TeamRepository runs", () => {
         };
       },
     );
+    expect(creating.supervision?.events?.at(-1)).toMatchObject({
+      kind: "decision.dispatch",
+      agentIds: [creating.supervision!.supervisor.agentId, firstAgentId],
+      attemptId,
+    });
     await expect(
       repository.resolveSupervisedAgentAuthority(creating.supervision!.supervisor.agentId),
     ).resolves.toMatchObject({

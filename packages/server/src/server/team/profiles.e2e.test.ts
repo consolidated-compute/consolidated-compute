@@ -58,6 +58,7 @@ test("runs Plan, Implement, and Review through existing Paseo Agent Profiles", a
       agentProfiles: true,
       teams: true,
       teamSecurity: true,
+      teamSupervision: true,
     });
     const createdWorkspace = await client.createWorkspace({
       source: { kind: "directory", path: cwd },

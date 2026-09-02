@@ -1182,7 +1182,7 @@ export class TeamRepository {
             attemptId: input.attemptId,
             humanRequestId: null,
             roleIds: [active.step.snapshot.roleId],
-            agentIds: active.agentId ? [active.agentId] : [],
+            agentIds: [active.step.state.plannedAgentId],
             stepIds: [active.step.snapshot.stepId],
             artifactIds: outputArtifactId ? [outputArtifactId] : [],
             createdAt: timestamp,
@@ -1914,8 +1914,8 @@ function createDecisionSupervisionEvent(
   ];
   const agentIds = [
     update.supervision.supervisor.agentId,
-    ...(workerStep && "agentId" in workerStep.state && workerStep.state.agentId
-      ? [workerStep.state.agentId]
+    ...(workerStep && "plannedAgentId" in workerStep.state
+      ? [workerStep.state.plannedAgentId]
       : []),
   ];
   return {

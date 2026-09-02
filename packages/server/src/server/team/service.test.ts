@@ -1180,6 +1180,11 @@ describe("TeamRunService", () => {
       "worker",
       "supervisor",
     ]);
+    expect(
+      completed.supervision?.events
+        ?.filter((event) => event.kind === "worker.succeeded")
+        .map((event) => event.agentIds),
+    ).toEqual([[secondAgentId], [unusedAgentId]]);
     expect(harness.runtime.creations.map((creation) => creation.agentId)).toEqual([
       firstAgentId,
       secondAgentId,
