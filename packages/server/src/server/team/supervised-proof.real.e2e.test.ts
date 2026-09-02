@@ -22,6 +22,7 @@ import type {
 } from "../agent/agent-sdk-types.js";
 import { CodexAppServerAgentClient } from "../agent/providers/codex-app-server-agent.js";
 import { CODEX_AGENT_PROFILE_SECURITY_PRESETS } from "../agent/providers/codex/security-controls.js";
+import { asInternals } from "../test-utils/class-mocks.js";
 import { DaemonClient, createTestPaseoDaemon } from "../test-utils/index.js";
 
 const PASSWORD_HASH = "$2b$12$GMhF7pN4QnMlHOQXOqjd1OitKWPSmAO3FwB0PHzKtcZR/sAMryz76";
@@ -89,8 +90,8 @@ test(
     );
     const implementationFile = path.join(workspaceRoot, "supervised-proof.txt");
     const implementationCommand = `printf 'REAL_SUPERVISED_IMPLEMENTATION' > '${implementationFile}'`;
-    const planToken = "REAL_SUPERVISED_PLAN_TOKEN_7ce54f";
-    const implementationToken = "REAL_SUPERVISED_IMPLEMENT_TOKEN_30b9d1";
+    const planToken = "REAL_SUPERVISED_PLAN_TOKEN: 7ce54f";
+    const implementationToken = "REAL_SUPERVISED_IMPLEMENT_TOKEN: 30b9d1";
     const realCodex = new RecordingGateAgentClient(new CodexAppServerAgentClient(logger));
     const daemon = await createTestPaseoDaemon({
       paseoHomeRoot,
@@ -153,10 +154,8 @@ test(
             name: "Planner",
             profileId: "proof-planner",
             instructions: [
-              "Try to use collaboration.spawn_agent once.",
-              "If that tool is unavailable, do not use shell commands or MCP tools.",
-              "Respond with exactly these two lines:",
-              "DELEGATION_UNAVAILABLE",
+              "Do not use tools or delegate.",
+              "Respond with exactly this line:",
               planToken,
             ].join("\n"),
           },
@@ -165,11 +164,11 @@ test(
             name: "Builder",
             profileId: "proof-builder",
             instructions: [
-              `Copy the exact input line ${planToken}.`,
+              "Copy the complete line beginning REAL_SUPERVISED_PLAN_TOKEN: from the input Artifact.",
+              "Do not infer or invent the value after the prefix.",
               "Invoke exec_command exactly once with this exact command:",
               implementationCommand,
-              "Wait for the tool result, then respond with exactly these two lines:",
-              planToken,
+              "Wait for the tool result, then respond with exactly the copied plan-token line followed by this line:",
               implementationToken,
             ].join("\n"),
           },
@@ -178,11 +177,10 @@ test(
             name: "Reviewer",
             profileId: "proof-reviewer",
             instructions: [
-              `Copy the exact input line ${implementationToken}.`,
+              "Copy the complete line beginning REAL_SUPERVISED_IMPLEMENT_TOKEN: from the input Artifacts.",
+              "Do not infer or invent the value after the prefix.",
               "Do not use tools.",
-              "Respond with exactly these two lines:",
-              "REAL_SUPERVISED_REVIEW_APPROVED",
-              implementationToken,
+              "Respond with exactly REAL_SUPERVISED_REVIEW_APPROVED followed by the copied implementation-token line.",
             ].join("\n"),
           },
         ],
@@ -260,7 +258,6 @@ test(
       });
       const artifactsById = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
       expect(artifacts).toHaveLength(3);
-      expect(artifactsById.get(planArtifactId)?.content).toContain("DELEGATION_UNAVAILABLE");
       expect(artifactsById.get(planArtifactId)?.content).toContain(planToken);
       expect(artifactsById.get(implementationArtifactId)?.content).toContain(planToken);
       expect(artifactsById.get(implementationArtifactId)?.content).toContain(implementationToken);
@@ -273,6 +270,13 @@ test(
 
       const workerAgentIds = workerSteps.map(requireCompletedAgentId);
       const planEvents = streamEvents.get(workerAgentIds[0]!) ?? [];
+      const implementationPrompt = userMessageText(streamEvents.get(workerAgentIds[1]!) ?? []);
+      const reviewPrompt = userMessageText(streamEvents.get(workerAgentIds[2]!) ?? []);
+      expect(implementationPrompt).toContain(`ID: ${planArtifactId}`);
+      expect(implementationPrompt).toContain(planToken);
+      expect(reviewPrompt).toContain(`ID: ${planArtifactId}`);
+      expect(reviewPrompt).toContain(`ID: ${implementationArtifactId}`);
+      expect(reviewPrompt).toContain(implementationToken);
       expect(
         planEvents.some(
           (event) =>
@@ -294,6 +298,13 @@ test(
               ?.features?.multi_agent_v2 === false,
         ),
       ).toBe(true);
+      const providerFeatureObservations = await realCodex.observeFeatures("multi_agent_v2");
+      expect(
+        providerFeatureObservations.map((observation) => ({
+          feature: observation.feature,
+          enabled: observation.enabled,
+        })),
+      ).toEqual(Array.from({ length: 4 }, () => ({ feature: "multi_agent_v2", enabled: false })));
       expect(existsSync(implementationFile)).toBe(true);
 
       emitEvidence({
@@ -308,6 +319,7 @@ test(
         })),
         profileOptionsFrozenAfterCatalogRemoval: true,
         recursiveDelegationEnabled: false,
+        providerFeatureObservations,
         workspaceWriteObserved: existsSync(implementationFile),
       });
     } finally {
@@ -327,6 +339,10 @@ class RecordingGateAgentClient implements AgentClient {
   readonly provider: AgentClient["provider"];
   readonly capabilities: AgentClient["capabilities"];
   readonly createdConfigs: AgentSessionConfig[] = [];
+  private readonly createdSessions: Array<{
+    agentId: string | null;
+    session: AgentSession;
+  }> = [];
   private firstCreationReleased = false;
   private readonly firstCreationObserved: Promise<void>;
   private resolveFirstCreationObserved!: () => void;
@@ -354,7 +370,9 @@ class RecordingGateAgentClient implements AgentClient {
       this.resolveFirstCreationObserved();
       await this.firstCreationGate;
     }
-    return this.inner.createSession(config, launchContext, options);
+    const session = await this.inner.createSession(config, launchContext, options);
+    this.createdSessions.push({ agentId: launchContext?.agentId ?? null, session });
+    return session;
   }
 
   resumeSession(
@@ -387,9 +405,83 @@ class RecordingGateAgentClient implements AgentClient {
     this.resolveFirstCreationGate();
   }
 
+  observeFeatures(featureName: string): Promise<CodexFeatureObservation[]> {
+    return Promise.all(
+      this.createdSessions.map(({ agentId, session }) =>
+        observeCodexFeature(session, agentId, featureName),
+      ),
+    );
+  }
+
   shutdown(): Promise<void> | undefined {
     return this.inner.shutdown?.();
   }
+}
+
+interface CodexFeatureObservation {
+  agentId: string | null;
+  threadId: string;
+  feature: string;
+  enabled: boolean;
+}
+
+interface CodexSessionTestAccess {
+  currentThreadId: string | null;
+  client: {
+    request(method: string, params?: unknown): Promise<unknown>;
+  } | null;
+}
+
+interface CodexExperimentalFeature {
+  name: string;
+  enabled: boolean;
+}
+
+async function observeCodexFeature(
+  session: AgentSession,
+  agentId: string | null,
+  featureName: string,
+): Promise<CodexFeatureObservation> {
+  const internals = asInternals<CodexSessionTestAccess>(session);
+  if (!internals.client || !internals.currentThreadId) {
+    throw new Error("Real Codex session did not expose its connected app-server thread");
+  }
+  const response = await internals.client.request("experimentalFeature/list", {
+    threadId: internals.currentThreadId,
+    limit: 1_000,
+  });
+  const feature = parseCodexExperimentalFeatures(response).find(
+    (candidate) => candidate.name === featureName,
+  );
+  if (!feature) {
+    throw new Error(`Codex app-server did not report feature ${featureName}`);
+  }
+  return {
+    agentId,
+    threadId: internals.currentThreadId,
+    feature: feature.name,
+    enabled: feature.enabled,
+  };
+}
+
+function parseCodexExperimentalFeatures(value: unknown): CodexExperimentalFeature[] {
+  if (!isRecord(value) || !Array.isArray(value.data)) {
+    throw new Error("Codex app-server returned an invalid experimental feature response");
+  }
+  return value.data.map((candidate) => {
+    if (
+      !isRecord(candidate) ||
+      typeof candidate.name !== "string" ||
+      typeof candidate.enabled !== "boolean"
+    ) {
+      throw new Error("Codex app-server returned an invalid experimental feature entry");
+    }
+    return { name: candidate.name, enabled: candidate.enabled };
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function requireCompletedAgentId(step: {
@@ -408,6 +500,14 @@ function requireOutputArtifactId(step: {
   const artifactId = step.snapshot.outputArtifact?.id;
   if (!artifactId) throw new Error(`Completed worker ${step.snapshot.stepId} has no Artifact`);
   return artifactId;
+}
+
+function userMessageText(events: AgentStreamEvent[]): string {
+  return events
+    .flatMap((event) =>
+      event.type === "timeline" && event.item.type === "user_message" ? [event.item.text] : [],
+    )
+    .join("\n");
 }
 
 function securityPreset(id: string): Record<string, unknown> {
