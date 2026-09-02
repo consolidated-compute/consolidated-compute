@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 const NEAR_BOTTOM_THRESHOLD_PX = 72;
 const DEFAULT_SCROLL_TOLERANCE_PX = 24;
@@ -12,6 +12,31 @@ export interface ScrollMetrics {
 
 function getVisibleChatScroll(page: Page) {
   return page.locator('[data-testid="agent-chat-scroll"]:visible').first();
+}
+
+interface PositionedToolCall {
+  locator: Locator;
+  bounds: { x: number; y: number; width: number; height: number };
+}
+
+async function readRenderedToolCalls(toolCalls: Locator): Promise<PositionedToolCall[]> {
+  const entries = await Promise.all(
+    Array.from({ length: await toolCalls.count() }, async (_, index) => ({
+      locator: toolCalls.nth(index),
+      bounds: await toolCalls.nth(index).boundingBox(),
+    })),
+  );
+  return entries.filter(
+    (entry): entry is PositionedToolCall => entry.bounds !== null && entry.bounds.width > 0,
+  );
+}
+
+function closestToolCallToY(toolCalls: PositionedToolCall[], targetY: number) {
+  return toolCalls.toSorted(
+    (left, right) =>
+      Math.abs(left.bounds.y + left.bounds.height / 2 - targetY) -
+      Math.abs(right.bounds.y + right.bounds.height / 2 - targetY),
+  )[0];
 }
 
 export async function readScrollMetrics(page: Page): Promise<ScrollMetrics> {
@@ -180,64 +205,64 @@ export async function clickToolCallBesideScrollToBottomButton(page: Page): Promi
   const visibleButtonBounds = buttonBounds!;
 
   const toolCalls = page.locator('[data-testid="tool-call-badge"] [role="button"]');
-  const toolCallBounds = await Promise.all(
-    Array.from({ length: await toolCalls.count() }, async (_, index) => ({
-      index,
-      bounds: await toolCalls.nth(index).boundingBox(),
-    })),
-  );
   const buttonCenterY = visibleButtonBounds.y + visibleButtonBounds.height / 2;
-  const candidate = toolCallBounds
-    .filter(
-      (entry): entry is { index: number; bounds: NonNullable<typeof entry.bounds> } =>
-        entry.bounds !== null && entry.bounds.width > 0,
-    )
-    .sort(
-      (left, right) =>
-        Math.abs(left.bounds.y + left.bounds.height / 2 - buttonCenterY) -
-        Math.abs(right.bounds.y + right.bounds.height / 2 - buttonCenterY),
-    )[0];
+  const initialToolCalls = await readRenderedToolCalls(toolCalls);
+  const initialCandidate = closestToolCallToY(initialToolCalls, buttonCenterY);
   expect(
-    candidate,
+    initialCandidate,
     `Expected at least one rendered tool-call badge: ${JSON.stringify({
       buttonBounds,
       scrollMetrics: await readScrollMetrics(page),
-      toolCallBounds,
+      toolCallBounds: initialToolCalls.map(({ bounds }) => bounds),
     })}`,
   ).toBeDefined();
-  const visibleToolCall = candidate!;
-  const alignedToolCall = toolCalls.nth(visibleToolCall.index);
   // Scroll and virtualization corrections can carry the tool call through the target band. Keep
-  // correcting against live geometry and require it to settle before testing the actual hit area.
+  // selecting against live geometry and require it to settle before testing the actual hit area.
   let alignedSamples = 0;
   await expect
     .poll(async () => {
-      const [currentButtonBounds, currentToolCallBounds] = await Promise.all([
-        scrollToBottomButton.boundingBox(),
-        alignedToolCall.boundingBox(),
-      ]);
-      if (!currentButtonBounds || !currentToolCallBounds) {
+      const currentButtonBounds = await scrollToBottomButton.boundingBox();
+      if (!currentButtonBounds) {
         alignedSamples = 0;
         return false;
       }
       const currentButtonCenterY = currentButtonBounds.y + currentButtonBounds.height / 2;
-      const toolCallCenterY = currentToolCallBounds.y + currentToolCallBounds.height / 2;
-      const correction = toolCallCenterY - currentButtonCenterY;
-      if (Math.abs(correction) > currentButtonBounds.height / 4) {
+      const closest = closestToolCallToY(
+        await readRenderedToolCalls(toolCalls),
+        currentButtonCenterY,
+      );
+      if (!closest) {
         alignedSamples = 0;
-        await getVisibleChatScroll(page).evaluate((scroll, deltaY) => {
-          (scroll as HTMLElement).scrollTop += deltaY;
-        }, correction);
         return false;
       }
-      alignedSamples += 1;
-      return alignedSamples >= 3;
+      const toolCallCenterY = closest.bounds.y + closest.bounds.height / 2;
+      if (
+        toolCallCenterY >= currentButtonBounds.y &&
+        toolCallCenterY <= currentButtonBounds.y + currentButtonBounds.height
+      ) {
+        alignedSamples += 1;
+        return alignedSamples >= 3;
+      }
+      alignedSamples = 0;
+      const deltaY = Math.max(-200, Math.min(200, toolCallCenterY - currentButtonCenterY));
+      await getVisibleChatScroll(page).evaluate((scroll, delta) => {
+        (scroll as HTMLElement).scrollTop += delta;
+      }, deltaY);
+      return false;
     })
     .toBe(true);
 
+  const currentButtonBounds = await scrollToBottomButton.boundingBox();
+  expect(currentButtonBounds, "Expected scroll-to-bottom button to remain visible").not.toBeNull();
+  const currentButtonCenterY = currentButtonBounds!.y + currentButtonBounds!.height / 2;
+  const alignedToolCall = closestToolCallToY(
+    await readRenderedToolCalls(toolCalls),
+    currentButtonCenterY,
+  )?.locator;
+  expect(alignedToolCall, "Expected an aligned tool-call badge").toBeDefined();
   const [alignedButtonBounds, visibleToolCallBounds] = await Promise.all([
     scrollToBottomButton.boundingBox(),
-    alignedToolCall.boundingBox(),
+    alignedToolCall!.boundingBox(),
   ]);
   expect(alignedButtonBounds, "Expected scroll-to-bottom button to remain visible").not.toBeNull();
   expect(
@@ -251,7 +276,7 @@ export async function clickToolCallBesideScrollToBottomButton(page: Page): Promi
     x: finalToolCallBounds.x + 24,
     y: finalToolCallBounds.y + finalToolCallBounds.height / 2,
   };
-  const toolCallReceivesPointer = await alignedToolCall.evaluate((toolCall, point) => {
+  const toolCallReceivesPointer = await alignedToolCall!.evaluate((toolCall, point) => {
     const hit = document.elementFromPoint(point.x, point.y);
     return hit !== null && toolCall.contains(hit);
   }, clickPoint);
