@@ -78,6 +78,71 @@ function createRun(definition = createDefinition()): PersistedTeamRunRecord {
   });
 }
 
+function createSupervisedRun(): PersistedTeamRunRecord {
+  const source = createRun();
+  const supervisorRole = {
+    id: "supervisor",
+    name: "Supervisor",
+    instructions: "Coordinate the run.",
+    profileId: "codex-supervisor",
+  };
+  const definition = PersistedTeamDefinitionSchema.parse({
+    ...source.teamSnapshot,
+    roles: [...source.teamSnapshot.roles, supervisorRole],
+  });
+  const workerTemplate = source.steps[0]!.snapshot;
+  const assignment = {
+    id: "asgn_0123456789abcdef",
+    revision: 1,
+    title: "Deliver the Team RPC",
+    objective: source.objective,
+    workItem: null,
+    state: { status: "open" as const },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  return PersistedTeamRunRecordSchema.parse({
+    ...source,
+    teamSnapshot: definition,
+    assignmentId: assignment.id,
+    assignmentRevision: assignment.revision,
+    assignmentSnapshot: assignment,
+    steps: [],
+    state: { status: "queued" },
+    supervision: {
+      revision: 1,
+      phase: "queued",
+      supervisor: {
+        roleId: supervisorRole.id,
+        roleName: supervisorRole.name,
+        roleInstructions: supervisorRole.instructions,
+        resolvedLaunch: {
+          profileId: supervisorRole.profileId,
+          provider: "codex",
+          model: "gpt-5.6-sol",
+          modeId: null,
+          thinkingOptionId: "high",
+          featureValues: {},
+        },
+        agentId: "8da4ef28-2a80-49a3-89bd-040de4864ed6",
+      },
+      workerTemplates: [workerTemplate],
+      limits: {
+        maxWorkItems: 24,
+        maxActiveWorkers: 1,
+        maxAttemptsPerWorkItem: 4,
+        maxSupervisorActions: 128,
+        maxDelegationDepth: 1,
+      },
+      workItems: [],
+      decisions: [],
+      events: [],
+      humanRequest: null,
+      updatedAt: timestamp,
+    },
+  });
+}
+
 function createRepository(overrides: Partial<TeamSessionRepository> = {}): TeamSessionRepository {
   return {
     createDefinition: vi.fn(async () => createDefinition()),
@@ -87,6 +152,7 @@ function createRepository(overrides: Partial<TeamSessionRepository> = {}): TeamS
     deleteDefinition: vi.fn(async () => undefined),
     listRuns: vi.fn(async () => ({ runs: [createRun()], nextCursor: null, issues: [] })),
     getRun: vi.fn(async () => createRun()),
+    listSupervisionEvents: vi.fn(async () => ({ events: [], nextCursor: null })),
     ...overrides,
   };
 }
@@ -111,6 +177,7 @@ function createRunService(overrides: Partial<TeamSessionRunService> = {}): TeamS
     })),
     startRun: vi.fn(async () => createRun()),
     cancelRun: vi.fn(async () => createRun()),
+    respondToSupervisionHumanRequest: vi.fn(async () => createSupervisedRun()),
     ...overrides,
   };
 }
@@ -159,6 +226,83 @@ describe("TeamSession", () => {
         type: "team.create.response",
         payload: { requestId: "request_create", team: { id: "team_delivery" } },
       },
+    ]);
+  });
+
+  test("exposes durable supervision state, events, and human responses", async () => {
+    const supervisedRun = createSupervisedRun();
+    const listSupervisionEvents = vi.fn(async () => ({
+      events: [
+        {
+          id: "sevt_0123456789abcdef",
+          sequence: 1,
+          kind: "decision.escalate",
+          title: "Supervisor requested human input",
+          detail: "Choose the next action.",
+          decisionId: "decision_escalate",
+          actionId: "action_escalate",
+          workItemId: null,
+          attemptId: null,
+          humanRequestId: "human_request",
+          roleIds: ["supervisor"],
+          agentIds: ["8da4ef28-2a80-49a3-89bd-040de4864ed6"],
+          stepIds: [],
+          artifactIds: [],
+          createdAt: timestamp,
+        },
+      ],
+      nextCursor: "next-events",
+    }));
+    const respondToSupervisionHumanRequest = vi.fn(async () => supervisedRun);
+    const harness = createHarness({
+      repository: createRepository({
+        getRun: vi.fn(async () => supervisedRun),
+        listSupervisionEvents,
+      }),
+      runService: createRunService({ respondToSupervisionHumanRequest }),
+    });
+
+    await harness.session.dispatch(
+      SessionInboundMessageSchema.parse({
+        type: "team.run.supervision.get.request",
+        requestId: "request-state",
+        runId: supervisedRun.id,
+      }),
+    );
+    await harness.session.dispatch(
+      SessionInboundMessageSchema.parse({
+        type: "team.run.supervision.events.list.request",
+        requestId: "request-events",
+        runId: supervisedRun.id,
+        limit: 1,
+      }),
+    );
+    await harness.session.dispatch(
+      SessionInboundMessageSchema.parse({
+        type: "team.run.supervision.human_request.respond.request",
+        requestId: "request-respond",
+        runId: supervisedRun.id,
+        humanRequestId: "human_request",
+        expectedRevision: 1,
+        actionId: "continue",
+        note: null,
+        idempotencyKey: "human-response",
+      }),
+    );
+
+    expect(listSupervisionEvents).toHaveBeenCalledWith({ runId: supervisedRun.id, limit: 1 });
+    expect(respondToSupervisionHumanRequest).toHaveBeenCalledWith({
+      runId: supervisedRun.id,
+      requestId: "human_request",
+      expectedRequestRevision: 1,
+      actionId: "continue",
+      note: null,
+      idempotencyKey: "human-response",
+    });
+    expect(harness.messages.map((message) => message.type)).toEqual([
+      "team.run.supervision.get.response",
+      "team.run.supervision.events.list.response",
+      "team.run.supervision.human_request.respond.response",
     ]);
   });
 

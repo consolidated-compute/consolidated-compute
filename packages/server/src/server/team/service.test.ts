@@ -1180,6 +1180,11 @@ describe("TeamRunService", () => {
       "worker",
       "supervisor",
     ]);
+    expect(
+      completed.supervision?.events
+        ?.filter((event) => event.kind === "worker.succeeded")
+        .map((event) => event.agentIds),
+    ).toEqual([[secondAgentId], [unusedAgentId]]);
     expect(harness.runtime.creations.map((creation) => creation.agentId)).toEqual([
       firstAgentId,
       secondAgentId,
@@ -1800,7 +1805,7 @@ describe("TeamRunService", () => {
     });
   });
 
-  test("persists escalation as an idle human wait without launching a worker", async () => {
+  test("preserves an idle human wait across restart and resumes only after a durable response", async () => {
     const harness = await createHarness();
     harness.daemonConfigStore.agentProfiles.push({
       id: "profile_supervisor",
@@ -1870,8 +1875,23 @@ describe("TeamRunService", () => {
     });
     expect(harness.runtime.creations.map((creation) => creation.agentId)).toEqual([firstAgentId]);
 
-    const request = waiting.supervision!.humanRequest!;
-    const resumed = await harness.service.respondToSupervisionHumanRequest({
+    await harness.service.shutdown();
+    const preservedWait = await harness.repository.getRun(run.id);
+    expect(preservedWait).toMatchObject({
+      state: { status: "running" },
+      supervision: { phase: "awaiting_human" },
+    });
+    expect(preservedWait?.supervision?.humanRequest).not.toHaveProperty("resolution");
+    const restarted = await createHarness({
+      repository: harness.repository,
+      assignmentRepository: harness.assignments,
+      workspace: createWorkspace(),
+    });
+    expect(restarted.runtime.creations).toEqual([]);
+    expect(restarted.runtime.streams).toEqual([]);
+
+    const request = (await restarted.repository.getRun(run.id))!.supervision!.humanRequest!;
+    const resumed = await restarted.service.respondToSupervisionHumanRequest({
       runId: run.id,
       requestId: request.id,
       expectedRequestRevision: request.revision,
@@ -1889,12 +1909,12 @@ describe("TeamRunService", () => {
         },
       },
     });
-    await harness.runtime.waitForStreamCount(firstAgentId, 2);
+    await restarted.runtime.waitForStreamCount(firstAgentId, 1);
     expect(
-      harness.runtime.streams.filter((stream) => stream.agentId === firstAgentId)[1]?.prompt,
+      restarted.runtime.streams.find((stream) => stream.agentId === firstAgentId)?.prompt,
     ).toContain("Proceed with the bounded plan.");
     await expect(
-      harness.service.respondToSupervisionHumanRequest({
+      restarted.service.respondToSupervisionHumanRequest({
         runId: run.id,
         requestId: request.id,
         expectedRequestRevision: request.revision,
@@ -1906,12 +1926,97 @@ describe("TeamRunService", () => {
       supervision: { humanRequest: { resolution: { actionId: "continue" } } },
     });
 
-    const canceled = await harness.service.cancelRun(run.id);
+    const canceled = await restarted.service.cancelRun(run.id);
     expect(canceled).toMatchObject({
       state: { status: "canceled" },
       supervision: {
         phase: "canceled",
         humanRequest: { resolution: { actionId: "continue" } },
+      },
+    });
+  });
+
+  test("observes Workspace archival during safe-wait startup reconciliation", async () => {
+    const harness = await createHarness();
+    harness.daemonConfigStore.agentProfiles.push({
+      id: "profile_supervisor",
+      name: "Supervisor",
+      provider: "codex",
+      model: "gpt-5.6",
+      providerOptions: { features: { multi_agent_v2: false } },
+    });
+    const definition = await harness.repository.updateDefinition({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      patch: {
+        roles: [
+          ...harness.definition.roles,
+          {
+            id: "role_supervisor",
+            name: "Supervisor",
+            instructions: "Escalate when the objective requires a human decision.",
+            profileId: "profile_supervisor",
+          },
+        ],
+      },
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Startup reconciliation race",
+      objective: "Wait for human input while the daemon restarts.",
+      workItem: null,
+    });
+    const run = await harness.service.admitSupervisedAssignmentRun({
+      teamId: definition.id,
+      expectedRevision: definition.revision,
+      idempotencyKey: "supervised-startup-race",
+      assignmentId: assignment.id,
+      expectedAssignmentRevision: assignment.revision,
+      workspaceId: "wks_team_service",
+      supervisorRoleId: "role_supervisor",
+    });
+    await harness.runtime.waitForStream(firstAgentId);
+    harness.runtime.finalResponses.set(
+      firstAgentId,
+      JSON.stringify({
+        kind: "escalate",
+        actionId: "action_escalate_startup_race",
+        summary: "Wait for a human response.",
+        workItemId: null,
+      }),
+    );
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-supervisor-startup-race",
+    });
+    await expect(harness.service.waitForRun(run.id)).resolves.toMatchObject({
+      state: { status: "running" },
+      supervision: { phase: "awaiting_human" },
+    });
+    await harness.service.shutdown();
+
+    const restarted = await createHarness({
+      repository: harness.repository,
+      assignmentRepository: harness.assignments,
+      workspace: createWorkspace(),
+      initialize: false,
+    });
+    restarted.workspaceRegistry.blockNextGet = true;
+    const staleReadStarted = restarted.workspaceRegistry.waitForBlockedGet();
+    const initialization = restarted.service.initialize();
+    await staleReadStarted;
+    try {
+      await restarted.workspaceRegistry.archive("wks_team_service");
+    } finally {
+      restarted.workspaceRegistry.unblockGet();
+    }
+    await initialization;
+
+    await expect(restarted.repository.getRun(run.id)).resolves.toMatchObject({
+      state: { status: "canceled" },
+      supervision: {
+        phase: "canceled",
+        humanRequest: { retirement: { reason: "canceled" } },
       },
     });
   });

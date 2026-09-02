@@ -39,11 +39,15 @@ export const TEAM_THINKING_OPTION_ID_MAX_CHARS = 256;
 export const TEAM_ENTITY_ID_MAX_CHARS = 128;
 export const TEAM_HANDOFF_MAX_BYTES = 4_096;
 export const TEAM_SUPERVISION_DECISION_SUMMARY_MAX_CHARS = 4_096;
+export const TEAM_SUPERVISION_EVENT_DETAIL_MAX_CHARS = 8_192;
+export const TEAM_SUPERVISION_EVENT_KIND_MAX_CHARS = 128;
+export const TEAM_SUPERVISION_EVENT_TITLE_MAX_CHARS = 256;
 export const TEAM_SUPERVISION_HUMAN_REQUEST_DETAIL_MAX_CHARS = 8_192;
 export const TEAM_SUPERVISION_HUMAN_REQUEST_NOTE_MAX_CHARS = 4_096;
 export const TEAM_SUPERVISION_HUMAN_REQUEST_TITLE_MAX_CHARS = 256;
 export const TEAM_SUPERVISION_MAX_ATTEMPTS_PER_WORK_ITEM = 4;
 export const TEAM_SUPERVISION_MAX_DECISIONS = 128;
+export const TEAM_SUPERVISION_MAX_EVENTS = 256;
 export const TEAM_SUPERVISION_MAX_HUMAN_ACTIONS = 8;
 export const TEAM_SUPERVISION_MAX_RUN_STEPS = 256;
 export const TEAM_SUPERVISION_MAX_WORK_ITEMS = TEAM_MAX_WORKFLOW_STEPS;
@@ -363,6 +367,26 @@ export const PersistedTeamRunSupervisionHumanRequestSchema = z
     }
   });
 
+export const PersistedTeamRunSupervisionEventSchema = z
+  .object({
+    id: PersistedTeamEntityIdSchema,
+    sequence: z.number().int().positive(),
+    kind: nonBlankStringSchema(TEAM_SUPERVISION_EVENT_KIND_MAX_CHARS),
+    title: nonBlankStringSchema(TEAM_SUPERVISION_EVENT_TITLE_MAX_CHARS),
+    detail: nonBlankStringSchema(TEAM_SUPERVISION_EVENT_DETAIL_MAX_CHARS).optional(),
+    decisionId: PersistedTeamEntityIdSchema.nullable(),
+    actionId: PersistedTeamEntityIdSchema.nullable(),
+    workItemId: PersistedTeamEntityIdSchema.nullable(),
+    attemptId: PersistedTeamEntityIdSchema.nullable(),
+    humanRequestId: PersistedTeamEntityIdSchema.nullable(),
+    roleIds: z.array(PersistedTeamEntityIdSchema).max(TEAM_MAX_ROLES),
+    agentIds: z.array(z.guid()).max(TEAM_SUPERVISION_MAX_RUN_STEPS),
+    stepIds: z.array(PersistedTeamEntityIdSchema).max(TEAM_SUPERVISION_MAX_RUN_STEPS),
+    artifactIds: z.array(PersistedAssignmentArtifactIdSchema).max(TEAM_SUPERVISION_MAX_RUN_STEPS),
+    createdAt: TimestampSchema,
+  })
+  .strict();
+
 export const PersistedTeamRunSupervisionSchema = z
   .object({
     revision: z.number().int().positive(),
@@ -388,6 +412,11 @@ export const PersistedTeamRunSupervisionSchema = z
     decisions: z
       .array(PersistedTeamRunSupervisionDecisionSchema)
       .max(TEAM_SUPERVISION_MAX_DECISIONS),
+    // COMPAT(teamSupervisionEvents): added in v0.7.0, review after 2027-03-01; remove once pre-v0.7.0 supervised Team Run records are migrated or retired.
+    events: z
+      .array(PersistedTeamRunSupervisionEventSchema)
+      .max(TEAM_SUPERVISION_MAX_EVENTS)
+      .optional(),
     humanRequest: PersistedTeamRunSupervisionHumanRequestSchema.nullable(),
     updatedAt: TimestampSchema,
   })
@@ -1050,10 +1079,142 @@ function validateSupervisionSnapshot(run: TeamRunRecordShape): ContractIssue[] {
     });
   }
 
+  issues.push(...validateSupervisionEvents(run));
   issues.push(...validateSupervisionWorkItems(run));
   issues.push(...validateSupervisionDecisions(run));
   issues.push(...validateSupervisionHumanRequest(run));
   return issues;
+}
+
+function validateSupervisionEvents(run: TeamRunRecordShape): ContractIssue[] {
+  const supervision = run.supervision!;
+  if (!supervision.events) return [];
+  const issues: ContractIssue[] = [];
+  const decisionIds = new Set(supervision.decisions.map((decision) => decision.id));
+  const actionIds = new Set(supervision.decisions.map((decision) => decision.actionId));
+  const workItemIds = new Set(supervision.workItems.map((workItem) => workItem.id));
+  const attemptIds = new Set(supervision.workItems.flatMap((workItem) => workItem.attemptIds));
+  const humanRequestIds = new Set(supervision.humanRequest ? [supervision.humanRequest.id] : []);
+  const roleIds = new Set(run.teamSnapshot.roles.map((role) => role.id));
+  const agentIds = new Set<string>([supervision.supervisor.agentId]);
+  const stepIds = new Set<string>();
+  const artifactIds = new Set<string>();
+  for (const action of supervision.humanRequest?.actions ?? []) actionIds.add(action.id);
+  for (const step of run.steps) {
+    stepIds.add(step.snapshot.stepId);
+    if ("plannedAgentId" in step.state) agentIds.add(step.state.plannedAgentId);
+    if ("agentId" in step.state && step.state.agentId) agentIds.add(step.state.agentId);
+    for (const artifactId of step.snapshot.inputArtifactIds ?? []) artifactIds.add(artifactId);
+    if (step.snapshot.outputArtifact) artifactIds.add(step.snapshot.outputArtifact.id);
+  }
+
+  const eventIds = new Set<string>();
+  for (const [index, event] of supervision.events.entries()) {
+    if (event.sequence !== index + 1) {
+      issues.push({
+        path: ["supervision", "events", index, "sequence"],
+        message: "Supervision event sequences must be contiguous",
+      });
+    }
+    if (eventIds.has(event.id)) {
+      issues.push({
+        path: ["supervision", "events", index, "id"],
+        message: `Duplicate supervision event ID: ${event.id}`,
+      });
+    }
+    eventIds.add(event.id);
+    validateSupervisionEventReference(
+      event.decisionId,
+      decisionIds,
+      index,
+      "decisionId",
+      "decision",
+      issues,
+    );
+    validateSupervisionEventReference(
+      event.actionId,
+      actionIds,
+      index,
+      "actionId",
+      "action",
+      issues,
+    );
+    validateSupervisionEventReference(
+      event.workItemId,
+      workItemIds,
+      index,
+      "workItemId",
+      "work item",
+      issues,
+    );
+    validateSupervisionEventReference(
+      event.attemptId,
+      attemptIds,
+      index,
+      "attemptId",
+      "attempt",
+      issues,
+    );
+    validateSupervisionEventReference(
+      event.humanRequestId,
+      humanRequestIds,
+      index,
+      "humanRequestId",
+      "human request",
+      issues,
+    );
+    validateSupervisionEventReferences(event.roleIds, roleIds, index, "roleIds", "role", issues);
+    validateSupervisionEventReferences(
+      event.agentIds,
+      agentIds,
+      index,
+      "agentIds",
+      "agent",
+      issues,
+    );
+    validateSupervisionEventReferences(event.stepIds, stepIds, index, "stepIds", "step", issues);
+    validateSupervisionEventReferences(
+      event.artifactIds,
+      artifactIds,
+      index,
+      "artifactIds",
+      "Artifact",
+      issues,
+    );
+  }
+  return issues;
+}
+
+function validateSupervisionEventReference(
+  value: string | null,
+  validValues: ReadonlySet<string>,
+  eventIndex: number,
+  field: "decisionId" | "actionId" | "workItemId" | "attemptId" | "humanRequestId",
+  label: string,
+  issues: ContractIssue[],
+): void {
+  if (value === null || validValues.has(value)) return;
+  issues.push({
+    path: ["supervision", "events", eventIndex, field],
+    message: `Supervision event references unknown ${label}: ${value}`,
+  });
+}
+
+function validateSupervisionEventReferences(
+  values: readonly string[],
+  validValues: ReadonlySet<string>,
+  eventIndex: number,
+  field: "roleIds" | "agentIds" | "stepIds" | "artifactIds",
+  label: string,
+  issues: ContractIssue[],
+): void {
+  for (const [referenceIndex, value] of values.entries()) {
+    if (validValues.has(value)) continue;
+    issues.push({
+      path: ["supervision", "events", eventIndex, field, referenceIndex],
+      message: `Supervision event references unknown ${label}: ${value}`,
+    });
+  }
 }
 
 function validateSupervisionWorkItems(run: TeamRunRecordShape): ContractIssue[] {
@@ -1891,6 +2052,24 @@ function validateRunTimestamps(run: TeamRunRecordShape): ContractIssue[] {
       }
       precedingDecisionAt = decisionAt;
     }
+    let precedingEventAt: number | null = null;
+    for (const [index, event] of (run.supervision.events ?? []).entries()) {
+      const eventAt = validateTimestampBounds(
+        event.createdAt,
+        "createdAt",
+        ["supervision", "events", index],
+        createdAt,
+        updatedAt,
+        issues,
+      );
+      if (precedingEventAt !== null && eventAt < precedingEventAt) {
+        issues.push({
+          path: ["supervision", "events", index, "createdAt"],
+          message: "Supervision events must be ordered by creation time",
+        });
+      }
+      precedingEventAt = eventAt;
+    }
     const request = run.supervision.humanRequest;
     if (request) {
       const requestCreatedAt = validateTimestampBounds(
@@ -2198,6 +2377,10 @@ export function generateTeamId(): string {
 
 export function generateTeamRunId(): string {
   return `trun_${randomBytes(8).toString("hex")}`;
+}
+
+export function generateTeamSupervisionEventId(): string {
+  return `sevt_${randomBytes(8).toString("hex")}`;
 }
 
 export function generateTeamRoleId(): string {

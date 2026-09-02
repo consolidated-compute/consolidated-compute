@@ -225,6 +225,23 @@ export interface ListTeamRunsInput {
   requestId?: string;
 }
 
+export interface ListTeamRunSupervisionEventsInput {
+  runId: string;
+  cursor?: string;
+  limit?: number;
+  requestId?: string;
+}
+
+export interface RespondToTeamRunSupervisionHumanRequestInput {
+  runId: string;
+  humanRequestId: string;
+  expectedRevision: number;
+  actionId: string;
+  note: string | null;
+  idempotencyKey: string;
+  requestId?: string;
+}
+
 export interface CreateAssignmentInput extends AssignmentInputDto {
   requestId?: string;
 }
@@ -5771,6 +5788,41 @@ export class DaemonClient {
     });
   }
 
+  async getTeamRunSupervision(runId: string, requestId?: string) {
+    this.requireTeamsSupport();
+    this.requireTeamSupervisionSupport();
+    return this.sendNamespacedCorrelatedSessionRequest<"team.run.supervision.get.response">({
+      requestId,
+      message: { type: "team.run.supervision.get.request", runId },
+    });
+  }
+
+  async listTeamRunSupervisionEvents(input: ListTeamRunSupervisionEventsInput) {
+    this.requireTeamsSupport();
+    this.requireTeamSupervisionSupport();
+    const { requestId, ...message } = input;
+    return this.sendNamespacedCorrelatedSessionRequest<"team.run.supervision.events.list.response">(
+      {
+        requestId,
+        message: { type: "team.run.supervision.events.list.request", ...message },
+      },
+    );
+  }
+
+  async respondToTeamRunSupervisionHumanRequest(
+    input: RespondToTeamRunSupervisionHumanRequestInput,
+  ) {
+    this.requireTeamsSupport();
+    this.requireTeamSupervisionSupport();
+    const { requestId, ...message } = input;
+    return this.sendNamespacedCorrelatedSessionRequest<"team.run.supervision.human_request.respond.response">(
+      {
+        requestId,
+        message: { type: "team.run.supervision.human_request.respond.request", ...message },
+      },
+    );
+  }
+
   async createAssignment(input: CreateAssignmentInput) {
     this.requireAssignmentsSupport();
     const { requestId, ...assignment } = input;
@@ -5888,6 +5940,13 @@ export class DaemonClient {
     // COMPAT(teamRunPreview): added in v0.6.2, remove gate after 2027-02-28.
     if (this.lastServerInfoMessage?.features?.teamRunPreview !== true) {
       throw new Error("Update the host to preview Team Run security controls.");
+    }
+  }
+
+  private requireTeamSupervisionSupport(): void {
+    // COMPAT(teamSupervision): added in v0.7.0, remove gate after 2027-03-01.
+    if (this.lastServerInfoMessage?.features?.teamSupervision !== true) {
+      throw new Error("Update the host to use supervised Team Runs.");
     }
   }
 

@@ -1273,6 +1273,67 @@ describe("Team Run contract", () => {
     );
   });
 
+  test("keeps legacy supervision readable and validates append-only event identity", () => {
+    const legacy = createSupervisedAssignmentRun();
+    expect(legacy.supervision).not.toHaveProperty("events");
+    expect(PersistedTeamRunRecordSchema.safeParse(legacy).success).toBe(true);
+
+    const invalid = structuredClone(legacy);
+    invalid.supervision!.events = [
+      {
+        id: "sevt_duplicate",
+        sequence: 1,
+        kind: "decision.plan",
+        title: "Supervisor planned work",
+        decisionId: null,
+        actionId: null,
+        workItemId: null,
+        attemptId: null,
+        humanRequestId: null,
+        roleIds: [invalid.supervision!.supervisor.roleId],
+        agentIds: [invalid.supervision!.supervisor.agentId],
+        stepIds: [],
+        artifactIds: [],
+        createdAt: timestamp,
+      },
+      {
+        id: "sevt_duplicate",
+        sequence: 3,
+        kind: "run.interrupted",
+        title: "Team Run interrupted",
+        decisionId: "decision_missing",
+        actionId: "action_missing",
+        workItemId: "work_missing",
+        attemptId: "attempt_missing",
+        humanRequestId: "human_missing",
+        roleIds: ["role_missing"],
+        agentIds: ["00000000-0000-4000-8000-000000000099"],
+        stepIds: ["step_missing"],
+        artifactIds: ["aart_9999999999999999"],
+        createdAt: timestamp,
+      },
+    ];
+
+    const result = PersistedTeamRunRecordSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toEqual(
+      expect.arrayContaining([
+        "Supervision event sequences must be contiguous",
+        "Duplicate supervision event ID: sevt_duplicate",
+        "Supervision event references unknown decision: decision_missing",
+        "Supervision event references unknown action: action_missing",
+        "Supervision event references unknown work item: work_missing",
+        "Supervision event references unknown attempt: attempt_missing",
+        "Supervision event references unknown human request: human_missing",
+        "Supervision event references unknown role: role_missing",
+        "Supervision event references unknown agent: 00000000-0000-4000-8000-000000000099",
+        "Supervision event references unknown step: step_missing",
+        "Supervision event references unknown Artifact: aart_9999999999999999",
+      ]),
+    );
+  });
+
   test("rejects terminal success while a human request remains unresolved", () => {
     const supervised = createSupervisedAssignmentRun();
     const result = PersistedTeamRunRecordSchema.safeParse({

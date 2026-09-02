@@ -10,7 +10,14 @@ export const TEAM_MAX_WORKFLOW_STEPS = 24;
 export const TEAM_OBJECTIVE_MAX_CHARS = 32_000;
 export const TEAM_SECURITY_SUMMARY_MAX_CHARS = 240;
 export const TEAM_SUPERVISION_STATUS_MAX_CHARS = 64;
+export const TEAM_SUPERVISION_EVENT_DETAIL_MAX_CHARS = 8_192;
+export const TEAM_SUPERVISION_EVENT_KIND_MAX_CHARS = 128;
+export const TEAM_SUPERVISION_EVENT_TITLE_MAX_CHARS = 256;
+export const TEAM_SUPERVISION_HUMAN_REQUEST_DETAIL_MAX_CHARS = 8_192;
+export const TEAM_SUPERVISION_HUMAN_REQUEST_NOTE_MAX_CHARS = 4_096;
 export const TEAM_SUPERVISION_HUMAN_REQUEST_TITLE_MAX_CHARS = 256;
+export const TEAM_SUPERVISION_MAX_EVENT_REFERENCES = 256;
+export const TEAM_SUPERVISION_MAX_HUMAN_ACTIONS = 8;
 
 export const TeamSecurityFactDtoSchema = z.object({
   status: z.enum(["enforced", "policy_only", "unavailable"]),
@@ -115,6 +122,73 @@ export const TeamRunSupervisionSummaryDtoSchema = z.object({
     })
     .optional(),
   updatedAt: z.string(),
+});
+
+export const TeamRunSupervisionHumanActionDtoSchema = z.object({
+  id: z.string(),
+  label: z.string().min(1).max(128),
+  description: z.string().min(1).max(512).optional(),
+  requiresNote: z.boolean(),
+});
+
+export const TeamRunSupervisionHumanRequestDtoSchema = z.object({
+  id: z.string(),
+  revision: z.number().int().positive(),
+  kind: z.string().min(1).max(128),
+  title: z.string().min(1).max(TEAM_SUPERVISION_HUMAN_REQUEST_TITLE_MAX_CHARS),
+  detail: z.string().min(1).max(TEAM_SUPERVISION_HUMAN_REQUEST_DETAIL_MAX_CHARS),
+  actions: z
+    .array(TeamRunSupervisionHumanActionDtoSchema)
+    .min(1)
+    .max(TEAM_SUPERVISION_MAX_HUMAN_ACTIONS),
+  roleIds: z.array(z.string()).max(TEAM_MAX_ROLES),
+  agentIds: z.array(z.string()).max(TEAM_SUPERVISION_MAX_EVENT_REFERENCES),
+  stepIds: z.array(z.string()).max(TEAM_SUPERVISION_MAX_EVENT_REFERENCES),
+  artifactIds: z.array(z.string()).max(TEAM_MAX_WORKFLOW_STEPS),
+  createdAt: z.string(),
+  resolution: z
+    .object({
+      actionId: z.string(),
+      note: z.string().min(1).max(TEAM_SUPERVISION_HUMAN_REQUEST_NOTE_MAX_CHARS).nullable(),
+      resolvedAt: z.string(),
+    })
+    .optional(),
+  retirement: z
+    .object({
+      reason: z.enum(["failed", "canceled", "interrupted"]),
+      retiredAt: z.string(),
+    })
+    .optional(),
+});
+
+export const TeamRunSupervisionStateDtoSchema = z.object({
+  runId: z.string(),
+  revision: z.number().int().positive(),
+  status: z.string().min(1).max(TEAM_SUPERVISION_STATUS_MAX_CHARS),
+  supervisorRoleId: z.string(),
+  supervisorAgentId: z.string(),
+  completedWorkItems: z.number().int().nonnegative(),
+  totalWorkItems: z.number().int().nonnegative(),
+  humanRequest: TeamRunSupervisionHumanRequestDtoSchema.nullable(),
+  updatedAt: z.string(),
+});
+
+export const TeamRunSupervisionEventDtoSchema = z.object({
+  id: z.string(),
+  sequence: z.number().int().positive(),
+  kind: z.string().min(1).max(TEAM_SUPERVISION_EVENT_KIND_MAX_CHARS),
+  title: z.string().min(1).max(TEAM_SUPERVISION_EVENT_TITLE_MAX_CHARS),
+  detail: z.string().min(1).max(TEAM_SUPERVISION_EVENT_DETAIL_MAX_CHARS).optional(),
+  decisionId: z.string().nullable(),
+  actionId: z.string().nullable(),
+  workItemId: z.string().nullable(),
+  attemptId: z.string().nullable(),
+  humanRequestId: z.string().nullable(),
+  roleIds: z.array(z.string()).max(TEAM_MAX_ROLES),
+  agentIds: z.array(z.string()).max(TEAM_SUPERVISION_MAX_EVENT_REFERENCES),
+  stepIds: z.array(z.string()).max(TEAM_SUPERVISION_MAX_EVENT_REFERENCES),
+  artifactIds: z.array(z.string()).max(TEAM_SUPERVISION_MAX_EVENT_REFERENCES),
+  createdAt: z.string(),
 });
 
 export const TeamRunStepSnapshotDtoSchema = z.object({
@@ -295,6 +369,14 @@ export type TeamRunPreviewDto = z.infer<typeof TeamRunPreviewDtoSchema>;
 export type TeamRunPreviewRoleDto = z.infer<typeof TeamRunPreviewRoleDtoSchema>;
 export type TeamRunSupervisionStartDto = z.infer<typeof TeamRunSupervisionStartDtoSchema>;
 export type TeamRunSupervisionSummaryDto = z.infer<typeof TeamRunSupervisionSummaryDtoSchema>;
+export type TeamRunSupervisionHumanActionDto = z.infer<
+  typeof TeamRunSupervisionHumanActionDtoSchema
+>;
+export type TeamRunSupervisionHumanRequestDto = z.infer<
+  typeof TeamRunSupervisionHumanRequestDtoSchema
+>;
+export type TeamRunSupervisionStateDto = z.infer<typeof TeamRunSupervisionStateDtoSchema>;
+export type TeamRunSupervisionEventDto = z.infer<typeof TeamRunSupervisionEventDtoSchema>;
 export type TeamSecurityFactDto = z.infer<typeof TeamSecurityFactDtoSchema>;
 export type TeamSecurityPostureDto = z.infer<typeof TeamSecurityPostureDtoSchema>;
 export type TeamRoleDto = z.infer<typeof TeamRoleDtoSchema>;
