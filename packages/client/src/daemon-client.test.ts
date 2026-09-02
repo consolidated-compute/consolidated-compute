@@ -21,6 +21,7 @@ import {
   encodeTerminalStreamFrame,
   TerminalStreamOpcode,
 } from "@getpaseo/protocol/terminal-stream-protocol";
+import type { ServerInfoStatusPayload } from "@getpaseo/protocol/messages";
 
 expectTypeOf<"getGitDiff" extends keyof DaemonClient ? true : false>().toEqualTypeOf<false>();
 expectTypeOf<
@@ -99,7 +100,10 @@ function createMockTransport() {
   return {
     transport,
     sent,
-    triggerOpen: (options?: { preserveSent?: boolean; features?: Record<string, boolean> }) => {
+    triggerOpen: (options?: {
+      preserveSent?: boolean;
+      features?: ServerInfoStatusPayload["features"];
+    }) => {
       onOpen();
       if (!options?.preserveSent) {
         // Ignore HELLO handshake payloads in assertions.
@@ -1410,7 +1414,13 @@ test("gates and sends supervised Assignment-backed Team run admission", async ()
   });
   clients.push(supportedClient);
   const supportedConnect = supportedClient.connect();
-  supportedTransport.triggerOpen({ features: { assignments: true, teamSupervision: true } });
+  supportedTransport.triggerOpen({
+    features: {
+      assignments: true,
+      teamSupervision: true,
+      teamSupervisionAdmission: "available",
+    },
+  });
   await supportedConnect;
 
   const responsePromise = supportedClient.startAssignmentTeamRun(input);
@@ -1436,6 +1446,54 @@ test("gates and sends supervised Assignment-backed Team run admission", async ()
     }),
   );
   await expect(responsePromise).rejects.toThrow("Supervised admission response received");
+});
+
+test.each([
+  {
+    status: undefined,
+    message: "Update the host to start supervised Team Runs.",
+  },
+  {
+    status: "authentication_required" as const,
+    message: "Configure a persisted daemon password to start supervised Team Runs.",
+  },
+  {
+    status: "environment_password_unsupported" as const,
+    message:
+      "Replace PASEO_PASSWORD with a persisted daemon password to start supervised Team Runs.",
+  },
+])("rejects supervised admission when runtime status is $status", async ({ status, message }) => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: `clsk_supervised_assignment_${status ?? "legacy"}`,
+    logger: createMockLogger(),
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+  const connectPromise = client.connect();
+  mock.triggerOpen({
+    features: {
+      assignments: true,
+      teamSupervision: true,
+      ...(status ? { teamSupervisionAdmission: status } : {}),
+    },
+  });
+  await connectPromise;
+
+  await expect(
+    client.startAssignmentTeamRun({
+      teamId: "team-1",
+      expectedRevision: 1,
+      idempotencyKey: `retry-supervised-${status ?? "legacy"}`,
+      assignmentId: "asgn_0123456789abcdef",
+      expectedAssignmentRevision: 2,
+      workspaceId: "workspace-1",
+      supervision: { supervisorRoleId: "supervisor" },
+    }),
+  ).rejects.toThrow(message);
+  expect(mock.sent).toEqual([]);
 });
 
 test("honors explicit fetchAgent timeout below the session RPC default", async () => {

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { Logger } from "pino";
+import type { TeamSupervisionAdmissionStatus } from "@getpaseo/protocol/messages";
 import type { TeamRunPreviewDto } from "@getpaseo/protocol/team/types";
 
 import type { AgentRunCancellationResult } from "../agent/agent-manager.js";
@@ -252,6 +253,16 @@ export class TeamRunService {
     this.createAgentId = options.createAgentId ?? randomUUID;
   }
 
+  getSupervisedAdmissionStatus(): TeamSupervisionAdmissionStatus {
+    if (this.supervisedControlPlaneProtection === "environment_password") {
+      return "environment_password_unsupported";
+    }
+    if (this.supervisedControlPlaneProtection === "passwordless") {
+      return "authentication_required";
+    }
+    return "available";
+  }
+
   async initialize(): Promise<void> {
     if (this.initialized) return;
     let unsubscribeTerminationBoundaries: (() => void) | null = null;
@@ -395,10 +406,11 @@ export class TeamRunService {
   ): Promise<PersistedTeamRunRecord> {
     const assignments = this.assignmentRepository;
     if (!assignments) throw new TeamAssignmentRepositoryUnavailableError();
-    if (this.supervisedControlPlaneProtection === "environment_password") {
+    const admissionStatus = this.getSupervisedAdmissionStatus();
+    if (admissionStatus === "environment_password_unsupported") {
       throw new TeamSupervisedRunEnvironmentPasswordUnsupportedError();
     }
-    if (this.supervisedControlPlaneProtection === "passwordless") {
+    if (admissionStatus === "authentication_required") {
       throw new TeamSupervisedRunAuthenticationRequiredError();
     }
     const identity = {

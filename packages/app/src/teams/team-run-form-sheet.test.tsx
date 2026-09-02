@@ -5,7 +5,7 @@ import React, { type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { TeamDefinitionDto } from "@getpaseo/protocol/team/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TeamRunFormSheet } from "./team-run-form-sheet";
+import { supportsSupervisedTeamRunAdmission, TeamRunFormSheet } from "./team-run-form-sheet";
 
 const { formModel, previewState, sheetState, submissionState } = vi.hoisted(() => {
   const team: TeamDefinitionDto = {
@@ -216,6 +216,28 @@ describe("TeamRunFormSheet", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+  });
+
+  it("offers supervised admission only when the runtime advertises availability", () => {
+    expect(
+      supportsSupervisedTeamRunAdmission({
+        teamSupervision: true,
+        teamSupervisionAdmission: "available",
+      }),
+    ).toBe(true);
+    expect(
+      supportsSupervisedTeamRunAdmission({
+        teamSupervision: true,
+        teamSupervisionAdmission: "authentication_required",
+      }),
+    ).toBe(false);
+    expect(
+      supportsSupervisedTeamRunAdmission({
+        teamSupervision: true,
+        teamSupervisionAdmission: "environment_password_unsupported",
+      }),
+    ).toBe(false);
+    expect(supportsSupervisedTeamRunAdmission({ teamSupervision: true })).toBe(false);
   });
 
   it("blocks every delegated sheet dismissal while Start is pending", () => {

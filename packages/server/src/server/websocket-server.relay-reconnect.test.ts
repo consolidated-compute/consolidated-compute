@@ -106,6 +106,7 @@ import { VoiceAssistantWebSocketServer } from "./websocket-server";
 import { DAEMON_PERMISSIONS, parseServerInfoStatusPayload } from "./messages.js";
 import type { SpeechReadinessSnapshot } from "./speech/speech-runtime.js";
 import type { AssignmentRepository } from "./assignment/repository.js";
+import type { TeamRepository } from "./team/repository.js";
 import type { TeamRunService } from "./team/service.js";
 
 interface WebSocketServerInternals {
@@ -231,6 +232,7 @@ function createServer(options?: {
   logger?: ReturnType<typeof createLogger>;
   startPaused?: boolean;
   assignmentRepository?: AssignmentRepository;
+  teamRepository?: TeamRepository;
   teamRunService?: TeamRunService;
 }) {
   const speechReadiness = options?.speechReadiness ?? null;
@@ -314,7 +316,7 @@ function createServer(options?: {
     undefined,
     undefined,
     undefined,
-    undefined,
+    options?.teamRepository,
     options?.teamRunService,
     options?.assignmentRepository,
   );
@@ -1061,6 +1063,29 @@ describe("relay external socket reconnect behavior", () => {
     expect(sessionMock.instances.at(-1)?.args.assignmentRepository).toBe(assignmentRepository);
     await boundServer.close();
   });
+
+  test.each(["available", "authentication_required", "environment_password_unsupported"] as const)(
+    "advertises supervised admission status %s independently",
+    async (status) => {
+      const teamRepository = createStub<TeamRepository>({});
+      const teamRunService = createStub<TeamRunService>({
+        getSupervisedAdmissionStatus: () => status,
+      });
+      const server = createServer({ teamRepository, teamRunService });
+      const serverInfo = await attachRelayAndHello({
+        server,
+        socket: new MockSocket(),
+        clientId: `cid-supervision-${status}`,
+      });
+
+      expect(serverInfo.features).toMatchObject({
+        teams: true,
+        teamSupervision: true,
+        teamSupervisionAdmission: status,
+      });
+      await server.close();
+    },
+  );
 
   test("includes voice capabilities in initial server_info when speech readiness exists", async () => {
     const speechReadiness = createReadySpeechReadinessSnapshot();

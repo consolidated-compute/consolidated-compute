@@ -7,6 +7,7 @@ import {
   type TeamDefinitionDto,
   type TeamRunDto,
 } from "@getpaseo/protocol/team/types";
+import type { ServerInfoStatusPayload } from "@getpaseo/protocol/messages";
 import type { AssignmentDto } from "@getpaseo/protocol/assignment/types";
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
 import { Button } from "@/components/ui/button";
@@ -40,6 +41,12 @@ export interface TeamRunFormSheetProps {
 
 const TEAM_RUN_SHEET_SNAP_POINTS = ["90%"];
 
+export function supportsSupervisedTeamRunAdmission(
+  features: ServerInfoStatusPayload["features"],
+): boolean {
+  return features?.teamSupervision === true && features.teamSupervisionAdmission === "available";
+}
+
 function validationMessage(
   issue: TeamRunFormValidationIssue | null,
   t: ReturnType<typeof useTranslation>["t"],
@@ -57,8 +64,8 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
     [liveWorkspaces],
   );
   const { profiles } = useAgentProfiles(props.serverId);
-  const supervisionSupported = useSessionStore(
-    (store) => store.sessions[props.serverId]?.serverInfo?.features?.teamSupervision === true,
+  const supervisionSupported = useSessionStore((store) =>
+    supportsSupervisedTeamRunAdmission(store.sessions[props.serverId]?.serverInfo?.features),
   );
   const model = useTeamRunFormModel({
     serverId: props.serverId,
