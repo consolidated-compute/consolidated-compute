@@ -138,6 +138,23 @@ describe("translation resources", () => {
     }
   });
 
+  it("localizes supervised Team Run copy in every supported language", () => {
+    for (const resource of [ar, es, fr, ja, ko, ptBR, ru, zhCN]) {
+      expect(resource.teams.runs.form.executionModes.supervised).not.toBe(
+        en.teams.runs.form.executionModes.supervised,
+      );
+      expect(resource.teams.runs.form.validation.native_delegation_unenforced).not.toBe(
+        en.teams.runs.form.validation.native_delegation_unenforced,
+      );
+      expect(resource.teams.runs.supervision.emptyActivity).not.toBe(
+        en.teams.runs.supervision.emptyActivity,
+      );
+      expect(resource.teams.runs.supervision.response.validation.request_settled).not.toBe(
+        en.teams.runs.supervision.response.validation.request_settled,
+      );
+    }
+  });
+
   it("preserves interpolation placeholders in every language", () => {
     expect(findInterpolationMismatches(ar)).toEqual([]);
     expect(findInterpolationMismatches(es)).toEqual([]);

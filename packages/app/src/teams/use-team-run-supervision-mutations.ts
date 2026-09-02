@@ -1,5 +1,5 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import type { TeamRunDto } from "@getpaseo/protocol/team/types";
+import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import type { TeamRunDto, TeamRunSupervisionStateDto } from "@getpaseo/protocol/team/types";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import type { TeamSupervisionResponseSubmission } from "./supervision-response-form-model";
 import {
@@ -13,6 +13,30 @@ function requireClient(serverId: string) {
   const client = getHostRuntimeStore().getClient(serverId);
   if (!client) throw new Error("Host is offline");
   return client;
+}
+
+export async function applyTeamRunSupervisionResponse(
+  queryClient: QueryClient,
+  input: Pick<TeamSupervisionResponseSubmission, "serverId" | "runId">,
+  supervision: TeamRunSupervisionStateDto,
+): Promise<void> {
+  const supervisionKey = teamRunSupervisionQueryKey(input.serverId, input.runId);
+  const runKey = teamRunQueryKey(input.serverId, input.runId);
+  await Promise.all([
+    queryClient.cancelQueries({ queryKey: supervisionKey, exact: true }),
+    queryClient.cancelQueries({ queryKey: runKey, exact: true }),
+  ]);
+  queryClient.setQueryData(supervisionKey, supervision);
+  queryClient.setQueryData<TeamRunDto>(runKey, (run) =>
+    updateTeamRunSupervisionSummary(run, supervision),
+  );
+  await Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: teamRunSupervisionEventsQueryKey(input.serverId, input.runId),
+      exact: true,
+    }),
+    queryClient.invalidateQueries({ queryKey: runKey, exact: true }),
+  ]);
 }
 
 export function useTeamRunSupervisionMutations() {
@@ -30,23 +54,7 @@ export function useTeamRunSupervisionMutations() {
       return { input, supervision: payload.supervision };
     },
     onSuccess: async ({ input, supervision }) => {
-      queryClient.setQueryData(
-        teamRunSupervisionQueryKey(input.serverId, input.runId),
-        supervision,
-      );
-      queryClient.setQueryData<TeamRunDto>(teamRunQueryKey(input.serverId, input.runId), (run) =>
-        updateTeamRunSupervisionSummary(run, supervision),
-      );
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: teamRunSupervisionEventsQueryKey(input.serverId, input.runId),
-          exact: true,
-        }),
-        queryClient.invalidateQueries({
-          queryKey: teamRunQueryKey(input.serverId, input.runId),
-          exact: true,
-        }),
-      ]);
+      await applyTeamRunSupervisionResponse(queryClient, input, supervision);
     },
   });
   return { respond };
