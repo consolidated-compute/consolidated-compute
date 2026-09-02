@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  AssignmentTeamRunScheduleTargetSchema,
   ScheduleCadenceSchema,
   ScheduleRunSchema,
   ScheduleSummarySchema,
@@ -22,6 +23,7 @@ const ScheduleCreateTargetSchema = z.discriminatedUnion("type", [
     type: z.literal("new-agent"),
     config: ScheduleCreateNewAgentConfigSchema,
   }),
+  AssignmentTeamRunScheduleTargetSchema,
 ]);
 
 export const ScheduleCreateRequestSchema = z.object({

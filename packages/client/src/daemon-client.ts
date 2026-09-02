@@ -845,6 +845,12 @@ export interface CreateScheduleOptions {
           systemPrompt?: string;
           mcpServers?: AgentSessionConfig["mcpServers"];
         };
+      }
+    | {
+        type: "assignment-team-run";
+        teamId: string;
+        assignmentId: string;
+        workspaceId: string;
       };
   maxRuns?: number;
   expiresAt?: string;
@@ -5575,6 +5581,9 @@ export class DaemonClient {
   }
 
   async scheduleCreate(options: CreateScheduleOptions): Promise<ScheduleCreatePayload> {
+    if (options.target.type === "assignment-team-run") {
+      this.requireAssignmentTeamSchedulesSupport();
+    }
     return this.sendCorrelatedSessionRequest({
       requestId: options.requestId,
       message: {
@@ -5987,6 +5996,13 @@ export class DaemonClient {
     }
   }
 
+  private requireAssignmentTeamSchedulesSupport(): void {
+    // COMPAT(assignmentTeamSchedules): added in v0.8.0, remove gate after 2027-03-02.
+    if (this.lastServerInfoMessage?.features?.assignmentTeamSchedules !== true) {
+      throw new Error("Update the host to schedule Assignment Team Runs.");
+    }
+  }
+
   private requireDaemonConfigReloadSupport(): void {
     // COMPAT(daemonConfigReload): added in v0.4.0, remove gate after 2027-02-14.
     if (this.lastServerInfoMessage?.features?.daemonConfigReload !== true) {
@@ -6021,6 +6037,7 @@ export class DaemonClient {
           [CLIENT_CAPS.providerSubagents]: true,
           [CLIENT_CAPS.projectUpdates]: true,
           [CLIENT_CAPS.compactProviderSnapshots]: true,
+          [CLIENT_CAPS.assignmentTeamSchedules]: true,
           ...this.config.capabilities,
         },
         ...(this.config.appVersion ? { appVersion: this.config.appVersion } : {}),

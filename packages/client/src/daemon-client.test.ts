@@ -741,6 +741,7 @@ test("advertises client capabilities in hello", async () => {
     clientType: "cli",
     protocolVersion: 1,
     capabilities: {
+      assignment_team_schedules: true,
       compact_provider_snapshots: true,
       custom_mode_icons: true,
       project_updates: true,
@@ -827,6 +828,7 @@ test("allows callers to disable default client capabilities", async () => {
     })
     .parse(JSON.parse(assertStr(mock.sent[0])));
   expect(hello.capabilities[CLIENT_CAPS.projectUpdates]).toBe(false);
+  expect(hello.capabilities[CLIENT_CAPS.assignmentTeamSchedules]).toBe(true);
 });
 
 test("sends new-agent run options when creating schedules", async () => {
@@ -886,6 +888,64 @@ test("sends new-agent run options when creating schedules", async () => {
     schedule: null,
     error: null,
   });
+});
+
+test("gates and sends Assignment Team Run schedule creation", async () => {
+  const legacyTransport = createMockTransport();
+  const legacyClient = new DaemonClient({
+    url: "ws://test",
+    clientId: "assignment_team_schedule_legacy",
+    logger: createMockLogger(),
+    reconnect: { enabled: false },
+    transportFactory: () => legacyTransport.transport,
+  });
+  clients.push(legacyClient);
+  const legacyConnect = legacyClient.connect();
+  legacyTransport.triggerOpen({ features: { assignments: true, teams: true } });
+  await legacyConnect;
+
+  const options = {
+    requestId: "request-team-schedule",
+    prompt: "Run the selected Assignment",
+    cadence: { type: "cron" as const, expression: "0 9 * * *" },
+    target: {
+      type: "assignment-team-run" as const,
+      teamId: "team-1",
+      assignmentId: "assignment-1",
+      workspaceId: "workspace-1",
+    },
+  };
+  await expect(legacyClient.scheduleCreate(options)).rejects.toThrow(
+    "Update the host to schedule Assignment Team Runs.",
+  );
+  expect(legacyTransport.sent).toEqual([]);
+
+  const supportedTransport = createMockTransport();
+  const supportedClient = new DaemonClient({
+    url: "ws://test",
+    clientId: "assignment_team_schedule_supported",
+    logger: createMockLogger(),
+    reconnect: { enabled: false },
+    transportFactory: () => supportedTransport.transport,
+  });
+  clients.push(supportedClient);
+  const supportedConnect = supportedClient.connect();
+  supportedTransport.triggerOpen({
+    features: { assignments: true, teams: true, assignmentTeamSchedules: true },
+  });
+  await supportedConnect;
+
+  const createPromise = supportedClient.scheduleCreate(options);
+  const request = parseSentFrame(supportedTransport.sent[0]);
+  expect(request).toEqual({
+    type: "schedule/create",
+    requestId: options.requestId,
+    prompt: options.prompt,
+    cadence: options.cadence,
+    target: options.target,
+  });
+  respondToScheduleRequest(supportedTransport, request);
+  await expect(createPromise).resolves.toMatchObject({ requestId: options.requestId, error: null });
 });
 
 test("sends new-agent run options when updating schedules", async () => {

@@ -6,6 +6,7 @@ import {
   formatCadence,
   formatNextRun,
   isNewAgentSchedule,
+  isScheduleEditable,
   scheduleProductName,
   partsToEveryMs,
   resolveScheduleTitle,
@@ -16,24 +17,35 @@ function createSchedule(input: {
   name?: string | null;
   prompt?: string;
   title?: string | null;
-  targetType?: "agent" | "new-agent";
+  targetType?: "agent" | "new-agent" | "assignment-team-run";
 }): ScheduleSummary {
+  let target: ScheduleSummary["target"];
+  if (input.targetType === "agent") {
+    target = { type: "agent", agentId: "00000000-0000-4000-8000-000000000000" };
+  } else if (input.targetType === "assignment-team-run") {
+    target = {
+      type: "assignment-team-run",
+      teamId: "team-1",
+      assignmentId: "assignment-1",
+      workspaceId: "workspace-1",
+    };
+  } else {
+    target = {
+      type: "new-agent",
+      config: {
+        provider: "codex",
+        cwd: "/tmp/project",
+        title: input.title,
+      },
+    };
+  }
+
   return {
     id: "schedule-1",
     name: input.name ?? null,
     prompt: input.prompt ?? "Run the task",
     cadence: { type: "every", everyMs: 60_000 },
-    target:
-      input.targetType === "agent"
-        ? { type: "agent", agentId: "00000000-0000-4000-8000-000000000000" }
-        : {
-            type: "new-agent",
-            config: {
-              provider: "codex",
-              cwd: "/tmp/project",
-              title: input.title,
-            },
-          },
+    target,
     status: "active",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -53,6 +65,12 @@ describe("schedule title helpers", () => {
   it("identifies new-agent schedules", () => {
     expect(isNewAgentSchedule(createSchedule({ targetType: "new-agent" }))).toBe(true);
     expect(isNewAgentSchedule(createSchedule({ targetType: "agent" }))).toBe(false);
+  });
+
+  it("keeps Assignment Team Run schedules out of existing editors", () => {
+    expect(isScheduleEditable(createSchedule({ targetType: "agent" }))).toBe(true);
+    expect(isScheduleEditable(createSchedule({ targetType: "new-agent" }))).toBe(true);
+    expect(isScheduleEditable(createSchedule({ targetType: "assignment-team-run" }))).toBe(false);
   });
 
   it("labels engine records by product meaning", () => {

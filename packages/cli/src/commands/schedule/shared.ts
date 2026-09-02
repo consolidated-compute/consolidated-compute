@@ -73,6 +73,9 @@ export function formatTarget(target: ScheduleTarget | ScheduleListItem["target"]
   if (target.type === "agent") {
     return `agent:${target.agentId.slice(0, 7)}`;
   }
+  if (target.type === "assignment-team-run") {
+    return `assignment:${target.assignmentId.slice(0, 12)}/team:${target.teamId.slice(0, 12)}`;
+  }
   const modelSuffix = target.config.model ? `/${target.config.model}` : "";
   return `new-agent:${target.config.provider}${modelSuffix}`;
 }

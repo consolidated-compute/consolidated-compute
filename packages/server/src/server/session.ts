@@ -938,9 +938,16 @@ export class Session {
       logger: this.sessionLogger,
     });
     this.scheduleSession = new ScheduleSession({
-      host: { emit: (msg) => this.emit(msg) },
+      host: {
+        emit: (msg, source) => this.emitForSource(msg, source),
+        supportsAssignmentTeamSchedules: (source) =>
+          source
+            ? this.supportsForSource(CLIENT_CAPS.assignmentTeamSchedules, source)
+            : this.supports(CLIENT_CAPS.assignmentTeamSchedules),
+      },
       scheduleService,
       logger: this.sessionLogger,
+      assignmentTeamSchedulesAvailable: false,
     });
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
@@ -1995,7 +2002,7 @@ export class Session {
       this.dispatchPluginDirectoryMessage(msg) ??
       this.dispatchPluginMessage(msg) ??
       this.dispatchTerminalMessage(msg) ??
-      this.dispatchScheduleMessage(msg) ??
+      this.dispatchScheduleMessage(msg, source) ??
       this.dispatchMiscMessage(msg);
     if (promise) await promise;
   }
@@ -2696,26 +2703,29 @@ export class Session {
     }
   }
 
-  private dispatchScheduleMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+  private dispatchScheduleMessage(
+    msg: SessionInboundMessage,
+    source?: object,
+  ): Promise<void> | undefined {
     switch (msg.type) {
       case "schedule/create":
-        return this.scheduleSession.handleScheduleCreateRequest(msg);
+        return this.scheduleSession.handleScheduleCreateRequest(msg, source);
       case "schedule/list":
-        return this.scheduleSession.handleScheduleListRequest(msg);
+        return this.scheduleSession.handleScheduleListRequest(msg, source);
       case "schedule/inspect":
-        return this.scheduleSession.handleScheduleInspectRequest(msg);
+        return this.scheduleSession.handleScheduleInspectRequest(msg, source);
       case "schedule/logs":
-        return this.scheduleSession.handleScheduleLogsRequest(msg);
+        return this.scheduleSession.handleScheduleLogsRequest(msg, source);
       case "schedule/pause":
-        return this.scheduleSession.handleSchedulePauseRequest(msg);
+        return this.scheduleSession.handleSchedulePauseRequest(msg, source);
       case "schedule/resume":
-        return this.scheduleSession.handleScheduleResumeRequest(msg);
+        return this.scheduleSession.handleScheduleResumeRequest(msg, source);
       case "schedule/delete":
-        return this.scheduleSession.handleScheduleDeleteRequest(msg);
+        return this.scheduleSession.handleScheduleDeleteRequest(msg, source);
       case "schedule/run-once":
-        return this.scheduleSession.handleScheduleRunOnceRequest(msg);
+        return this.scheduleSession.handleScheduleRunOnceRequest(msg, source);
       case "schedule/update":
-        return this.scheduleSession.handleScheduleUpdateRequest(msg);
+        return this.scheduleSession.handleScheduleUpdateRequest(msg, source);
       default:
         return undefined;
     }

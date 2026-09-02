@@ -7,7 +7,11 @@ import type { AggregatedSchedule } from "@/hooks/use-schedules";
 import type { ScheduleDerivedState } from "@/schedules/schedule-derivation";
 import { settingsStyles } from "@/styles/settings";
 import { confirmDialog } from "@/utils/confirm-dialog";
-import { resolveScheduleTitle, scheduleProductName } from "@/utils/schedule-format";
+import {
+  isScheduleEditable,
+  resolveScheduleTitle,
+  scheduleProductName,
+} from "@/utils/schedule-format";
 
 /** A schedule plus the client-derived fields the row renders. */
 export interface ScheduleRowView {
@@ -96,6 +100,9 @@ function SchedulesTableRow({
   );
 
   const handleEdit = useCallback(() => {
+    if (!isScheduleEditable(schedule)) {
+      return;
+    }
     onEditSchedule(schedule);
   }, [onEditSchedule, schedule]);
 

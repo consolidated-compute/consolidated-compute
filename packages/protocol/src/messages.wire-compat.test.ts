@@ -176,6 +176,22 @@ describe("wire schema compatibility", () => {
     expect(capable.features?.agentProfileProviderOptions).toBe(true);
   });
 
+  test("Assignment Team Run schedules advertise an optional server feature", () => {
+    const legacy = ServerInfoStatusPayloadSchema.parse({
+      status: "server_info",
+      serverId: "legacy-server",
+      features: { assignments: true, teams: true },
+    });
+    const capable = ServerInfoStatusPayloadSchema.parse({
+      status: "server_info",
+      serverId: "capable-server",
+      features: { assignments: true, teams: true, assignmentTeamSchedules: true },
+    });
+
+    expect(legacy.features?.assignmentTeamSchedules).toBeUndefined();
+    expect(capable.features?.assignmentTeamSchedules).toBe(true);
+  });
+
   test("assistant timeline message ids are optional on the wire", () => {
     expect(
       AgentTimelineItemPayloadSchema.parse({

@@ -31,6 +31,12 @@ export type ScheduleTarget =
         title?: string | null;
         providerOptions?: Record<string, unknown>;
       };
+    }
+  | {
+      type: "assignment-team-run";
+      teamId: string;
+      assignmentId: string;
+      workspaceId: string;
     };
 
 export interface ScheduleRunRecord {
@@ -40,6 +46,7 @@ export interface ScheduleRunRecord {
   endedAt: string | null;
   status: "running" | "succeeded" | "failed";
   agentId: string | null;
+  teamRunId?: string | null;
   output: string | null;
   error: string | null;
 }

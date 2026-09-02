@@ -17,6 +17,13 @@ export const ScheduleCadenceSchema = z.discriminatedUnion("type", [
 ]);
 export type ScheduleCadence = z.infer<typeof ScheduleCadenceSchema>;
 
+export const AssignmentTeamRunScheduleTargetSchema = z.object({
+  type: z.literal("assignment-team-run"),
+  teamId: z.string().trim().min(1),
+  assignmentId: z.string().trim().min(1),
+  workspaceId: z.string().trim().min(1),
+});
+
 export const ScheduleTargetSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("agent"),
@@ -39,6 +46,7 @@ export const ScheduleTargetSchema = z.discriminatedUnion("type", [
       mcpServers: z.record(z.string(), z.unknown()).optional(),
     }),
   }),
+  AssignmentTeamRunScheduleTargetSchema,
 ]);
 export type ScheduleTarget = z.infer<typeof ScheduleTargetSchema>;
 
@@ -50,6 +58,7 @@ export const ScheduleRunSchema = z.object({
   status: z.enum(["running", "succeeded", "failed"]),
   agentId: z.guid().nullable(),
   workspaceId: z.string().nullable().optional(),
+  teamRunId: z.string().nullable().optional(),
   output: z.string().nullable(),
   error: z.string().nullable(),
 });

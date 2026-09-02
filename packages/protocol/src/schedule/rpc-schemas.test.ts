@@ -38,6 +38,30 @@ describe("schedule RPC schemas", () => {
     });
   });
 
+  it("round-trips Assignment Team Run targets on create requests", () => {
+    expect(
+      ScheduleCreateRequestSchema.parse({
+        type: "schedule/create",
+        requestId: "request-team-run",
+        prompt: "Run the selected Assignment",
+        cadence: { type: "cron", expression: "0 9 * * *" },
+        target: {
+          type: "assignment-team-run",
+          teamId: "team-1",
+          assignmentId: "assignment-1",
+          workspaceId: "workspace-1",
+        },
+      }),
+    ).toMatchObject({
+      target: {
+        type: "assignment-team-run",
+        teamId: "team-1",
+        assignmentId: "assignment-1",
+        workspaceId: "workspace-1",
+      },
+    });
+  });
+
   it("round-trips new-agent run options on update requests", () => {
     expect(
       ScheduleUpdateRequestSchema.parse({
