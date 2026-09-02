@@ -17,6 +17,7 @@ import {
   type PersistedTeamDefinition,
   type PersistedTeamRunRecord,
   type PersistedTeamRunSupervision,
+  type TeamRunUnattendedPolicyInput,
 } from "./model.js";
 import {
   TEAM_RUN_PAGE_MAX_LIMIT,
@@ -42,6 +43,7 @@ import {
   type TeamRunSupervisionUpdate,
 } from "./repository.js";
 import { TeamNativeDelegationUnenforcedError } from "./supervision.js";
+import { TeamRunUnattendedPolicyError } from "./unattended-policy.js";
 import { toTeamRunDto } from "./wire.js";
 
 const firstTimestamp = "2026-08-25T12:00:00.000Z";
@@ -137,6 +139,23 @@ function createAssignmentRunInput(
     ...runInput,
     assignmentId: assignment.id,
     expectedAssignmentRevision: assignment.revision,
+  };
+}
+
+function createUnattendedPolicy(
+  overrides: Partial<TeamRunUnattendedPolicyInput> = {},
+): TeamRunUnattendedPolicyInput {
+  return {
+    source: { type: "schedule", scopeId: "schedule-1" },
+    executionWindow: { type: "schedule" },
+    maxRuntimeMs: 60_000,
+    maxActiveRunsOnHost: 3,
+    maxActiveRunsForSource: 1,
+    launchAllowlist: [
+      { provider: "codex", models: ["gpt-5.6"] },
+      { provider: "claude", models: [null] },
+    ],
+    ...overrides,
   };
 }
 
@@ -817,6 +836,139 @@ describe("TeamRepository runs", () => {
       patch: { name: "Edited Team" },
     });
     await expect(repository.getRun(run.id)).resolves.toEqual(run);
+  });
+
+  test("freezes unattended admission bounds and includes them in idempotent identity", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const assignment = await assignments.createAssignment({
+      title: "Scheduled Assignment",
+      objective: "Run within frozen unattended bounds.",
+      workItem: null,
+    });
+    const input = {
+      ...createAssignmentRunInput(definition, assignment),
+      unattendedPolicy: createUnattendedPolicy(),
+    };
+
+    const run = await repository.createAssignmentRun(input, assignments);
+
+    expect(run.unattendedPolicy).toEqual({
+      ...createUnattendedPolicy(),
+      deadlineAt: "2026-08-25T12:01:00.000Z",
+    });
+    await expect(repository.createAssignmentRun(input, assignments)).resolves.toEqual(run);
+    await expect(
+      repository.createAssignmentRun(
+        {
+          ...input,
+          unattendedPolicy: createUnattendedPolicy({ maxRuntimeMs: 30_000 }),
+        },
+        assignments,
+      ),
+    ).rejects.toBeInstanceOf(TeamRunIdempotencyConflictError);
+
+    await repository.updateDefinition({
+      teamId: definition.id,
+      expectedRevision: definition.revision,
+      patch: { name: "Edited after unattended admission" },
+    });
+    await expect(repository.getRun(run.id)).resolves.toMatchObject({
+      unattendedPolicy: run.unattendedPolicy,
+    });
+  });
+
+  test("rejects active-state commits at the repository deadline boundary", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const assignment = await assignments.createAssignment({
+      title: "Atomic deadline",
+      objective: "Fence mutation commits at the repository clock.",
+      workItem: null,
+    });
+    const run = await repository.createAssignmentRun(
+      {
+        ...createAssignmentRunInput(definition, assignment),
+        unattendedPolicy: createUnattendedPolicy(),
+      },
+      assignments,
+    );
+
+    currentTimestamp = secondTimestamp;
+    await expect(
+      repository.updateRun(run.id, (current) => {
+        const steps = current.steps.slice();
+        steps[0] = {
+          ...steps[0]!,
+          state: {
+            status: "creating",
+            plannedAgentId: firstAgentId,
+            startedAt: firstTimestamp,
+          },
+        };
+        return { steps, state: { status: "running", startedAt: firstTimestamp } };
+      }),
+    ).rejects.toMatchObject<TeamRunUnattendedPolicyError>({ issue: "deadline_elapsed" });
+  });
+
+  test("enforces unattended source and host limits inside serialized admission", async () => {
+    const assignments = new AssignmentRepository({
+      paseoHome,
+      now: () => new Date(currentTimestamp),
+      activeRunStore: repository,
+    });
+    const first = await assignments.createAssignment({
+      title: "First scheduled Assignment",
+      objective: "Own the first unattended slot.",
+      workItem: null,
+    });
+    const second = await assignments.createAssignment({
+      title: "Second scheduled Assignment",
+      objective: "Attempt the same source slot.",
+      workItem: null,
+    });
+    const third = await assignments.createAssignment({
+      title: "Third scheduled Assignment",
+      objective: "Attempt the host slot.",
+      workItem: null,
+    });
+    await repository.createAssignmentRun(
+      {
+        ...createAssignmentRunInput(definition, first, "unattended-first", "wks_unattended_1"),
+        unattendedPolicy: createUnattendedPolicy(),
+      },
+      assignments,
+    );
+
+    await expect(
+      repository.createAssignmentRun(
+        {
+          ...createAssignmentRunInput(definition, second, "unattended-second", "wks_unattended_2"),
+          unattendedPolicy: createUnattendedPolicy(),
+        },
+        assignments,
+      ),
+    ).rejects.toMatchObject<TeamRunUnattendedPolicyError>({
+      issue: "source_active_run_limit",
+    });
+    await expect(
+      repository.createAssignmentRun(
+        {
+          ...createAssignmentRunInput(definition, third, "unattended-third", "wks_unattended_3"),
+          unattendedPolicy: createUnattendedPolicy({
+            source: { type: "schedule", scopeId: "schedule-2" },
+            maxActiveRunsOnHost: 1,
+          }),
+        },
+        assignments,
+      ),
+    ).rejects.toMatchObject<TeamRunUnattendedPolicyError>({ issue: "host_active_run_limit" });
   });
 
   test("durably admits a supervised Assignment without exposing it to the sequential executor", async () => {

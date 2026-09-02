@@ -54,6 +54,13 @@ unchanged for the run.
 
 Only one Team Run may own a Workspace at a time. The lock covers active, permission-waiting, stopping, and stop-failed runs. It does not isolate the Workspace from people or ordinary Paseo agents.
 
+Schedule and Hub adapters must admit unattended work with a daemon-owned policy. Admission freezes
+the source type and scope, execution window, absolute deadline, maximum runtime, host and source
+active-run limits, and exact provider/model allowlist. Schedule sources use their cadence as the
+window; Hub events supply explicit open and close timestamps. The repository checks every resolved
+launch and both active-run limits inside the serialized run write. Team, Agent Profile, schedule,
+and authorization edits affect later admissions only.
+
 Supervised execution uses the same Team Run record rather than a second coordinator store. Its
 admission snapshot is Assignment-only and freezes an unused Team role as supervisor, the existing
 workflow as worker templates, every resolved launch, the planned supervisor agent ID, and bounded
@@ -161,6 +168,10 @@ For an objective-only step, delimit the previous response as untrusted handoff c
 
 The Artifact handoff is not a security or context-isolation boundary. Provider-native launch controls may separately restrict each role. The current real-provider proof covers Codex on macOS. The restricted role uses `sandbox_mode: read-only` with `approval_policy: never`. The writer uses `sandbox_mode: workspace-write` with the same approval policy, no extra writable roots, and both standard temporary-root exclusions. It can write the selected Workspace but not a sibling directory. Both roles can still read the selected Workspace, and daemon tools are not isolated by this boundary. Run records keep step status, timestamps, agent IDs, frozen configuration, and bounded errors; agent timelines remain authoritative for output.
 
+Freeze provider-reported usage on each successful step and sum the additive token and cost fields
+in the Team Run projection. Mark omitted provider data `partial` or `unavailable`; never substitute
+zero for a value the provider did not report.
+
 ## Lifecycle
 
 One foreground stream owns a step from prompt admission through completion, failure, or cancellation.
@@ -174,6 +185,12 @@ The active step and outer run use the same `waiting_for_permission`, `stopping`,
 checkpoint. Never persist one side without the other.
 
 Cancellation uses the ordinary agent cancellation path and drains the stream to a terminal event. A refused cancellation is `stop_failed`, remains nonterminal, and retains the Workspace lock.
+
+An unattended deadline uses the same cancellation path, then persists a failed run with an immutable
+`deadline` termination record. Check the deadline before external work and before committing a
+supervisor decision so a late response cannot cross the boundary. Startup fails already-expired
+records before accepting new work and rearms timers only for safe human waits that remain inside
+their frozen deadline.
 
 Workspace archive or removal wins over the Team Run. Stop the current step and create no later agents. Keep the preexisting Workspace and every created agent.
 

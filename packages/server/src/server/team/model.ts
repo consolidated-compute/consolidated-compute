@@ -51,6 +51,9 @@ export const TEAM_SUPERVISION_MAX_EVENTS = 256;
 export const TEAM_SUPERVISION_MAX_HUMAN_ACTIONS = 8;
 export const TEAM_SUPERVISION_MAX_RUN_STEPS = 256;
 export const TEAM_SUPERVISION_MAX_WORK_ITEMS = TEAM_MAX_WORKFLOW_STEPS;
+export const TEAM_UNATTENDED_MAX_ACTIVE_RUNS = 64;
+export const TEAM_UNATTENDED_MAX_RUNTIME_MS = 24 * 60 * 60 * 1_000;
+export const TEAM_UNATTENDED_SOURCE_SCOPE_MAX_CHARS = 512;
 
 function nonBlankStringSchema(max: number) {
   return z
@@ -90,6 +93,119 @@ export const PersistedTeamResolvedLaunchSchema = z
       });
     }
   });
+
+const PersistedTeamRunUsageValuesSchema = z
+  .object({
+    inputTokens: z.number().finite().nonnegative().optional(),
+    cachedInputTokens: z.number().finite().nonnegative().optional(),
+    outputTokens: z.number().finite().nonnegative().optional(),
+    totalCostUsd: z.number().finite().nonnegative().optional(),
+    contextWindowMaxTokens: z.number().finite().nonnegative().optional(),
+    contextWindowUsedTokens: z.number().finite().nonnegative().optional(),
+  })
+  .strict();
+
+export const PersistedTeamRunStepUsageSchema = z.discriminatedUnion("status", [
+  PersistedTeamRunUsageValuesSchema.extend({ status: z.literal("reported") }).strict(),
+  PersistedTeamRunUsageValuesSchema.extend({ status: z.literal("partial") }).strict(),
+  z.object({ status: z.literal("unavailable") }).strict(),
+]);
+
+const PersistedTeamRunLaunchAllowlistEntrySchema = z
+  .object({
+    provider: nonBlankStringSchema(TEAM_PROVIDER_ID_MAX_CHARS),
+    models: z.array(nonBlankStringSchema(TEAM_MODEL_ID_MAX_CHARS).nullable()).min(1).max(256),
+  })
+  .strict()
+  .superRefine((entry, context) => {
+    const models = new Set<string | null>();
+    for (const [index, model] of entry.models.entries()) {
+      if (models.has(model)) {
+        context.addIssue({
+          code: "custom",
+          path: ["models", index],
+          message: `Duplicate allowed model: ${model ?? "[provider default]"}`,
+        });
+      }
+      models.add(model);
+    }
+  });
+
+const PersistedTeamRunExecutionWindowSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("schedule") }).strict(),
+  z
+    .object({
+      type: z.literal("event"),
+      opensAt: TimestampSchema,
+      closesAt: TimestampSchema,
+    })
+    .strict()
+    .superRefine((window, context) => {
+      if (Date.parse(window.closesAt) <= Date.parse(window.opensAt)) {
+        context.addIssue({
+          code: "custom",
+          path: ["closesAt"],
+          message: "Event execution window must close after it opens",
+        });
+      }
+    }),
+]);
+
+const TeamRunUnattendedPolicyFieldsSchema = z
+  .object({
+    source: z
+      .object({
+        type: z.enum(["schedule", "hub"]),
+        scopeId: nonBlankStringSchema(TEAM_UNATTENDED_SOURCE_SCOPE_MAX_CHARS),
+      })
+      .strict(),
+    executionWindow: PersistedTeamRunExecutionWindowSchema,
+    maxRuntimeMs: z.number().int().positive().max(TEAM_UNATTENDED_MAX_RUNTIME_MS),
+    maxActiveRunsOnHost: z.number().int().positive().max(TEAM_UNATTENDED_MAX_ACTIVE_RUNS),
+    maxActiveRunsForSource: z.number().int().positive().max(TEAM_UNATTENDED_MAX_ACTIVE_RUNS),
+    launchAllowlist: z.array(PersistedTeamRunLaunchAllowlistEntrySchema).min(1).max(TEAM_MAX_ROLES),
+  })
+  .strict()
+  .superRefine((policy, context) => {
+    if (policy.maxActiveRunsForSource > policy.maxActiveRunsOnHost) {
+      context.addIssue({
+        code: "custom",
+        path: ["maxActiveRunsForSource"],
+        message: "Source active-run limit cannot exceed the host active-run limit",
+      });
+    }
+    if ((policy.source.type === "schedule") !== (policy.executionWindow.type === "schedule")) {
+      context.addIssue({
+        code: "custom",
+        path: ["executionWindow"],
+        message: "Schedule sources use cadence windows; Hub sources require an event window",
+      });
+    }
+    const providers = new Set<string>();
+    for (const [index, entry] of policy.launchAllowlist.entries()) {
+      if (providers.has(entry.provider)) {
+        context.addIssue({
+          code: "custom",
+          path: ["launchAllowlist", index, "provider"],
+          message: `Duplicate allowed provider: ${entry.provider}`,
+        });
+      }
+      providers.add(entry.provider);
+    }
+  });
+
+export const TeamRunUnattendedPolicyInputSchema = TeamRunUnattendedPolicyFieldsSchema;
+
+export const PersistedTeamRunUnattendedPolicySchema = TeamRunUnattendedPolicyFieldsSchema.extend({
+  deadlineAt: TimestampSchema,
+}).strict();
+
+export const PersistedTeamRunTerminationSchema = z
+  .object({
+    reason: z.enum(["cancel", "workspace", "shutdown", "deadline"]),
+    requestedAt: TimestampSchema,
+  })
+  .strict();
 
 export const PersistedTeamRoleSchema = z
   .object({
@@ -462,6 +578,8 @@ const SucceededStepStateSchema = z
     agentId: z.guid(),
     startedAt: TimestampSchema,
     endedAt: TimestampSchema,
+    // COMPAT(teamRunStepUsage): added in v0.7.2, review after 2027-03-02; old Team Runs have no usage snapshot.
+    usage: PersistedTeamRunStepUsageSchema.optional(),
   })
   .strict();
 const FailedStepStateSchema = z
@@ -653,6 +771,10 @@ const PersistedTeamRunRecordBaseSchema = z
     workspace: PersistedTeamRunWorkspaceSnapshotSchema,
     steps: z.array(PersistedTeamRunStepSchema).max(TEAM_SUPERVISION_MAX_RUN_STEPS),
     supervision: PersistedTeamRunSupervisionSchema.optional(),
+    // COMPAT(teamRunUnattendedPolicy): added in v0.7.2, review after 2027-03-02; attended and older runs have no policy.
+    unattendedPolicy: PersistedTeamRunUnattendedPolicySchema.optional(),
+    // COMPAT(teamRunTermination): added in v0.7.2, review after 2027-03-02; older terminal records have no reason snapshot.
+    termination: PersistedTeamRunTerminationSchema.optional(),
     state: PersistedTeamRunStateSchema,
     createdAt: TimestampSchema,
     updatedAt: TimestampSchema,
@@ -680,7 +802,71 @@ function validateRunIdentity(run: TeamRunRecordShape): ContractIssue[] {
   if (!run.supervision && run.steps.length !== run.teamSnapshot.workflow.length) {
     issues.push({ path: ["steps"], message: "Run steps must match the frozen workflow length" });
   }
+  if (run.unattendedPolicy && run.assignmentId === undefined) {
+    issues.push({
+      path: ["unattendedPolicy"],
+      message: "Unattended Team Runs require a frozen Assignment",
+    });
+  }
   issues.push(...validateAssignmentIdentity(run));
+  return issues;
+}
+
+function validateUnattendedPolicy(run: TeamRunRecordShape): ContractIssue[] {
+  const issues: ContractIssue[] = [];
+  const policy = run.unattendedPolicy;
+  if (policy) {
+    const createdAt = Date.parse(run.createdAt);
+    const deadlineAt = Date.parse(policy.deadlineAt);
+    if (deadlineAt <= createdAt) {
+      issues.push({
+        path: ["unattendedPolicy", "deadlineAt"],
+        message: "Unattended deadline must follow run admission",
+      });
+    }
+    if (policy.executionWindow.type === "event") {
+      const opensAt = Date.parse(policy.executionWindow.opensAt);
+      const closesAt = Date.parse(policy.executionWindow.closesAt);
+      if (createdAt < opensAt || createdAt >= closesAt) {
+        issues.push({
+          path: ["unattendedPolicy", "executionWindow"],
+          message: "Run admission must occur inside its frozen event execution window",
+        });
+      }
+      if (deadlineAt > closesAt) {
+        issues.push({
+          path: ["unattendedPolicy", "deadlineAt"],
+          message: "Unattended deadline cannot exceed its event execution window",
+        });
+      }
+    }
+  }
+
+  const termination = run.termination;
+  if (!termination) return issues;
+  if (termination.reason === "deadline" && !policy) {
+    issues.push({
+      path: ["termination", "reason"],
+      message: "Only an unattended Team Run can terminate at a deadline",
+    });
+  }
+  const terminalStatusByReason = {
+    cancel: "canceled",
+    workspace: "canceled",
+    shutdown: "interrupted",
+    deadline: "failed",
+  } as const;
+  const status = run.state.status;
+  if (
+    status !== "stopping" &&
+    status !== "stop_failed" &&
+    status !== terminalStatusByReason[termination.reason]
+  ) {
+    issues.push({
+      path: ["termination", "reason"],
+      message: `Termination reason ${termination.reason} is incompatible with run status ${status}`,
+    });
+  }
   return issues;
 }
 
@@ -2022,6 +2208,16 @@ function validateRunTimestamps(run: TeamRunRecordShape): ContractIssue[] {
     issues.push({ path: ["updatedAt"], message: "updatedAt cannot precede createdAt" });
   }
   validateStateTimestamps(run.state, ["state"], createdAt, updatedAt, issues);
+  if (run.termination) {
+    validateTimestampBounds(
+      run.termination.requestedAt,
+      "requestedAt",
+      ["termination"],
+      createdAt,
+      updatedAt,
+      issues,
+    );
+  }
   for (const [index, step] of run.steps.entries()) {
     validateStateTimestamps(step.state, ["steps", index, "state"], createdAt, updatedAt, issues);
   }
@@ -2228,6 +2424,7 @@ type LifecycleTimestampField =
   | "updatedAt"
   | "startedAt"
   | "stopRequestedAt"
+  | "requestedAt"
   | "resolvedAt"
   | "retiredAt"
   | "endedAt";
@@ -2254,6 +2451,7 @@ export const PersistedTeamRunRecordSchema = PersistedTeamRunRecordBaseSchema.sup
   (run, context) => {
     const issues = [
       ...validateRunIdentity(run),
+      ...validateUnattendedPolicy(run),
       ...validateRunStepSnapshots(run),
       ...validateRunLifecycle(run),
       ...validateRunTimestamps(run),
@@ -2265,8 +2463,15 @@ export const PersistedTeamRunRecordSchema = PersistedTeamRunRecordBaseSchema.sup
 );
 
 export type PersistedTeamDefinition = z.infer<typeof PersistedTeamDefinitionSchema>;
+export type PersistedTeamResolvedLaunch = z.infer<typeof PersistedTeamResolvedLaunchSchema>;
 export type PersistedTeamRunRecord = z.infer<typeof PersistedTeamRunRecordSchema>;
 export type PersistedTeamRunSupervision = z.infer<typeof PersistedTeamRunSupervisionSchema>;
+export type PersistedTeamRunStepUsage = z.infer<typeof PersistedTeamRunStepUsageSchema>;
+export type PersistedTeamRunTermination = z.infer<typeof PersistedTeamRunTerminationSchema>;
+export type PersistedTeamRunUnattendedPolicy = z.infer<
+  typeof PersistedTeamRunUnattendedPolicySchema
+>;
+export type TeamRunUnattendedPolicyInput = z.infer<typeof TeamRunUnattendedPolicyInputSchema>;
 
 const TEAM_RUN_TRANSITIONS: Readonly<Record<TeamRunStatus, ReadonlySet<TeamRunStatus>>> = {
   queued: new Set(["running", "failed", "canceled", "interrupted"]),

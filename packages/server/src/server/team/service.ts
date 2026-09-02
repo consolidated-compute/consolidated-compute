@@ -5,6 +5,7 @@ import type { TeamSupervisionAdmissionStatus } from "@getpaseo/protocol/messages
 import type { TeamRunPreviewDto } from "@getpaseo/protocol/team/types";
 
 import type { AgentRunCancellationResult } from "../agent/agent-manager.js";
+import type { AgentUsage } from "../agent/agent-sdk-types.js";
 import {
   buildStructuredAgentResponsePrompt,
   getStructuredAgentResponse,
@@ -38,6 +39,8 @@ import {
   type PersistedTeamRunStepState,
   type PersistedTeamRunSupervision,
   type PersistedTeamDefinition,
+  type PersistedTeamRunStepUsage,
+  type TeamRunUnattendedPolicyInput,
   type TeamRunStepStatus,
 } from "./model.js";
 import {
@@ -68,9 +71,12 @@ import {
   type TeamSupervisorAction,
   type TeamSupervisorActionSchemaOptions,
 } from "./supervised-execution.js";
+import { snapshotTeamRunStepUsage } from "./usage.js";
 
 type TeamRunStep = PersistedTeamRunRecord["steps"][number];
-type TeamRunTerminationReason = "cancel" | "workspace" | "shutdown";
+type TeamRunTerminationReason = "cancel" | "workspace" | "shutdown" | "deadline";
+
+export type TeamRunDeadlineScheduler = (callback: () => void, delayMs: number) => () => void;
 
 const ACTIVE_STEP_STATUSES: ReadonlySet<TeamRunStepStatus> = new Set([
   "creating",
@@ -110,6 +116,7 @@ export interface StartAssignmentTeamRunInput {
   expectedAssignmentRevision: number;
   workspaceId: string;
   expectedPreviewFingerprint?: string;
+  unattendedPolicy?: TeamRunUnattendedPolicyInput;
 }
 
 export interface AdmitSupervisedAssignmentTeamRunInput extends StartAssignmentTeamRunInput {
@@ -133,6 +140,7 @@ export interface TeamRunServiceOptions {
   logger: Pick<Logger, "error">;
   now?: () => Date;
   createAgentId?: () => string;
+  scheduleDeadline?: TeamRunDeadlineScheduler;
 }
 
 export type TeamSupervisedControlPlaneProtection =
@@ -202,6 +210,11 @@ interface StepEventResult {
   outcome: StepExecutionOutcome | null;
 }
 
+interface SupervisorPromptResult {
+  response: string;
+  usage: AgentUsage | undefined;
+}
+
 type WorkspaceTerminationOutcome = "committed" | "failed";
 
 interface WorkspaceTerminationFence {
@@ -228,7 +241,9 @@ export class TeamRunService {
   private readonly logger: Pick<Logger, "error">;
   private readonly now: () => Date;
   private readonly createAgentId: () => string;
+  private readonly scheduleDeadline: TeamRunDeadlineScheduler;
   private readonly executions = new Map<string, Promise<void>>();
+  private readonly deadlineTimers = new Map<string, () => void>();
   private readonly terminationRequests = new Map<string, TeamRunTerminationReason>();
   private readonly workspaceTerminationFences = new Map<
     string,
@@ -255,6 +270,7 @@ export class TeamRunService {
     this.logger = options.logger;
     this.now = options.now ?? (() => new Date());
     this.createAgentId = options.createAgentId ?? randomUUID;
+    this.scheduleDeadline = options.scheduleDeadline ?? scheduleNodeDeadline;
   }
 
   getSupervisedAdmissionStatus(): TeamSupervisionAdmissionStatus {
@@ -283,9 +299,21 @@ export class TeamRunService {
 
       const activeRuns = await this.repository.listActiveRuns();
       for (const run of activeRuns) {
+        if (this.isUnattendedDeadlineExpired(run)) {
+          this.requestTermination(run.id, "deadline");
+          await this.finishTermination(
+            run.id,
+            "deadline",
+            "Unattended Team Run deadline elapsed before daemon recovery",
+          );
+          continue;
+        }
         if (isSafeAwaitingHumanRun(run)) {
           const workspace = await this.workspaceRegistry.get(run.workspace.workspaceId);
-          if (workspace && !workspace.archivedAt) continue;
+          if (workspace && !workspace.archivedAt) {
+            this.armUnattendedDeadline(run);
+            continue;
+          }
           await this.finishTermination(
             run.id,
             "workspace",
@@ -373,6 +401,7 @@ export class TeamRunService {
       assignmentId: input.assignmentId,
       expectedAssignmentRevision: input.expectedAssignmentRevision,
       workspaceId: input.workspaceId,
+      ...(input.unattendedPolicy ? { unattendedPolicy: input.unattendedPolicy } : {}),
     };
     const existing = await this.repository.getRunByAdmissionIdentity(identity);
     if (existing) return existing;
@@ -396,9 +425,11 @@ export class TeamRunService {
             expectedAssignmentRevision: input.expectedAssignmentRevision,
             workspace: accepted.workspace,
             steps: accepted.steps,
+            ...(input.unattendedPolicy ? { unattendedPolicy: input.unattendedPolicy } : {}),
           },
           assignments,
         );
+        this.armUnattendedDeadline(run);
         this.launchExecution(run.id);
         return run;
       }),
@@ -426,6 +457,7 @@ export class TeamRunService {
       expectedAssignmentRevision: input.expectedAssignmentRevision,
       workspaceId: input.workspaceId,
       supervisorRoleId: input.supervisorRoleId,
+      ...(input.unattendedPolicy ? { unattendedPolicy: input.unattendedPolicy } : {}),
     };
     const existing = await this.repository.getRunByAdmissionIdentity(identity);
     if (existing) return existing;
@@ -456,9 +488,11 @@ export class TeamRunService {
             expectedAssignmentRevision: input.expectedAssignmentRevision,
             workspace: accepted.workspace,
             supervision,
+            ...(input.unattendedPolicy ? { unattendedPolicy: input.unattendedPolicy } : {}),
           },
           assignments,
         );
+        this.armUnattendedDeadline(run);
         this.launchExecution(run.id);
         return run;
       }),
@@ -493,6 +527,11 @@ export class TeamRunService {
       this.serializeAdmission(async () => {
         this.requireAcceptingStarts();
         const validation = await this.repository.validateSupervisionHumanRequest(input);
+        const terminationReason = this.requestedTerminationReason(validation.run);
+        if (terminationReason) {
+          this.requestTermination(input.runId, terminationReason);
+          return this.stopActiveRun(input.runId, false);
+        }
         if (validation.requiresResolution) {
           await this.executions.get(input.runId);
         }
@@ -521,6 +560,7 @@ export class TeamRunService {
     await this.serializeAdmission(async () => {
       this.acceptingStarts = false;
     });
+    this.clearAllDeadlineTimers();
     this.unsubscribeWorkspaceMutations?.();
     this.unsubscribeWorkspaceMutations = null;
     const activeRuns = await this.repository.listActiveRuns();
@@ -730,6 +770,11 @@ export class TeamRunService {
   private async executeSupervisedRun(runId: string): Promise<void> {
     let run = requireSupervisedRun(await this.requireRun(runId));
     while (!isTerminalTeamRunStatus(run.state.status)) {
+      const reason = this.requestedTerminationReason(run);
+      if (reason) {
+        await this.finishTermination(runId, reason);
+        return;
+      }
       if (run.supervision.phase === "awaiting_human") return;
       const active = findActiveStep(run);
       if (active?.step.snapshot.supervision?.kind === "worker") {
@@ -805,14 +850,18 @@ export class TeamRunService {
         `Team supervisor prompt exceeds ${TEAM_SUPERVISOR_PROMPT_MAX_BYTES} UTF-8 bytes`,
       );
     }
+    const usageReports: Array<AgentUsage | undefined> = [];
     const action = await getStructuredAgentResponse<TeamSupervisorAction>({
-      caller: (attemptPrompt) =>
-        this.runSupervisorPrompt(
+      caller: async (attemptPrompt) => {
+        const result = await this.runSupervisorPrompt(
           runId,
           readySupervisor.index,
           readySupervisor.agentId,
           attemptPrompt,
-        ),
+        );
+        usageReports.push(result.usage);
+        return result.response;
+      },
       prompt,
       schema,
       maxRetries: 2,
@@ -824,6 +873,7 @@ export class TeamRunService {
       decisionId,
       action,
       canContinueTeamSupervision(ready, artifactRouting),
+      snapshotTeamRunStepUsage(usageReports),
     );
   }
 
@@ -875,8 +925,13 @@ export class TeamRunService {
     decisionId: string,
     action: TeamSupervisorAction,
     allowContinueAfterEscalation: boolean,
+    usage: PersistedTeamRunStepUsage,
   ): Promise<PersistedTeamRunRecord & { supervision: PersistedTeamRunSupervision }> {
     const beforeCommit = requireSupervisedRun(await this.requireRun(runId));
+    const terminationReason = this.requestedTerminationReason(beforeCommit);
+    if (terminationReason) {
+      return requireSupervisedRun(await this.finishTermination(runId, terminationReason));
+    }
     const launchesWorker = action.kind === "dispatch" || action.kind === "request_revision";
     const attemptId = launchesWorker ? randomUUID() : null;
     const decision = normalizeTeamSupervisorDecision({
@@ -902,6 +957,7 @@ export class TeamRunService {
             workerAgentId,
             humanRequestId,
             allowContinueAfterEscalation,
+            usage,
           }),
       ),
     );
@@ -996,7 +1052,7 @@ export class TeamRunService {
     stepIndex: number,
     agentId: string,
     prompt: string,
-  ): Promise<string> {
+  ): Promise<SupervisorPromptResult> {
     const events = await this.withWorkspaceOperation(
       (await this.requireRun(runId)).workspace.workspaceId,
       async () => {
@@ -1024,6 +1080,7 @@ export class TeamRunService {
     if (!events) throw new Error(`Supervisor prompt for Team Run ${runId} was not admitted`);
 
     const pendingPermissions = new Set<string>();
+    let latestUsage: AgentUsage | undefined;
     for await (const event of events) {
       if (event.type === "permission_requested") {
         pendingPermissions.add(event.request.id);
@@ -1041,8 +1098,15 @@ export class TeamRunService {
         });
         continue;
       }
+      if (event.type === "usage_updated") {
+        latestUsage = event.usage;
+        continue;
+      }
       if (event.type === "turn_completed") {
-        return (await this.agentManager.getLastAssistantMessage(agentId)) ?? "";
+        return {
+          response: (await this.agentManager.getLastAssistantMessage(agentId)) ?? "",
+          usage: event.usage ?? latestUsage,
+        };
       }
       if (event.type === "turn_failed") throw new Error(event.error);
       if (event.type === "turn_canceled") {
@@ -1092,6 +1156,7 @@ export class TeamRunService {
         stepIndex,
         event.finalResponse,
         event.turnId ?? null,
+        event.usage,
       );
       return { agentCreated: false, outcome };
     }
@@ -1233,6 +1298,13 @@ export class TeamRunService {
       { type: "permission_requested" | "permission_resolved" }
     >,
   ): Promise<void> {
+    const beforeUpdate = await this.requireRun(runId);
+    const requestedReason = this.requestedTerminationReason(beforeUpdate);
+    if (requestedReason) {
+      this.requestTermination(runId, requestedReason);
+      await this.stopActiveRun(runId, false);
+      return;
+    }
     await this.repository.updateRun(runId, (run) => {
       if (isTerminalTeamRunStatus(run.state.status)) return unchangedRun(run);
       if (run.state.status === "stopping" || run.state.status === "stop_failed") {
@@ -1265,6 +1337,7 @@ export class TeamRunService {
     stepIndex: number,
     finalResponse: string,
     turnId: string | null,
+    usage: AgentUsage | undefined,
   ): Promise<StepExecutionOutcome> {
     const current = await this.requireRun(runId);
     return this.withWorkspaceOperation(current.workspace.workspaceId, async () => {
@@ -1300,7 +1373,7 @@ export class TeamRunService {
           runId,
           expectedSupervisionRevision: beforeCompletion.supervision.revision,
           attemptId: currentStep.snapshot.supervision.attemptId,
-          outcome: { status: "succeeded" },
+          outcome: { status: "succeeded", usage: snapshotTeamRunStepUsage([usage]) },
         });
         return { status: "next" };
       }
@@ -1326,6 +1399,7 @@ export class TeamRunService {
             agentId: step.state.agentId,
             startedAt: step.state.startedAt,
             endedAt: timestamp,
+            usage: snapshotTeamRunStepUsage([usage]),
           },
         };
         const nextStep = run.steps[stepIndex + 1];
@@ -1385,15 +1459,16 @@ export class TeamRunService {
     runId: string,
     waitForExecution = true,
   ): Promise<PersistedTeamRunRecord> {
-    const reason = this.terminationRequests.get(runId) ?? "cancel";
+    const requestedReason = this.terminationRequests.get(runId) ?? "cancel";
     const timestamp = this.timestamp();
     let agentIdToCancel: string | null = null;
     let shouldCancel = false;
     let updated = await this.repository.updateRun(runId, (run) => {
       if (isTerminalTeamRunStatus(run.state.status)) return unchangedRun(run);
+      const reason = this.requestedTerminationReason(run) ?? requestedReason;
       const active = findActiveStep(run);
       if (!active) {
-        return { steps: run.steps, state: terminalBoundaryState(run, reason, timestamp) };
+        return terminationRunUpdate(run, reason, timestamp);
       }
       if (active.step.state.status === "stopping") return unchangedRun(run);
       if (!("plannedAgentId" in active.step.state)) return unchangedRun(run);
@@ -1413,6 +1488,7 @@ export class TeamRunService {
           startedAt: requireRunStartedAt(run),
           stopRequestedAt: timestamp,
         },
+        termination: run.termination ?? { reason, requestedAt: timestamp },
       };
     });
 
@@ -1449,7 +1525,8 @@ export class TeamRunService {
       return updated;
     }
 
-    if (reason !== "shutdown" && waitForExecution) await this.executions.get(runId);
+    const effectiveReason = updated.termination?.reason ?? requestedReason;
+    if (effectiveReason !== "shutdown" && waitForExecution) await this.executions.get(runId);
     return this.requireRun(runId);
   }
 
@@ -1505,7 +1582,12 @@ export class TeamRunService {
   private requestTermination(runId: string, reason: TeamRunTerminationReason): void {
     const current = this.terminationRequests.get(runId);
     if (current === "shutdown") return;
-    if (reason === "shutdown" || current === undefined || reason === "workspace") {
+    if (
+      reason === "shutdown" ||
+      current === undefined ||
+      reason === "workspace" ||
+      (reason === "deadline" && current === "cancel")
+    ) {
       this.terminationRequests.set(runId, reason);
     }
   }
@@ -1517,10 +1599,14 @@ export class TeamRunService {
     const hasCommittedWorkspaceTermination = [...(fences?.values() ?? [])].some(
       (fence) => fence.status === "committed",
     );
-    return (
-      this.terminationRequests.get(run.id) ??
-      (hasCommittedWorkspaceTermination ? "workspace" : undefined)
-    );
+    const requested = this.terminationRequests.get(run.id);
+    if (requested === "shutdown" || requested === "workspace" || requested === "deadline") {
+      return requested;
+    }
+    if (run.termination) return run.termination.reason;
+    if (hasCommittedWorkspaceTermination) return "workspace";
+    if (this.isUnattendedDeadlineExpired(run)) return "deadline";
+    return requested;
   }
 
   private async handleWorkspaceMutation(mutation: WorkspaceMutation): Promise<void> {
@@ -1589,6 +1675,7 @@ export class TeamRunService {
       const run = await this.repository.getRun(runId);
       if (run && isTerminalTeamRunStatus(run.state.status)) {
         this.terminationRequests.delete(runId);
+        this.clearDeadlineTimer(runId);
       }
     } catch (error) {
       this.logger.error({ err: error, runId }, "Failed to inspect completed Team Run");
@@ -1598,6 +1685,64 @@ export class TeamRunService {
   private timestamp(): string {
     return this.now().toISOString();
   }
+
+  private isUnattendedDeadlineExpired(run: PersistedTeamRunRecord): boolean {
+    return (
+      run.unattendedPolicy !== undefined &&
+      this.now().getTime() >= Date.parse(run.unattendedPolicy.deadlineAt)
+    );
+  }
+
+  private armUnattendedDeadline(run: PersistedTeamRunRecord): void {
+    this.clearDeadlineTimer(run.id);
+    if (!run.unattendedPolicy || isTerminalTeamRunStatus(run.state.status)) return;
+    const delayMs = Math.max(0, Date.parse(run.unattendedPolicy.deadlineAt) - this.now().getTime());
+    const cancel = this.scheduleDeadline(() => {
+      this.deadlineTimers.delete(run.id);
+      void this.expireUnattendedRun(run.id);
+    }, delayMs);
+    this.deadlineTimers.set(run.id, cancel);
+  }
+
+  private async expireUnattendedRun(runId: string): Promise<void> {
+    try {
+      const run = await this.repository.getRun(runId);
+      if (!run || isTerminalTeamRunStatus(run.state.status)) {
+        this.clearDeadlineTimer(runId);
+        return;
+      }
+      if (!this.isUnattendedDeadlineExpired(run)) {
+        this.armUnattendedDeadline(run);
+        return;
+      }
+      this.requestTermination(runId, "deadline");
+      const stopped = await this.stopActiveRun(runId);
+      if (
+        !isTerminalTeamRunStatus(stopped.state.status) &&
+        stopped.state.status !== "stop_failed"
+      ) {
+        await this.finishTermination(runId, "deadline", "Unattended Team Run deadline elapsed");
+      }
+    } catch (error) {
+      this.logger.error({ err: error, runId }, "Failed to enforce unattended Team Run deadline");
+    }
+  }
+
+  private clearDeadlineTimer(runId: string): void {
+    this.deadlineTimers.get(runId)?.();
+    this.deadlineTimers.delete(runId);
+  }
+
+  private clearAllDeadlineTimers(): void {
+    for (const cancel of this.deadlineTimers.values()) cancel();
+    this.deadlineTimers.clear();
+  }
+}
+
+function scheduleNodeDeadline(callback: () => void, delayMs: number): () => void {
+  const timer = setTimeout(callback, delayMs);
+  timer.unref();
+  return () => clearTimeout(timer);
 }
 
 function findActiveStep(run: PersistedTeamRunRecord): ActiveStep | null {
@@ -1676,6 +1821,14 @@ function terminalBoundaryState(
       error: boundedError(detail ?? "Daemon interrupted Team Run execution"),
     };
   }
+  if (reason === "deadline") {
+    return {
+      status: "failed",
+      startedAt: startedAt ?? run.createdAt,
+      endedAt,
+      error: boundedError(detail ?? "Unattended Team Run deadline elapsed"),
+    };
+  }
   return { status: "canceled", startedAt, endedAt };
 }
 
@@ -1685,17 +1838,24 @@ function terminationRunUpdate(
   endedAt: string,
   detail?: string,
 ): TeamRunUpdate {
+  const termination = run.termination ?? { reason, requestedAt: endedAt };
+  const effectiveReason = termination.reason;
   const active = findActiveStep(run);
   if (!active) {
-    return { steps: run.steps, state: terminalBoundaryState(run, reason, endedAt, detail) };
+    return {
+      steps: run.steps,
+      state: terminalBoundaryState(run, effectiveReason, endedAt, detail),
+      termination,
+    };
   }
   if (!("plannedAgentId" in active.step.state)) return unchangedRun(run);
   return {
     steps: replaceStep(run.steps, active.index, {
       ...active.step,
-      state: terminationStepState(active.step, reason, endedAt, detail),
+      state: terminationStepState(active.step, effectiveReason, endedAt, detail),
     }),
-    state: terminalBoundaryState(run, reason, endedAt, detail),
+    state: terminalBoundaryState(run, effectiveReason, endedAt, detail),
+    termination,
   };
 }
 
@@ -1717,6 +1877,16 @@ function terminationStepState(
       startedAt: step.state.startedAt,
       endedAt,
       error: boundedError(detail ?? "Daemon interrupted Team Run execution"),
+    };
+  }
+  if (reason === "deadline") {
+    return {
+      status: "failed",
+      plannedAgentId: step.state.plannedAgentId,
+      agentId,
+      startedAt: step.state.startedAt,
+      endedAt,
+      error: boundedError(detail ?? "Unattended Team Run deadline elapsed"),
     };
   }
   return {

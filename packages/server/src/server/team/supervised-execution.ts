@@ -6,6 +6,7 @@ import {
   PersistedTeamRunArtifactInputIdsSchema,
   TEAM_SUPERVISION_DECISION_SUMMARY_MAX_CHARS,
   type PersistedTeamRunRecord,
+  type PersistedTeamRunStepUsage,
   type PersistedTeamRunSupervision,
 } from "./model.js";
 import type {
@@ -542,6 +543,7 @@ export interface BuildTeamSupervisionDecisionUpdateInput {
   workerAgentId: string | null;
   humanRequestId: string | null;
   allowContinueAfterEscalation: boolean;
+  usage: PersistedTeamRunStepUsage;
 }
 
 export function buildTeamSupervisionDecisionUpdate(
@@ -574,6 +576,7 @@ export function buildTeamSupervisionDecisionUpdate(
       agentId: supervisorStep.state.agentId,
       startedAt: supervisorStep.state.startedAt,
       endedAt: timestamp,
+      usage: input.usage,
     },
   };
 
