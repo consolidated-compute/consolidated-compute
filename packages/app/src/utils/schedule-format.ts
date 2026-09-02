@@ -28,6 +28,10 @@ export function isNewAgentSchedule(schedule: ScheduleSummary): boolean {
   return schedule.target.type === "new-agent";
 }
 
+export function isScheduleEditable(schedule: ScheduleSummary): boolean {
+  return schedule.target.type !== "assignment-team-run";
+}
+
 export function scheduleProductName(schedule: ScheduleSummary): "Heartbeat" | "Schedule" {
   return schedule.target.type === "agent" ? "Heartbeat" : "Schedule";
 }

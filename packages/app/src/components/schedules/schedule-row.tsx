@@ -19,6 +19,7 @@ import type { ScheduleDerivedState } from "@/schedules/schedule-derivation";
 import {
   formatCadence,
   formatNextRun,
+  isScheduleEditable,
   resolveScheduleTitle,
   scheduleProductName,
 } from "@/utils/schedule-format";
@@ -131,7 +132,8 @@ function ProviderGlyph({ provider }: { provider: string | null }): ReactElement 
 /**
  * One schedule, rendered as a settings-style card row: provider glyph + title,
  * a muted secondary line (model · cadence · next run), a StatusBadge, and the
- * kebab menu that owns every row action. Tapping the row opens the editor.
+ * kebab menu that owns every row action. Tapping an editable row opens its
+ * editor; target kinds without an editor remain delete-only.
  *
  * Hover lives on the outer plain View (docs/hover.md): the inner Pressable owns
  * press, the nested kebab Pressable never fights it, and the row background
@@ -159,6 +161,7 @@ export function ScheduleRow({
 
   const title = resolveScheduleTitle(schedule);
   const productName = scheduleProductName(schedule);
+  const canEdit = isScheduleEditable(schedule);
   const badge = stateBadge(state);
   const meta = buildMeta(schedule, state, serverName, singleHost ?? false);
   const canRun = schedule.target.type === "new-agent" && (state === "active" || state === "paused");
@@ -169,9 +172,9 @@ export function ScheduleRow({
       styles.row,
       !isFirst && settingsStyles.rowBorder,
       isHovered && !isCompact && styles.rowHovered,
-      pressed && styles.rowPressed,
+      canEdit && pressed && styles.rowPressed,
     ],
-    [isFirst, isHovered, isCompact],
+    [canEdit, isFirst, isHovered, isCompact],
   );
 
   return (
@@ -182,9 +185,11 @@ export function ScheduleRow({
     >
       <Pressable
         style={rowStyle}
-        onPress={onEdit}
-        accessibilityRole="button"
-        accessibilityLabel={`Edit ${productName.toLowerCase()} ${title}`}
+        onPress={canEdit ? onEdit : undefined}
+        accessibilityRole={canEdit ? "button" : undefined}
+        accessibilityLabel={
+          canEdit ? `Edit ${productName.toLowerCase()} ${title}` : `${productName} ${title}`
+        }
         testID={`schedule-row-${schedule.id}`}
       >
         <View style={styles.main}>
@@ -238,7 +243,7 @@ function ScheduleExecutionMenuItems({
 }: Pick<ScheduleRowProps, "schedule" | "pending" | "onPause" | "onResume" | "onRunNow"> & {
   canRun: boolean;
 }): ReactElement | null {
-  if (schedule.target.type === "agent") {
+  if (schedule.target.type !== "new-agent") {
     return null;
   }
 
@@ -314,6 +319,8 @@ function ScheduleKebabMenu({
 }): ReactElement {
   const productName = scheduleProductName(schedule);
   const productNameLower = productName.toLowerCase();
+  const canEdit = isScheduleEditable(schedule);
+  const hasExecutionActions = schedule.target.type === "new-agent";
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -326,13 +333,15 @@ function ScheduleKebabMenu({
         {renderKebabTriggerIcon}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" width={220}>
-        <DropdownMenuItem
-          leading={editLeading}
-          onSelect={onEdit}
-          testID={`schedule-menu-edit-${schedule.id}`}
-        >
-          Edit {productNameLower}
-        </DropdownMenuItem>
+        {canEdit ? (
+          <DropdownMenuItem
+            leading={editLeading}
+            onSelect={onEdit}
+            testID={`schedule-menu-edit-${schedule.id}`}
+          >
+            Edit {productNameLower}
+          </DropdownMenuItem>
+        ) : null}
         <ScheduleExecutionMenuItems
           schedule={schedule}
           canRun={canRun}
@@ -341,7 +350,7 @@ function ScheduleKebabMenu({
           onResume={onResume}
           onRunNow={onRunNow}
         />
-        <DropdownMenuSeparator />
+        {canEdit || hasExecutionActions ? <DropdownMenuSeparator /> : null}
         <DropdownMenuItem
           leading={deleteLeading}
           destructive

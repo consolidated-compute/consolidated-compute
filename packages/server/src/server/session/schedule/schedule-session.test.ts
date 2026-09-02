@@ -10,20 +10,28 @@ function makeSession(
   schedule: { [K in keyof ScheduleService]?: unknown },
   options: {
     supportsAssignmentTeamSchedules?: boolean;
+    supportedSources?: ReadonlySet<object>;
     assignmentTeamSchedulesAvailable?: boolean;
   } = {},
 ) {
   const emitted: SessionOutboundMessage[] = [];
+  const emissions: Array<{ message: SessionOutboundMessage; source: object | undefined }> = [];
   const session = new ScheduleSession({
     host: {
-      emit: (message) => emitted.push(message),
-      supportsAssignmentTeamSchedules: () => options.supportsAssignmentTeamSchedules === true,
+      emit: (message, source) => {
+        emitted.push(message);
+        emissions.push({ message, source });
+      },
+      supportsAssignmentTeamSchedules: (source) =>
+        source && options.supportedSources
+          ? options.supportedSources.has(source)
+          : options.supportsAssignmentTeamSchedules === true,
     },
     scheduleService: createStub<ScheduleService>(schedule),
     logger: pino({ level: "silent" }),
     assignmentTeamSchedulesAvailable: options.assignmentTeamSchedulesAvailable === true,
   });
-  return { session, emitted };
+  return { session, emitted, emissions };
 }
 
 const assignmentTeamSchedule = {
@@ -200,6 +208,55 @@ describe("ScheduleSession", () => {
         (schedule) => schedule.id,
       ),
     ).toEqual([ordinarySchedule.id, assignmentTeamSchedule.id]);
+  });
+
+  it("projects and emits schedule responses for the requesting source", async () => {
+    const ordinarySchedule = {
+      ...assignmentTeamSchedule,
+      id: "agent-schedule-1",
+      target: { type: "agent" as const, agentId: "agent-1" },
+    };
+    const legacySource = {};
+    const capableSource = {};
+    const { session, emissions } = makeSession(
+      { list: async () => [ordinarySchedule, assignmentTeamSchedule] },
+      { supportedSources: new Set([capableSource]) },
+    );
+
+    await session.handleScheduleListRequest(
+      { type: "schedule/list", requestId: "legacy-list" },
+      legacySource,
+    );
+    await session.handleScheduleListRequest(
+      { type: "schedule/list", requestId: "capable-list" },
+      capableSource,
+    );
+
+    expect(emissions).toEqual([
+      {
+        source: legacySource,
+        message: expect.objectContaining({
+          type: "schedule/list/response",
+          payload: expect.objectContaining({
+            requestId: "legacy-list",
+            schedules: [expect.objectContaining({ id: ordinarySchedule.id })],
+          }),
+        }),
+      },
+      {
+        source: capableSource,
+        message: expect.objectContaining({
+          type: "schedule/list/response",
+          payload: expect.objectContaining({
+            requestId: "capable-list",
+            schedules: [
+              expect.objectContaining({ id: ordinarySchedule.id }),
+              expect.objectContaining({ id: assignmentTeamSchedule.id }),
+            ],
+          }),
+        }),
+      },
+    ]);
   });
 
   it("hides Assignment Team Run schedules from legacy inspect and mutation requests", async () => {

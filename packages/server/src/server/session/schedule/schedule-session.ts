@@ -3,8 +3,8 @@ import type { SessionInboundMessage, SessionOutboundMessage } from "../../messag
 import type { ScheduleService } from "../../schedule/service.js";
 
 export interface ScheduleSessionHost {
-  emit(msg: SessionOutboundMessage): void;
-  supportsAssignmentTeamSchedules(): boolean;
+  emit(msg: SessionOutboundMessage, source?: object): void;
+  supportsAssignmentTeamSchedules(source?: object): boolean;
 }
 
 export interface ScheduleSessionOptions {
@@ -37,17 +37,22 @@ export class ScheduleSession {
     return summary;
   }
 
-  private supportsSchedule(schedule: Awaited<ReturnType<ScheduleService["inspect"]>>): boolean {
+  private supportsSchedule(
+    schedule: Awaited<ReturnType<ScheduleService["inspect"]>>,
+    source?: object,
+  ): boolean {
     return (
-      schedule.target.type !== "assignment-team-run" || this.host.supportsAssignmentTeamSchedules()
+      schedule.target.type !== "assignment-team-run" ||
+      this.host.supportsAssignmentTeamSchedules(source)
     );
   }
 
   private async requireSupportedSchedule(
     scheduleId: string,
+    source?: object,
   ): Promise<Awaited<ReturnType<ScheduleService["inspect"]>>> {
     const schedule = await this.scheduleService.inspect(scheduleId);
-    if (!this.supportsSchedule(schedule)) {
+    if (!this.supportsSchedule(schedule, source)) {
       throw new Error(`Schedule not found: ${scheduleId}`);
     }
     return schedule;
@@ -70,22 +75,27 @@ export class ScheduleSession {
       }
     >,
     error: unknown,
+    source?: object,
   ): void {
     const message = error instanceof Error ? error.message : String(error);
     this.logger.error({ err: error, requestType: request.type }, "Schedule request failed");
-    this.host.emit({
-      type: "rpc_error",
-      payload: {
-        requestId: request.requestId,
-        requestType: request.type,
-        error: message,
-        code: "schedule_request_failed",
+    this.host.emit(
+      {
+        type: "rpc_error",
+        payload: {
+          requestId: request.requestId,
+          requestType: request.type,
+          error: message,
+          code: "schedule_request_failed",
+        },
       },
-    });
+      source,
+    );
   }
 
   async handleScheduleCreateRequest(
     request: Extract<SessionInboundMessage, { type: "schedule/create" }>,
+    source?: object,
   ): Promise<void> {
     try {
       if (request.target.type === "assignment-team-run" && !this.assignmentTeamSchedulesAvailable) {
@@ -93,7 +103,7 @@ export class ScheduleSession {
       }
       if (
         request.target.type === "assignment-team-run" &&
-        !this.host.supportsAssignmentTeamSchedules()
+        !this.host.supportsAssignmentTeamSchedules(source)
       ) {
         throw new Error("Update the client to create Assignment Team Run schedules");
       }
@@ -110,157 +120,189 @@ export class ScheduleSession {
         expiresAt: request.expiresAt,
         runOnCreate: request.runOnCreate,
       });
-      this.host.emit({
-        type: "schedule/create/response",
-        payload: {
-          requestId: request.requestId,
-          schedule: this.toScheduleSummary(schedule),
-          error: null,
+      this.host.emit(
+        {
+          type: "schedule/create/response",
+          payload: {
+            requestId: request.requestId,
+            schedule: this.toScheduleSummary(schedule),
+            error: null,
+          },
         },
-      });
+        source,
+      );
     } catch (error) {
-      this.emitScheduleRpcError(request, error);
+      this.emitScheduleRpcError(request, error, source);
     }
   }
 
   async handleScheduleListRequest(
     request: Extract<SessionInboundMessage, { type: "schedule/list" }>,
+    source?: object,
   ): Promise<void> {
     try {
       const schedules = await this.scheduleService.list();
-      this.host.emit({
-        type: "schedule/list/response",
-        payload: {
-          requestId: request.requestId,
-          schedules: schedules
-            .filter((schedule) => this.supportsSchedule(schedule))
-            .map((schedule) => this.toScheduleSummary(schedule)),
-          error: null,
+      this.host.emit(
+        {
+          type: "schedule/list/response",
+          payload: {
+            requestId: request.requestId,
+            schedules: schedules
+              .filter((schedule) => this.supportsSchedule(schedule, source))
+              .map((schedule) => this.toScheduleSummary(schedule)),
+            error: null,
+          },
         },
-      });
+        source,
+      );
     } catch (error) {
-      this.emitScheduleRpcError(request, error);
+      this.emitScheduleRpcError(request, error, source);
     }
   }
 
   async handleScheduleInspectRequest(
     request: Extract<SessionInboundMessage, { type: "schedule/inspect" }>,
+    source?: object,
   ): Promise<void> {
     try {
-      const schedule = await this.requireSupportedSchedule(request.scheduleId);
-      this.host.emit({
-        type: "schedule/inspect/response",
-        payload: {
-          requestId: request.requestId,
-          schedule,
-          error: null,
+      const schedule = await this.requireSupportedSchedule(request.scheduleId, source);
+      this.host.emit(
+        {
+          type: "schedule/inspect/response",
+          payload: {
+            requestId: request.requestId,
+            schedule,
+            error: null,
+          },
         },
-      });
+        source,
+      );
     } catch (error) {
-      this.emitScheduleRpcError(request, error);
+      this.emitScheduleRpcError(request, error, source);
     }
   }
 
   async handleScheduleLogsRequest(
     request: Extract<SessionInboundMessage, { type: "schedule/logs" }>,
+    source?: object,
   ): Promise<void> {
     try {
-      await this.requireSupportedSchedule(request.scheduleId);
+      await this.requireSupportedSchedule(request.scheduleId, source);
       const runs = await this.scheduleService.logs(request.scheduleId);
-      this.host.emit({
-        type: "schedule/logs/response",
-        payload: {
-          requestId: request.requestId,
-          runs,
-          error: null,
+      this.host.emit(
+        {
+          type: "schedule/logs/response",
+          payload: {
+            requestId: request.requestId,
+            runs,
+            error: null,
+          },
         },
-      });
+        source,
+      );
     } catch (error) {
-      this.emitScheduleRpcError(request, error);
+      this.emitScheduleRpcError(request, error, source);
     }
   }
 
   async handleSchedulePauseRequest(
     request: Extract<SessionInboundMessage, { type: "schedule/pause" }>,
+    source?: object,
   ): Promise<void> {
     try {
-      await this.requireSupportedSchedule(request.scheduleId);
+      await this.requireSupportedSchedule(request.scheduleId, source);
       const schedule = await this.scheduleService.pause(request.scheduleId);
-      this.host.emit({
-        type: "schedule/pause/response",
-        payload: {
-          requestId: request.requestId,
-          schedule: this.toScheduleSummary(schedule),
-          error: null,
+      this.host.emit(
+        {
+          type: "schedule/pause/response",
+          payload: {
+            requestId: request.requestId,
+            schedule: this.toScheduleSummary(schedule),
+            error: null,
+          },
         },
-      });
+        source,
+      );
     } catch (error) {
-      this.emitScheduleRpcError(request, error);
+      this.emitScheduleRpcError(request, error, source);
     }
   }
 
   async handleScheduleResumeRequest(
     request: Extract<SessionInboundMessage, { type: "schedule/resume" }>,
+    source?: object,
   ): Promise<void> {
     try {
-      await this.requireSupportedSchedule(request.scheduleId);
+      await this.requireSupportedSchedule(request.scheduleId, source);
       const schedule = await this.scheduleService.resume(request.scheduleId);
-      this.host.emit({
-        type: "schedule/resume/response",
-        payload: {
-          requestId: request.requestId,
-          schedule: this.toScheduleSummary(schedule),
-          error: null,
+      this.host.emit(
+        {
+          type: "schedule/resume/response",
+          payload: {
+            requestId: request.requestId,
+            schedule: this.toScheduleSummary(schedule),
+            error: null,
+          },
         },
-      });
+        source,
+      );
     } catch (error) {
-      this.emitScheduleRpcError(request, error);
+      this.emitScheduleRpcError(request, error, source);
     }
   }
 
   async handleScheduleDeleteRequest(
     request: Extract<SessionInboundMessage, { type: "schedule/delete" }>,
+    source?: object,
   ): Promise<void> {
     try {
-      await this.requireSupportedSchedule(request.scheduleId);
+      await this.requireSupportedSchedule(request.scheduleId, source);
       await this.scheduleService.delete(request.scheduleId);
-      this.host.emit({
-        type: "schedule/delete/response",
-        payload: {
-          requestId: request.requestId,
-          scheduleId: request.scheduleId,
-          error: null,
+      this.host.emit(
+        {
+          type: "schedule/delete/response",
+          payload: {
+            requestId: request.requestId,
+            scheduleId: request.scheduleId,
+            error: null,
+          },
         },
-      });
+        source,
+      );
     } catch (error) {
-      this.emitScheduleRpcError(request, error);
+      this.emitScheduleRpcError(request, error, source);
     }
   }
 
   async handleScheduleRunOnceRequest(
     request: Extract<SessionInboundMessage, { type: "schedule/run-once" }>,
+    source?: object,
   ): Promise<void> {
     try {
-      await this.requireSupportedSchedule(request.scheduleId);
+      await this.requireSupportedSchedule(request.scheduleId, source);
       const schedule = await this.scheduleService.runOnce(request.scheduleId);
-      this.host.emit({
-        type: "schedule/run-once/response",
-        payload: {
-          requestId: request.requestId,
-          schedule,
-          error: null,
+      this.host.emit(
+        {
+          type: "schedule/run-once/response",
+          payload: {
+            requestId: request.requestId,
+            schedule,
+            error: null,
+          },
         },
-      });
+        source,
+      );
     } catch (error) {
-      this.emitScheduleRpcError(request, error);
+      this.emitScheduleRpcError(request, error, source);
     }
   }
 
   async handleScheduleUpdateRequest(
     request: Extract<SessionInboundMessage, { type: "schedule/update" }>,
+    source?: object,
   ): Promise<void> {
     try {
-      await this.requireSupportedSchedule(request.scheduleId);
+      await this.requireSupportedSchedule(request.scheduleId, source);
       const schedule = await this.scheduleService.update({
         id: request.scheduleId,
         ...(request.name !== undefined ? { name: request.name } : {}),
@@ -270,16 +312,19 @@ export class ScheduleSession {
         ...(request.maxRuns !== undefined ? { maxRuns: request.maxRuns } : {}),
         ...(request.expiresAt !== undefined ? { expiresAt: request.expiresAt } : {}),
       });
-      this.host.emit({
-        type: "schedule/update/response",
-        payload: {
-          requestId: request.requestId,
-          schedule,
-          error: null,
+      this.host.emit(
+        {
+          type: "schedule/update/response",
+          payload: {
+            requestId: request.requestId,
+            schedule,
+            error: null,
+          },
         },
-      });
+        source,
+      );
     } catch (error) {
-      this.emitScheduleRpcError(request, error);
+      this.emitScheduleRpcError(request, error, source);
     }
   }
 }
