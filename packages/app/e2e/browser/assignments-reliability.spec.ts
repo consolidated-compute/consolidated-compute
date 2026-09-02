@@ -126,18 +126,8 @@ test.describe("Assignments reliability", () => {
           form.getByTestId("team-run-workspace-field"),
           `team-run-workspace-${workspace.workspaceId}`,
         );
-        await expect(form.getByTestId("team-run-mode-sequential")).toHaveAttribute(
-          "aria-selected",
-          "true",
-        );
-        await form.getByTestId("team-run-mode-supervised").click();
-        await expect(form.getByTestId("team-run-supervisor-field")).toContainText("Supervisor");
-        await expect(form.getByTestId("team-run-validation")).toContainText(
-          "disables provider-native delegation",
-          { timeout: 30_000 },
-        );
-        await expect(form.getByTestId("team-run-start")).toBeDisabled();
-        await form.getByTestId("team-run-mode-sequential").click();
+        await expect(form.getByTestId("team-run-execution-mode")).toHaveCount(0);
+        await expect(form.getByTestId("team-run-supervisor-field")).toHaveCount(0);
         await expect(form.getByTestId("team-run-start")).toBeEnabled({ timeout: 30_000 });
         await form.getByTestId("team-run-start").click();
         await expect(
