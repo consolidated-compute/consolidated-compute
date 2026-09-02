@@ -388,6 +388,18 @@ describe("Team wire contracts", () => {
         idempotencyKey: "response_1",
       }),
     ).toMatchObject({ expectedRevision: 2, actionId: "continue" });
+    expect(() =>
+      SessionInboundMessageSchema.parse({
+        type: "team.run.supervision.human_request.respond.request",
+        requestId: "request_blank_note",
+        runId: run.id,
+        humanRequestId: "human_1",
+        expectedRevision: 2,
+        actionId: "continue",
+        note: " \n\t ",
+        idempotencyKey: "response_blank_note",
+      }),
+    ).toThrow();
 
     const event = {
       id: "event_1",

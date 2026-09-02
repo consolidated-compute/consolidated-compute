@@ -1079,29 +1079,142 @@ function validateSupervisionSnapshot(run: TeamRunRecordShape): ContractIssue[] {
     });
   }
 
-  if (supervision.events) {
-    const eventIds = new Set<string>();
-    for (const [index, event] of supervision.events.entries()) {
-      if (event.sequence !== index + 1) {
-        issues.push({
-          path: ["supervision", "events", index, "sequence"],
-          message: "Supervision event sequences must be contiguous",
-        });
-      }
-      if (eventIds.has(event.id)) {
-        issues.push({
-          path: ["supervision", "events", index, "id"],
-          message: `Duplicate supervision event ID: ${event.id}`,
-        });
-      }
-      eventIds.add(event.id);
-    }
-  }
-
+  issues.push(...validateSupervisionEvents(run));
   issues.push(...validateSupervisionWorkItems(run));
   issues.push(...validateSupervisionDecisions(run));
   issues.push(...validateSupervisionHumanRequest(run));
   return issues;
+}
+
+function validateSupervisionEvents(run: TeamRunRecordShape): ContractIssue[] {
+  const supervision = run.supervision!;
+  if (!supervision.events) return [];
+  const issues: ContractIssue[] = [];
+  const decisionIds = new Set(supervision.decisions.map((decision) => decision.id));
+  const actionIds = new Set(supervision.decisions.map((decision) => decision.actionId));
+  const workItemIds = new Set(supervision.workItems.map((workItem) => workItem.id));
+  const attemptIds = new Set(supervision.workItems.flatMap((workItem) => workItem.attemptIds));
+  const humanRequestIds = new Set(supervision.humanRequest ? [supervision.humanRequest.id] : []);
+  const roleIds = new Set(run.teamSnapshot.roles.map((role) => role.id));
+  const agentIds = new Set<string>([supervision.supervisor.agentId]);
+  const stepIds = new Set<string>();
+  const artifactIds = new Set<string>();
+  for (const action of supervision.humanRequest?.actions ?? []) actionIds.add(action.id);
+  for (const step of run.steps) {
+    stepIds.add(step.snapshot.stepId);
+    if ("plannedAgentId" in step.state) agentIds.add(step.state.plannedAgentId);
+    if ("agentId" in step.state && step.state.agentId) agentIds.add(step.state.agentId);
+    for (const artifactId of step.snapshot.inputArtifactIds ?? []) artifactIds.add(artifactId);
+    if (step.snapshot.outputArtifact) artifactIds.add(step.snapshot.outputArtifact.id);
+  }
+
+  const eventIds = new Set<string>();
+  for (const [index, event] of supervision.events.entries()) {
+    if (event.sequence !== index + 1) {
+      issues.push({
+        path: ["supervision", "events", index, "sequence"],
+        message: "Supervision event sequences must be contiguous",
+      });
+    }
+    if (eventIds.has(event.id)) {
+      issues.push({
+        path: ["supervision", "events", index, "id"],
+        message: `Duplicate supervision event ID: ${event.id}`,
+      });
+    }
+    eventIds.add(event.id);
+    validateSupervisionEventReference(
+      event.decisionId,
+      decisionIds,
+      index,
+      "decisionId",
+      "decision",
+      issues,
+    );
+    validateSupervisionEventReference(
+      event.actionId,
+      actionIds,
+      index,
+      "actionId",
+      "action",
+      issues,
+    );
+    validateSupervisionEventReference(
+      event.workItemId,
+      workItemIds,
+      index,
+      "workItemId",
+      "work item",
+      issues,
+    );
+    validateSupervisionEventReference(
+      event.attemptId,
+      attemptIds,
+      index,
+      "attemptId",
+      "attempt",
+      issues,
+    );
+    validateSupervisionEventReference(
+      event.humanRequestId,
+      humanRequestIds,
+      index,
+      "humanRequestId",
+      "human request",
+      issues,
+    );
+    validateSupervisionEventReferences(event.roleIds, roleIds, index, "roleIds", "role", issues);
+    validateSupervisionEventReferences(
+      event.agentIds,
+      agentIds,
+      index,
+      "agentIds",
+      "agent",
+      issues,
+    );
+    validateSupervisionEventReferences(event.stepIds, stepIds, index, "stepIds", "step", issues);
+    validateSupervisionEventReferences(
+      event.artifactIds,
+      artifactIds,
+      index,
+      "artifactIds",
+      "Artifact",
+      issues,
+    );
+  }
+  return issues;
+}
+
+function validateSupervisionEventReference(
+  value: string | null,
+  validValues: ReadonlySet<string>,
+  eventIndex: number,
+  field: "decisionId" | "actionId" | "workItemId" | "attemptId" | "humanRequestId",
+  label: string,
+  issues: ContractIssue[],
+): void {
+  if (value === null || validValues.has(value)) return;
+  issues.push({
+    path: ["supervision", "events", eventIndex, field],
+    message: `Supervision event references unknown ${label}: ${value}`,
+  });
+}
+
+function validateSupervisionEventReferences(
+  values: readonly string[],
+  validValues: ReadonlySet<string>,
+  eventIndex: number,
+  field: "roleIds" | "agentIds" | "stepIds" | "artifactIds",
+  label: string,
+  issues: ContractIssue[],
+): void {
+  for (const [referenceIndex, value] of values.entries()) {
+    if (validValues.has(value)) continue;
+    issues.push({
+      path: ["supervision", "events", eventIndex, field, referenceIndex],
+      message: `Supervision event references unknown ${label}: ${value}`,
+    });
+  }
 }
 
 function validateSupervisionWorkItems(run: TeamRunRecordShape): ContractIssue[] {

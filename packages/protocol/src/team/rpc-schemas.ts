@@ -137,7 +137,7 @@ export const TeamRunSupervisionHumanRequestRespondRequestSchema = z.object({
   humanRequestId: z.string().min(1).max(128),
   expectedRevision: z.number().int().positive(),
   actionId: z.string().min(1).max(128),
-  note: z.string().min(1).max(TEAM_SUPERVISION_HUMAN_REQUEST_NOTE_MAX_CHARS).nullable(),
+  note: z.string().min(1).max(TEAM_SUPERVISION_HUMAN_REQUEST_NOTE_MAX_CHARS).regex(/\S/).nullable(),
   idempotencyKey: z.string().min(1).max(256),
 });
 

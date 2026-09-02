@@ -254,33 +254,50 @@ export class TeamRunService {
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
-    const activeRuns = await this.repository.listActiveRuns();
-    for (const run of activeRuns) {
-      if (isSafeAwaitingHumanRun(run)) {
-        const workspace = await this.workspaceRegistry.get(run.workspace.workspaceId);
-        if (workspace && !workspace.archivedAt) continue;
+    let unsubscribeTerminationBoundaries: (() => void) | null = null;
+    let unsubscribeMutations: (() => void) | null = null;
+    try {
+      unsubscribeTerminationBoundaries = this.workspaceRegistry.subscribeToTerminationBoundaries(
+        (boundary) => this.handleWorkspaceTerminationBoundary(boundary),
+      );
+      unsubscribeMutations = this.workspaceRegistry.subscribeToMutations((mutation) =>
+        this.handleWorkspaceMutation(mutation),
+      );
+      this.unsubscribeWorkspaceTerminationBoundaries = unsubscribeTerminationBoundaries;
+      this.unsubscribeWorkspaceMutations = unsubscribeMutations;
+
+      const activeRuns = await this.repository.listActiveRuns();
+      for (const run of activeRuns) {
+        if (isSafeAwaitingHumanRun(run)) {
+          const workspace = await this.workspaceRegistry.get(run.workspace.workspaceId);
+          if (workspace && !workspace.archivedAt) continue;
+          await this.finishTermination(
+            run.id,
+            "workspace",
+            "Workspace was removed or archived while the Team Run awaited human input",
+          );
+          continue;
+        }
         await this.finishTermination(
           run.id,
-          "workspace",
-          "Workspace was removed or archived while the Team Run awaited human input",
+          "shutdown",
+          "Daemon restarted before the Team Run reached a durable terminal state",
         );
-        continue;
       }
-      await this.finishTermination(
-        run.id,
-        "shutdown",
-        "Daemon restarted before the Team Run reached a durable terminal state",
-      );
+      this.initialized = true;
+      this.acceptingStarts = true;
+    } catch (error) {
+      unsubscribeMutations?.();
+      unsubscribeTerminationBoundaries?.();
+      if (this.unsubscribeWorkspaceMutations === unsubscribeMutations) {
+        this.unsubscribeWorkspaceMutations = null;
+      }
+      if (this.unsubscribeWorkspaceTerminationBoundaries === unsubscribeTerminationBoundaries) {
+        this.unsubscribeWorkspaceTerminationBoundaries = null;
+      }
+      this.releaseWorkspaceTerminationFences();
+      throw error;
     }
-    this.unsubscribeWorkspaceTerminationBoundaries =
-      this.workspaceRegistry.subscribeToTerminationBoundaries((boundary) =>
-        this.handleWorkspaceTerminationBoundary(boundary),
-      );
-    this.unsubscribeWorkspaceMutations = this.workspaceRegistry.subscribeToMutations((mutation) =>
-      this.handleWorkspaceMutation(mutation),
-    );
-    this.initialized = true;
-    this.acceptingStarts = true;
   }
 
   supportsAssignmentRepository(repository: AssignmentRepository): boolean {
