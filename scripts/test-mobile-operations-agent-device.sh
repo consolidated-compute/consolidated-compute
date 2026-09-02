@@ -144,6 +144,7 @@ if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
       fixture.primary.providerSubagentId,
       fixture.primary.teamId,
       fixture.primary.teamRoleId,
+      fixture.primary.teamSupervisorRoleId,
       fixture.primary.teamStepId,
       fixture.primary.assignmentId,
       fixture.secondary.port,
@@ -161,6 +162,7 @@ if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
     PRIMARY_PROVIDER_SUBAGENT_ID \
     PRIMARY_TEAM_ID \
     PRIMARY_TEAM_ROLE_ID \
+    PRIMARY_TEAM_SUPERVISOR_ROLE_ID \
     PRIMARY_TEAM_STEP_ID \
     PRIMARY_ASSIGNMENT_ID \
     SECONDARY_PORT \
@@ -175,6 +177,7 @@ if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
   export AD_VAR_PRIMARY_PROVIDER_SUBAGENT_ID="${PRIMARY_PROVIDER_SUBAGENT_ID}"
   export AD_VAR_PRIMARY_TEAM_ID="${PRIMARY_TEAM_ID}"
   export AD_VAR_PRIMARY_TEAM_ROLE_ID="${PRIMARY_TEAM_ROLE_ID}"
+  export AD_VAR_PRIMARY_TEAM_SUPERVISOR_ROLE_ID="${PRIMARY_TEAM_SUPERVISOR_ROLE_ID}"
   export AD_VAR_PRIMARY_TEAM_STEP_ID="${PRIMARY_TEAM_STEP_ID}"
   export AD_VAR_PRIMARY_ASSIGNMENT_ID="${PRIMARY_ASSIGNMENT_ID}"
   export AD_VAR_SECONDARY_HOST="${DEVICE_HOST}"

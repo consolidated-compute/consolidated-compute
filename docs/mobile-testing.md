@@ -70,7 +70,7 @@ Assignments uses the same profile-backed Team and Workspace with a durable seede
 PASEO_MOBILE_E2E_PLATFORM=ios npm run test:e2e:mobile:assignments
 ```
 
-The replay checks Assignment list, detail, Work Item reference, rotation, and resume before starting an Assignment-backed Team Run. It accepts the run's permission, verifies the frozen Assignment and durable Artifact on the run, then returns to the Assignment history. The scheduled workflow runs Operations, Visual, Teams, and Assignments independently on iOS and Android, retains every evidence directory, then fails the platform job if any replay failed.
+The replay checks Assignment list, detail, Work Item reference, rotation, and resume before starting an Assignment-backed Team Run. It exercises the explicit supervised admission control, returns to the default sequential mode, accepts the run's permission, verifies the frozen Assignment and durable Artifact on the run, then returns to the Assignment history. The scheduled workflow runs Operations, Visual, Teams, and Assignments independently on iOS and Android, retains every evidence directory, then fails the platform job if any replay failed.
 
 When replay diverges, read its ranked selector suggestions. Edit the script deliberately and rerun it from the beginning. `--update` is retained for compatibility but no longer rewrites scripts.
 

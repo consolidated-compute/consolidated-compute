@@ -29,6 +29,7 @@ import { seedParentWithCrossWorkspaceSubagent } from "../packages/app/e2e/suppor
 const PRIMARY_SERVER_ID = "srv_mobile_operations_primary";
 const SECONDARY_SERVER_ID = "srv_mobile_operations_secondary";
 const PRIMARY_TEAM_ROLE_ID = "planner";
+const PRIMARY_TEAM_SUPERVISOR_ROLE_ID = "supervisor";
 const PRIMARY_TEAM_STEP_ID = "plan";
 
 interface AgentProfilesDaemonClient {
@@ -71,6 +72,13 @@ async function main(): Promise<void> {
           model: "ten-second-stream",
           modeId: "load-test",
         },
+        {
+          id: "mobile-supervisor",
+          name: "Mobile Supervisor",
+          provider: "mock",
+          model: "ten-second-stream",
+          modeId: "load-test",
+        },
       ],
     });
     teamsClient = await connectTeamsClient({ port: primaryDaemon.port });
@@ -83,6 +91,12 @@ async function main(): Promise<void> {
           name: "Planner",
           instructions: "Emit synthetic plan approval.",
           profileId: "mobile-planner",
+        },
+        {
+          id: PRIMARY_TEAM_SUPERVISOR_ROLE_ID,
+          name: "Supervisor",
+          instructions: "Coordinate the saved native worker plan.",
+          profileId: "mobile-supervisor",
         },
       ],
       workflow: [
@@ -195,6 +209,7 @@ async function main(): Promise<void> {
           providerSubagentId: OPERATIONS_DUPLICATE_PROVIDER_SUBAGENT_ID,
           teamId: mobileTeam.team.id,
           teamRoleId: PRIMARY_TEAM_ROLE_ID,
+          teamSupervisorRoleId: PRIMARY_TEAM_SUPERVISOR_ROLE_ID,
           teamStepId: PRIMARY_TEAM_STEP_ID,
           assignmentId: mobileAssignment.assignment.id,
         },

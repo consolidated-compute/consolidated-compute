@@ -285,6 +285,11 @@ test("mobile Assignments replays keep one cross-platform Artifact contract", () 
   assert.match(iosReplay, /home\nopen "\$\{APP_ID\}"/);
   assert.match(iosReplay, /assignment-team-\$\{PRIMARY_SERVER_ID\}-\$\{PRIMARY_TEAM_ID\}/);
   assert.match(iosReplay, /team-run-assignment/);
+  assert.match(iosReplay, /team-run-mode-sequential/);
+  assert.match(iosReplay, /team-run-mode-supervised/);
+  assert.match(iosReplay, /team-run-supervisor-field/);
+  assert.match(iosReplay, /team-run-role-status-\$\{PRIMARY_TEAM_SUPERVISOR_ROLE_ID\}-ready/);
+  assert.match(iosReplay, /assignment-supervised-admission\.png/);
   assert.match(iosReplay, /team-run-status-waiting_for_permission/);
   assert.match(iosReplay, /permission-request-accept/);
   assert.match(iosReplay, /team-run-status-succeeded/);

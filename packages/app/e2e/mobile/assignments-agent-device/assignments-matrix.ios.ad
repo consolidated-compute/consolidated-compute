@@ -43,8 +43,15 @@ wait "id=\"team-run-assignment\"" 10000
 press "id=\"team-run-workspace-field\""
 wait "id=\"team-run-workspace-${PRIMARY_WORKSPACE_ID}\"" 30000
 press "id=\"team-run-workspace-${PRIMARY_WORKSPACE_ID}\""
+scroll down 0.4
+wait "id=\"team-run-mode-sequential\"" 10000
+press "id=\"team-run-mode-supervised\""
+wait "id=\"team-run-supervisor-field\"" 10000
+screenshot "${AD_ARTIFACTS}/assignment-supervised-admission.png" --scale 1
+press "id=\"team-run-mode-sequential\""
 scroll down 0.6
 wait "id=\"team-run-role-status-${PRIMARY_TEAM_ROLE_ID}-ready\"" 30000
+wait "id=\"team-run-role-status-${PRIMARY_TEAM_SUPERVISOR_ROLE_ID}-ready\"" 30000
 press "id=\"team-run-start\""
 wait "id=\"team-run-frozen-assignment-${PRIMARY_SERVER_ID}-${PRIMARY_ASSIGNMENT_ID}\"" 30000
 wait "id=\"team-run-status-waiting_for_permission\"" 30000
