@@ -5,7 +5,7 @@ import React, { type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { TeamDefinitionDto } from "@getpaseo/protocol/team/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TeamRunFormSheet } from "./team-run-form-sheet";
+import { supportsSupervisedTeamRunAdmission, TeamRunFormSheet } from "./team-run-form-sheet";
 
 const { formModel, previewState, sheetState, submissionState } = vi.hoisted(() => {
   const team: TeamDefinitionDto = {
@@ -26,10 +26,17 @@ const { formModel, previewState, sheetState, submissionState } = vi.hoisted(() =
     selectedWorkspaceDisplay: { label: "Main" },
     selectedWorkspaceCwd: "/repo",
     catalogGeneration: 0,
+    profileGeneration: 0,
     objective: "Ship it",
+    assignment: null,
+    supervisionSupported: false,
+    executionMode: "sequential" as const,
+    supervisorOptions: [],
+    selectedSupervisorRoleId: null,
+    selectedSupervisorDisplay: null,
     roleResolutions: [],
     securityPreviewStatus: "ready",
-    securityPreview: null,
+    securityPreviewRequest: null,
     securityPreviewError: null as string | null,
     validationIssue: null,
     canSubmit: true,
@@ -50,10 +57,17 @@ const { formModel, previewState, sheetState, submissionState } = vi.hoisted(() =
       close: vi.fn(),
       applyWorkspaces: vi.fn(),
       applyProfiles: vi.fn(),
+      applySupervisionCapability: vi.fn(),
       applyProviderCatalog: vi.fn(),
+      applySecurityPreviewCapability: vi.fn(),
+      applySecurityPreviewPending: vi.fn(),
+      applySecurityPreview: vi.fn(),
+      applySecurityPreviewError: vi.fn(),
       applyFeatureCatalog: vi.fn(),
       setWorkspace: vi.fn(),
       setObjective: vi.fn(),
+      setExecutionMode: vi.fn(),
+      setSupervisor: vi.fn(),
       setSubmitError: vi.fn(),
     },
     previewState: {
@@ -181,6 +195,10 @@ vi.mock("@/components/ui/select-field", () => ({
   SelectField: () => null,
 }));
 
+vi.mock("@/components/ui/segmented-control", () => ({
+  SegmentedControl: () => null,
+}));
+
 describe("TeamRunFormSheet", () => {
   const team = formModel.getState().team;
 
@@ -198,6 +216,28 @@ describe("TeamRunFormSheet", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+  });
+
+  it("offers supervised admission only when the runtime advertises availability", () => {
+    expect(
+      supportsSupervisedTeamRunAdmission({
+        teamSupervision: true,
+        teamSupervisionAdmission: "available",
+      }),
+    ).toBe(true);
+    expect(
+      supportsSupervisedTeamRunAdmission({
+        teamSupervision: true,
+        teamSupervisionAdmission: "authentication_required",
+      }),
+    ).toBe(false);
+    expect(
+      supportsSupervisedTeamRunAdmission({
+        teamSupervision: true,
+        teamSupervisionAdmission: "environment_password_unsupported",
+      }),
+    ).toBe(false);
+    expect(supportsSupervisedTeamRunAdmission({ teamSupervision: true })).toBe(false);
   });
 
   it("blocks every delegated sheet dismissal while Start is pending", () => {

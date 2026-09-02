@@ -3442,6 +3442,12 @@ const ServerCapabilitiesFromUnknownSchema = z
     return parsed.data;
   });
 
+export const TeamSupervisionAdmissionStatusSchema = z.enum([
+  "available",
+  "authentication_required",
+  "environment_password_unsupported",
+]);
+
 export const ServerInfoStatusPayloadSchema = z
   .object({
     status: z.literal("server_info"),
@@ -3607,6 +3613,8 @@ export const ServerInfoStatusPayloadSchema = z
         teamRunPreview: z.boolean().optional(),
         // COMPAT(teamSupervision): added in v0.7.0, remove gate after 2027-03-01.
         teamSupervision: z.boolean().optional(),
+        // COMPAT(teamSupervisionAdmission): added in v0.7.0, remove gate after 2027-03-02.
+        teamSupervisionAdmission: TeamSupervisionAdmissionStatusSchema.optional(),
         // COMPAT(assignments): added in v0.6.x, remove gate after 2027-02-27.
         assignments: z.boolean().optional(),
         // COMPAT(agentConfigApply): added in v0.3.2, remove gate after 2027-02-11.
@@ -6669,6 +6677,7 @@ export type StatusMessage = z.infer<typeof StatusMessageSchema>;
 export type ServerCapabilityState = z.infer<typeof ServerCapabilityStateSchema>;
 export type ServerVoiceCapabilities = z.infer<typeof ServerVoiceCapabilitiesSchema>;
 export type ServerCapabilities = z.infer<typeof ServerCapabilitiesSchema>;
+export type TeamSupervisionAdmissionStatus = z.infer<typeof TeamSupervisionAdmissionStatusSchema>;
 export type ServerInfoStatusPayload = z.infer<typeof ServerInfoStatusPayloadSchema>;
 export type RpcErrorMessage = z.infer<typeof RpcErrorMessageSchema>;
 export type ArtifactMessage = z.infer<typeof ArtifactMessageSchema>;

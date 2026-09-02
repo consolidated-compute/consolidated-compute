@@ -475,6 +475,7 @@ describe("Team wire contracts", () => {
           teamSecurity: true,
           teamRunPreview: true,
           teamSupervision: true,
+          teamSupervisionAdmission: "available",
         },
       }).features,
     ).toEqual({
@@ -483,6 +484,7 @@ describe("Team wire contracts", () => {
       teamSecurity: true,
       teamRunPreview: true,
       teamSupervision: true,
+      teamSupervisionAdmission: "available",
     });
   });
 
@@ -503,6 +505,7 @@ describe("Team wire contracts", () => {
           teamSecurity: true,
           teamRunPreview: true,
           teamSupervision: true,
+          teamSupervisionAdmission: "authentication_required",
         },
       }),
     ).toEqual({

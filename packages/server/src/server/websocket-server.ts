@@ -1800,6 +1800,7 @@ export class VoiceAssistantWebSocketServer {
               teamSecurity: true,
               teamRunPreview: true,
               teamSupervision: true,
+              teamSupervisionAdmission: this.teamRunService.getSupervisedAdmissionStatus(),
             }
           : {}),
         // COMPAT(assignments): added in v0.6.x, remove gate after 2027-02-27.

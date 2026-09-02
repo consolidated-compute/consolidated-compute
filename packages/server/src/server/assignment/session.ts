@@ -4,7 +4,11 @@ import {
 } from "@getpaseo/protocol/assignment/rpc-schemas";
 
 import type { SessionInboundMessage, SessionOutboundMessage } from "../messages.js";
-import type { StartAssignmentTeamRunInput, TeamRunService } from "../team/service.js";
+import type {
+  AdmitSupervisedAssignmentTeamRunInput,
+  StartAssignmentTeamRunInput,
+  TeamRunService,
+} from "../team/service.js";
 import { toTeamRpcError, type TeamRpcError } from "../team/session.js";
 import { toTeamRunDto } from "../team/wire.js";
 import type {
@@ -48,6 +52,9 @@ export interface AssignmentSessionRunService {
   startAssignmentRun(
     input: StartAssignmentTeamRunInput,
   ): ReturnType<TeamRunService["startAssignmentRun"]>;
+  admitSupervisedAssignmentRun(
+    input: AdmitSupervisedAssignmentTeamRunInput,
+  ): ReturnType<TeamRunService["admitSupervisedAssignmentRun"]>;
 }
 
 export interface AssignmentSessionOptions {
@@ -184,17 +191,30 @@ export class AssignmentSession {
           payload: {
             requestId: message.requestId,
             run: toTeamRunDto(
-              await this.runService.startAssignmentRun({
-                teamId: message.teamId,
-                expectedRevision: message.expectedRevision,
-                idempotencyKey: message.idempotencyKey,
-                assignmentId: message.assignmentId,
-                expectedAssignmentRevision: message.expectedAssignmentRevision,
-                workspaceId: message.workspaceId,
-                ...(message.expectedPreviewFingerprint !== undefined
-                  ? { expectedPreviewFingerprint: message.expectedPreviewFingerprint }
-                  : {}),
-              }),
+              await (message.supervision
+                ? this.runService.admitSupervisedAssignmentRun({
+                    teamId: message.teamId,
+                    expectedRevision: message.expectedRevision,
+                    idempotencyKey: message.idempotencyKey,
+                    assignmentId: message.assignmentId,
+                    expectedAssignmentRevision: message.expectedAssignmentRevision,
+                    workspaceId: message.workspaceId,
+                    supervisorRoleId: message.supervision.supervisorRoleId,
+                    ...(message.expectedPreviewFingerprint !== undefined
+                      ? { expectedPreviewFingerprint: message.expectedPreviewFingerprint }
+                      : {}),
+                  })
+                : this.runService.startAssignmentRun({
+                    teamId: message.teamId,
+                    expectedRevision: message.expectedRevision,
+                    idempotencyKey: message.idempotencyKey,
+                    assignmentId: message.assignmentId,
+                    expectedAssignmentRevision: message.expectedAssignmentRevision,
+                    workspaceId: message.workspaceId,
+                    ...(message.expectedPreviewFingerprint !== undefined
+                      ? { expectedPreviewFingerprint: message.expectedPreviewFingerprint }
+                      : {}),
+                  })),
             ),
           },
         }));

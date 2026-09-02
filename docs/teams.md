@@ -106,6 +106,13 @@ the response idempotency key. A reconnect reads the persisted state; it does not
 from an agent transcript. Existing Team Run and step lifecycle values do not change. Gate the client
 surface once on the supervised-execution capability.
 
+Assignment admission defaults to sequential execution. Show the supervised choice only when the
+host advertises that capability, then require an unused saved Team role as supervisor and an
+authoritative security preview before Start. The Team Run detail owns durable human requests and
+the normalized supervision event history. Provider permission checkpoints link to the exact agent's
+existing timeline instead of duplicating the permission control. Legacy runs keep the established
+detail surface.
+
 Supervised agent authority comes from persisted run membership by exact preallocated agent ID.
 Correlation labels never grant access. Persist the identity before provider launch so its first tool
 catalog is already restricted. Deliver that catalog through the provider's native host interface

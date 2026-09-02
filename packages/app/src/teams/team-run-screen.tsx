@@ -31,6 +31,7 @@ import {
 import { useTeamRunMutations } from "./use-team-run-mutations";
 import { useTeamRun } from "./use-team-runs";
 import { TeamSecurityPostureFacts, TeamSecurityPostureNotice } from "./security-posture-facts";
+import { TeamRunSupervisionPanel } from "./team-run-supervision-panel";
 
 export function TeamRunScreen({
   serverId,
@@ -150,6 +151,9 @@ export function TeamRunScreen({
             />
           </View>
         </View>
+        {run.supervision ? (
+          <TeamRunSupervisionPanel serverId={serverId} run={run} enabled={isFocused} />
+        ) : null}
         <DetailSection title={t("teams.runs.detail.objective")}>
           <Text style={styles.bodyText}>{run.objective}</Text>
         </DetailSection>

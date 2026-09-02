@@ -2124,55 +2124,61 @@ describe("TeamRunService", () => {
     {
       protection: "passwordless" as const,
       code: "team_supervised_run_authentication_required",
+      admissionStatus: "authentication_required",
     },
     {
       protection: "environment_password" as const,
       code: "team_supervised_run_environment_password_unsupported",
+      admissionStatus: "environment_password_unsupported",
     },
-  ])("rejects supervised admission with $protection protection", async ({ protection, code }) => {
-    const harness = await createHarness({ supervisedControlPlaneProtection: protection });
-    harness.daemonConfigStore.agentProfiles.push({
-      id: "profile_supervisor",
-      name: "Supervisor",
-      provider: "codex",
-      model: "gpt-5.6",
-      providerOptions: { features: { multi_agent_v2: false } },
-    });
-    const definition = await harness.repository.updateDefinition({
-      teamId: harness.definition.id,
-      expectedRevision: harness.definition.revision,
-      patch: {
-        roles: [
-          ...harness.definition.roles,
-          {
-            id: "role_supervisor",
-            name: "Supervisor",
-            instructions: "Coordinate bounded work.",
-            profileId: "profile_supervisor",
-          },
-        ],
-      },
-    });
-    const assignment = await harness.assignments.createAssignment({
-      title: "Protected supervised admission",
-      objective: "Reject admission before a restricted agent can launch.",
-      workItem: null,
-    });
+  ])(
+    "rejects supervised admission with $protection protection",
+    async ({ protection, code, admissionStatus }) => {
+      const harness = await createHarness({ supervisedControlPlaneProtection: protection });
+      expect(harness.service.getSupervisedAdmissionStatus()).toBe(admissionStatus);
+      harness.daemonConfigStore.agentProfiles.push({
+        id: "profile_supervisor",
+        name: "Supervisor",
+        provider: "codex",
+        model: "gpt-5.6",
+        providerOptions: { features: { multi_agent_v2: false } },
+      });
+      const definition = await harness.repository.updateDefinition({
+        teamId: harness.definition.id,
+        expectedRevision: harness.definition.revision,
+        patch: {
+          roles: [
+            ...harness.definition.roles,
+            {
+              id: "role_supervisor",
+              name: "Supervisor",
+              instructions: "Coordinate bounded work.",
+              profileId: "profile_supervisor",
+            },
+          ],
+        },
+      });
+      const assignment = await harness.assignments.createAssignment({
+        title: "Protected supervised admission",
+        objective: "Reject admission before a restricted agent can launch.",
+        workItem: null,
+      });
 
-    await expect(
-      harness.service.admitSupervisedAssignmentRun({
-        teamId: definition.id,
-        expectedRevision: definition.revision,
-        idempotencyKey: "passwordless-supervised-start",
-        assignmentId: assignment.id,
-        expectedAssignmentRevision: assignment.revision,
-        workspaceId: "wks_team_service",
-        supervisorRoleId: "role_supervisor",
-      }),
-    ).rejects.toMatchObject({ code });
-    expect(harness.runtime.creations).toEqual([]);
-    await expect(harness.repository.listRuns()).resolves.toMatchObject({ runs: [] });
-  });
+      await expect(
+        harness.service.admitSupervisedAssignmentRun({
+          teamId: definition.id,
+          expectedRevision: definition.revision,
+          idempotencyKey: "passwordless-supervised-start",
+          assignmentId: assignment.id,
+          expectedAssignmentRevision: assignment.revision,
+          workspaceId: "wks_team_service",
+          supervisorRoleId: "role_supervisor",
+        }),
+      ).rejects.toMatchObject({ code });
+      expect(harness.runtime.creations).toEqual([]);
+      await expect(harness.repository.listRuns()).resolves.toMatchObject({ runs: [] });
+    },
+  );
 
   test("rejects supervised admission when provider-native delegation is not disabled", async () => {
     const harness = await createHarness();

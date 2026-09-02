@@ -98,6 +98,24 @@ describe("Assignment wire contracts", () => {
 
     expect(
       SessionInboundMessageSchema.parse({
+        type: "assignment.team_run.start.request",
+        requestId: "request_supervised_start",
+        teamId: "team_delivery",
+        expectedRevision: 3,
+        idempotencyKey: "assignment-supervised-run-1",
+        assignmentId: assignment.id,
+        expectedAssignmentRevision: 2,
+        workspaceId: "workspace_delivery",
+        supervision: { supervisorRoleId: "supervisor" },
+      }),
+    ).toMatchObject({
+      type: "assignment.team_run.start.request",
+      assignmentId: assignment.id,
+      supervision: { supervisorRoleId: "supervisor" },
+    });
+
+    expect(
+      SessionInboundMessageSchema.parse({
         type: "team.run.start.request",
         requestId: "legacy_start",
         teamId: "team_delivery",

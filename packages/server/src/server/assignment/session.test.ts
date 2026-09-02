@@ -146,7 +146,10 @@ function createHarness(options?: {
   const repository = options?.repository ?? createRepository();
   const runService =
     options?.runService ??
-    ({ startAssignmentRun: vi.fn(async () => createRun()) } satisfies AssignmentSessionRunService);
+    ({
+      startAssignmentRun: vi.fn(async () => createRun()),
+      admitSupervisedAssignmentRun: vi.fn(async () => createRun()),
+    } satisfies AssignmentSessionRunService);
   const session = new AssignmentSession({
     repository,
     runService,
@@ -277,6 +280,36 @@ describe("AssignmentSession", () => {
     expect(harness.messages).toMatchObject([
       { type: "assignment.team_run.start.response", payload: { run: { id: createRun().id } } },
     ]);
+  });
+
+  test("routes supervised Assignment admission through the durable supervisor service", async () => {
+    const harness = createHarness();
+    await harness.session.dispatch(
+      SessionInboundMessageSchema.parse({
+        type: "assignment.team_run.start.request",
+        requestId: "request_supervised_start",
+        teamId: "team_delivery",
+        expectedRevision: 2,
+        idempotencyKey: "assignment-supervised-run-1",
+        assignmentId: "asgn_0123456789abcdef",
+        expectedAssignmentRevision: 2,
+        workspaceId: "workspace_delivery",
+        expectedPreviewFingerprint: "c".repeat(64),
+        supervision: { supervisorRoleId: "supervisor" },
+      }),
+    );
+
+    expect(harness.runService.admitSupervisedAssignmentRun).toHaveBeenCalledWith({
+      teamId: "team_delivery",
+      expectedRevision: 2,
+      idempotencyKey: "assignment-supervised-run-1",
+      assignmentId: "asgn_0123456789abcdef",
+      expectedAssignmentRevision: 2,
+      workspaceId: "workspace_delivery",
+      expectedPreviewFingerprint: "c".repeat(64),
+      supervisorRoleId: "supervisor",
+    });
+    expect(harness.runService.startAssignmentRun).not.toHaveBeenCalled();
   });
 
   test("maps lifecycle failures and preserves healthy records beside corrupt siblings", async () => {

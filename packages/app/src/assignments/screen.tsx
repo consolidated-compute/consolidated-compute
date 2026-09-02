@@ -39,6 +39,7 @@ import {
 import { toErrorMessage } from "@/utils/error-messages";
 import { formatTimeAgo } from "@/utils/time";
 import { TeamRunFormSheet } from "@/teams/team-run-form-sheet";
+import { TeamRunSupervisionBadge } from "@/teams/team-run-supervision-badge";
 import type { AggregatedTeam } from "@/teams/data";
 import { useTeams } from "@/teams/use-teams";
 import { AssignmentArtifactCard } from "./artifact-card";
@@ -777,7 +778,10 @@ function AssignmentRunRow({
           {run.workspace.displayName} · {formatTimeAgo(new Date(run.createdAt))}
         </Text>
       </View>
-      <StatusBadge label={t(`teams.runs.status.${run.state.status}`)} />
+      <View style={styles.runBadges}>
+        <StatusBadge label={t(`teams.runs.status.${run.state.status}`)} />
+        {run.supervision ? <TeamRunSupervisionBadge summary={run.supervision} /> : null}
+      </View>
       <ChevronRight size={16} color={styles.chevron.color} />
     </Pressable>
   );
@@ -1001,6 +1005,12 @@ const styles = StyleSheet.create((theme) => ({
     borderColor: theme.colors.border,
     borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface1,
+  },
+  runBadges: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    gap: theme.spacing[2],
   },
   error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm },
 }));

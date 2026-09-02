@@ -158,7 +158,11 @@ import type {
   BrowserAutomationExecuteRequest,
   BrowserAutomationExecuteResponse,
 } from "@getpaseo/protocol/browser-automation/rpc-schemas";
-import type { TeamDefinitionInputDto, TeamDefinitionPatchDto } from "@getpaseo/protocol/team/types";
+import type {
+  TeamDefinitionInputDto,
+  TeamDefinitionPatchDto,
+  TeamRunSupervisionStartDto,
+} from "@getpaseo/protocol/team/types";
 import type { AssignmentInputDto, AssignmentPatchDto } from "@getpaseo/protocol/assignment/types";
 
 export interface Logger {
@@ -274,6 +278,7 @@ export interface StartAssignmentTeamRunInput {
   expectedAssignmentRevision: number;
   workspaceId: string;
   expectedPreviewFingerprint?: string;
+  supervision?: TeamRunSupervisionStartDto;
   requestId?: string;
 }
 
@@ -5895,6 +5900,7 @@ export class DaemonClient {
   async startAssignmentTeamRun(input: StartAssignmentTeamRunInput) {
     this.requireAssignmentsSupport();
     if (input.expectedPreviewFingerprint !== undefined) this.requireTeamRunPreviewSupport();
+    if (input.supervision !== undefined) this.requireTeamSupervisionAdmissionSupport();
     const { requestId, ...message } = input;
     return this.sendNamespacedCorrelatedSessionRequest<"assignment.team_run.start.response">({
       requestId,
@@ -5948,6 +5954,22 @@ export class DaemonClient {
     if (this.lastServerInfoMessage?.features?.teamSupervision !== true) {
       throw new Error("Update the host to use supervised Team Runs.");
     }
+  }
+
+  private requireTeamSupervisionAdmissionSupport(): void {
+    this.requireTeamSupervisionSupport();
+    const status = this.lastServerInfoMessage?.features?.teamSupervisionAdmission;
+    if (status === "available") return;
+    if (status === "authentication_required") {
+      throw new Error("Configure a persisted daemon password to start supervised Team Runs.");
+    }
+    if (status === "environment_password_unsupported") {
+      throw new Error(
+        "Replace PASEO_PASSWORD with a persisted daemon password to start supervised Team Runs.",
+      );
+    }
+    // COMPAT(teamSupervisionAdmission): added in v0.7.0, remove gate after 2027-03-02.
+    throw new Error("Update the host to start supervised Team Runs.");
   }
 
   private requireHubRelationshipSupport(): void {

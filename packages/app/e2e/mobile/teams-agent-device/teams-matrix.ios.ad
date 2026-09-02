@@ -45,6 +45,7 @@ fill "id=\"team-run-objective\"" "Verify the native Team permission boundary."
 keyboard dismiss
 scroll down 0.6
 wait "id=\"team-run-role-status-${PRIMARY_TEAM_ROLE_ID}-ready\"" 30000
+wait "id=\"team-run-role-status-${PRIMARY_TEAM_SUPERVISOR_ROLE_ID}-ready\"" 30000
 press "id=\"team-run-start\""
 wait "id=\"team-run-status-waiting_for_permission\"" 30000
 screenshot "${AD_ARTIFACTS}/teams-waiting-for-permission.png" --scale 1
