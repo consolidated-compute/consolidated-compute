@@ -10,15 +10,20 @@ export const TEST_PROVIDER_PREFERENCES = {
   codex: { model: "gpt-5.4-mini", thinkingByModel: { "gpt-5.4-mini": "low" } },
 } satisfies Record<string, ProviderPreferences>;
 
-export function buildDirectTcpConnection(endpoint: string): {
+export function buildDirectTcpConnection(
+  endpoint: string,
+  password?: string,
+): {
   id: string;
   type: "directTcp";
   endpoint: string;
+  password?: string;
 } {
   return {
     id: `direct:${endpoint}`,
     type: "directTcp",
     endpoint,
+    ...(password ? { password } : {}),
   };
 }
 
@@ -27,8 +32,9 @@ export function buildSeededHost(input: {
   endpoint: string;
   label?: string;
   nowIso: string;
+  password?: string;
 }) {
-  const connection = buildDirectTcpConnection(input.endpoint);
+  const connection = buildDirectTcpConnection(input.endpoint, input.password);
   return {
     serverId: input.serverId,
     label: input.label ?? TEST_HOST_LABEL,

@@ -254,6 +254,38 @@ describe("MockLoadTestAgentClient", () => {
     });
   });
 
+  test("drives the deterministic supervised checkpoint surface fixture", async () => {
+    vi.useFakeTimers();
+    const client = new MockLoadTestAgentClient();
+    const session = await client.createSession({
+      provider: "mock",
+      cwd: process.cwd(),
+      model: "ten-second-stream",
+    });
+    const run = async (state: string) => {
+      const result = session.run(
+        [
+          "Run the deterministic supervised checkpoint proof.",
+          "You must respond with JSON only that matches this JSON Schema for TeamSupervisorAction.",
+          state,
+        ].join("\n"),
+      );
+      await vi.runAllTimersAsync();
+      return (await result).finalText;
+    };
+
+    await expect(run("No decisions have been committed.")).resolves.toContain('"kind":"plan"');
+    await expect(run("action_surface_plan")).resolves.toContain('"kind":"dispatch"');
+    await expect(run("action_surface_plan action_surface_dispatch")).resolves.toContain(
+      '"kind":"escalate"',
+    );
+    await expect(
+      run(
+        "action_surface_plan action_surface_dispatch action_surface_escalate\n## Resolved human request\nAction: continue",
+      ),
+    ).resolves.toContain('"kind":"complete"');
+  });
+
   test("emits sub-word tokens, reasoning, and sequential tool calls during a foreground turn", async () => {
     vi.useFakeTimers();
     const client = new MockLoadTestAgentClient();
@@ -463,6 +495,15 @@ describe("MockLoadTestAgentClient", () => {
       finalText: "Synthetic questions resolved",
       canceled: false,
     });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "timeline",
+        item: expect.objectContaining({
+          type: "assistant_message",
+          text: "Synthetic questions resolved",
+        }),
+      }),
+    );
     unsubscribe();
   });
 

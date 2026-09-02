@@ -50,3 +50,15 @@ export function projectUnavailableProviderSecurityPosture(
     },
   };
 }
+
+export function projectMockProviderSecurityPosture(
+  input: ProviderSecurityPostureInput,
+): ProviderSecurityPosture {
+  return {
+    ...projectUnavailableProviderSecurityPosture(input),
+    nativeDelegation: {
+      status: "enforced",
+      summary: "The development mock provider has no native delegation runtime.",
+    },
+  };
+}

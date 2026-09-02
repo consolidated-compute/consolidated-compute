@@ -62,14 +62,20 @@ export async function addOfflineHostAndReload(
 
 export async function addConnectedHostAndReload(
   page: Page,
-  input: { serverId: string; label: string; port: number; primaryLabel?: string },
+  input: {
+    serverId: string;
+    label: string;
+    password?: string;
+    port: number;
+    primaryLabel?: string;
+  },
 ): Promise<void> {
   await addConnectedHostsAndReload(page, [input], { primaryLabel: input.primaryLabel });
 }
 
 export async function addConnectedHostsAndReload(
   page: Page,
-  inputs: Array<{ serverId: string; label: string; port: number }>,
+  inputs: Array<{ serverId: string; label: string; password?: string; port: number }>,
   options?: { primaryLabel?: string },
 ): Promise<void> {
   const connectedHosts = inputs.map((input) =>
@@ -78,6 +84,7 @@ export async function addConnectedHostsAndReload(
       label: input.label,
       endpoint: `127.0.0.1:${input.port}`,
       nowIso: new Date().toISOString(),
+      password: input.password,
     }),
   );
 

@@ -294,6 +294,49 @@ function shouldEmitPlanApprovalPrompt(prompt: AgentPromptInput): boolean {
   return /emit\s+(?:a\s+)?synthetic\s+plan\s+approval/i.test(promptToText(prompt));
 }
 
+function parseSupervisedCheckpointProofAction(prompt: AgentPromptInput): string | null {
+  const text = promptToText(prompt);
+  if (
+    !text.includes("Run the deterministic supervised checkpoint proof.") ||
+    !text.includes("TeamSupervisorAction")
+  ) {
+    return null;
+  }
+  if (!text.includes("action_surface_plan")) {
+    return JSON.stringify({
+      kind: "plan",
+      actionId: "action_surface_plan",
+      summary: "Plan the frozen checkpoint worker.",
+      workItems: [{ id: "work_surface_checkpoint", templateStepId: "checkpoint" }],
+    });
+  }
+  if (!text.includes("action_surface_dispatch")) {
+    return JSON.stringify({
+      kind: "dispatch",
+      actionId: "action_surface_dispatch",
+      summary: "Dispatch the checkpoint worker.",
+      workItemId: "work_surface_checkpoint",
+      inputArtifactIds: [],
+    });
+  }
+  if (!text.includes("action_surface_escalate")) {
+    return JSON.stringify({
+      kind: "escalate",
+      actionId: "action_surface_escalate",
+      summary: "Confirm the permission-approved Artifact before completion.",
+      workItemId: "work_surface_checkpoint",
+    });
+  }
+  if (text.includes("## Resolved human request") && text.includes("Action: continue")) {
+    return JSON.stringify({
+      kind: "complete",
+      actionId: "action_surface_complete",
+      summary: "Complete the approved supervised proof.",
+    });
+  }
+  return null;
+}
+
 function shouldEmitTurnFailure(prompt: AgentPromptInput): boolean {
   return /emit\s+(?:a\s+)?synthetic\s+turn\s+failure/i.test(promptToText(prompt));
 }
@@ -879,6 +922,7 @@ export class MockLoadTestAgentSession implements AgentSession {
     const stress = parseAgentStreamStressPrompt(prompt);
     const questionPrompt = parseMockQuestionPrompt(prompt);
     const structuredBranchName = parseStructuredBranchNamePrompt(prompt);
+    const supervisedCheckpointProofAction = parseSupervisedCheckpointProofAction(prompt);
     const settledAssistantImageMarkdown = parseSettledAssistantImageMarkdown(prompt);
     const steeringReplayShape = parseSteeringReplayShape(prompt);
     const scheduleTurn = () => {
@@ -892,6 +936,8 @@ export class MockLoadTestAgentSession implements AgentSession {
         this.scheduleSettledAssistantTurn(turn, this.assistantResponse);
       } else if (structuredBranchName) {
         this.scheduleSettledAssistantTurn(turn, JSON.stringify(structuredBranchName));
+      } else if (supervisedCheckpointProofAction) {
+        this.scheduleSettledAssistantTurn(turn, supervisedCheckpointProofAction);
       } else if (settledAssistantImageMarkdown) {
         this.scheduleSettledAssistantTurn(turn, settledAssistantImageMarkdown);
       } else if (shouldEmitPlanApprovalPrompt(prompt)) {
@@ -1036,12 +1082,16 @@ export class MockLoadTestAgentSession implements AgentSession {
     });
 
     if (turn) {
-      this.finishTurnWithText(
-        turn,
+      const finalText =
         request.kind === "question"
           ? "Synthetic questions resolved"
-          : "Synthetic plan approval resolved",
-      );
+          : "Synthetic plan approval resolved";
+      this.emitTimeline(turn.turnId, {
+        type: "assistant_message",
+        text: finalText,
+        messageId: turn.assistantMessageId,
+      });
+      this.finishTurnWithText(turn, finalText);
     }
     return undefined;
   }

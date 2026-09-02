@@ -238,7 +238,13 @@ function ProviderPermissionCallout({
           {t("teams.runs.supervision.permission.detail", { role: step.snapshot.roleName })}
         </Text>
       </View>
-      <Button variant="outline" size="sm" leftIcon={Bot} onPress={onOpen}>
+      <Button
+        variant="outline"
+        size="sm"
+        leftIcon={Bot}
+        onPress={onOpen}
+        testID="team-run-provider-permission-open-agent"
+      >
         {t("teams.runs.supervision.permission.openAgent")}
       </Button>
     </View>

@@ -152,6 +152,12 @@ if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
       fixture.secondary.workspaceId,
       fixture.secondary.agentId,
       fixture.secondary.providerSubagentId,
+      fixture.supervised.port,
+      fixture.supervised.serverId,
+      fixture.supervised.password,
+      fixture.supervised.assignmentId,
+      fixture.supervised.runId,
+      fixture.supervised.workerAgentId,
     ].join("\t"));
   ' "${FIXTURE_JSON}")"
   IFS=$'\t' read -r \
@@ -169,7 +175,13 @@ if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
     SECONDARY_SERVER_ID \
     SECONDARY_WORKSPACE_ID \
     SECONDARY_AGENT_ID \
-    SECONDARY_PROVIDER_SUBAGENT_ID <<<"${FIXTURE_VALUES}"
+    SECONDARY_PROVIDER_SUBAGENT_ID \
+    SUPERVISED_PORT \
+    SUPERVISED_SERVER_ID \
+    SUPERVISED_PASSWORD \
+    SUPERVISED_ASSIGNMENT_ID \
+    SUPERVISED_RUN_ID \
+    SUPERVISED_WORKER_AGENT_ID <<<"${FIXTURE_VALUES}"
 
   export AD_VAR_PRIMARY_SERVER_ID="${PRIMARY_SERVER_ID}"
   export AD_VAR_PRIMARY_WORKSPACE_ID="${PRIMARY_WORKSPACE_ID}"
@@ -186,6 +198,13 @@ if [[ "${OPERATIONS_FIXTURE}" == "1" ]]; then
   export AD_VAR_SECONDARY_WORKSPACE_ID="${SECONDARY_WORKSPACE_ID}"
   export AD_VAR_SECONDARY_AGENT_ID="${SECONDARY_AGENT_ID}"
   export AD_VAR_SECONDARY_PROVIDER_SUBAGENT_ID="${SECONDARY_PROVIDER_SUBAGENT_ID}"
+  export AD_VAR_SUPERVISED_HOST="${DEVICE_HOST}"
+  export AD_VAR_SUPERVISED_PORT="${SUPERVISED_PORT}"
+  export AD_VAR_SUPERVISED_SERVER_ID="${SUPERVISED_SERVER_ID}"
+  export AD_VAR_SUPERVISED_PASSWORD="${SUPERVISED_PASSWORD}"
+  export AD_VAR_SUPERVISED_ASSIGNMENT_ID="${SUPERVISED_ASSIGNMENT_ID}"
+  export AD_VAR_SUPERVISED_RUN_ID="${SUPERVISED_RUN_ID}"
+  export AD_VAR_SUPERVISED_WORKER_AGENT_ID="${SUPERVISED_WORKER_AGENT_ID}"
   export AD_VAR_APP_ID="${APP_ID}"
   export AD_VAR_METRO_HOST="${DEVICE_HOST}"
   export AD_VAR_METRO_PORT="${METRO_PORT}"

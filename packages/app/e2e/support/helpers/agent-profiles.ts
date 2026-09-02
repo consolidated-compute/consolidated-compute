@@ -30,9 +30,13 @@ export interface AgentProfilesSeed extends HostSeed {
   replace(profiles: AgentProfile[]): Promise<void>;
 }
 
-async function connectAgentProfilesClient(port?: number): Promise<AgentProfilesDaemonClient> {
+async function connectAgentProfilesClient(
+  port?: number,
+  password?: string,
+): Promise<AgentProfilesDaemonClient> {
   return connectDaemonClient<AgentProfilesDaemonClient>({
     clientIdPrefix: "agent-profiles-e2e",
+    password,
     port,
   });
 }
@@ -44,9 +48,9 @@ async function connectAgentProfilesClient(port?: number): Promise<AgentProfilesD
  */
 export async function seedAgentProfiles(
   profiles: AgentProfile[],
-  options?: { port?: number },
+  options?: { password?: string; port?: number },
 ): Promise<AgentProfilesSeed> {
-  const client = await connectAgentProfilesClient(options?.port);
+  const client = await connectAgentProfilesClient(options?.port, options?.password);
   const previous = (await client.getDaemonConfig()).config.agentProfiles ?? [];
   await client.patchDaemonConfig({ agentProfiles: profiles });
   return {

@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { projectClaudeSecurityPosture } from "./providers/claude/security-posture.js";
 import { projectCodexSecurityPosture } from "./providers/codex/security-posture.js";
 import { projectOpenCodeSecurityPosture } from "./providers/opencode/security-posture.js";
+import { projectMockProviderSecurityPosture } from "./provider-security-posture.js";
 
 describe("provider security posture", () => {
   test("reports only fail-closed Codex filesystem and network restrictions as enforced", () => {
@@ -165,5 +166,18 @@ describe("provider security posture", () => {
         providerOptions: { features: { multi_agent_v2: false } },
       }).nativeDelegation?.status,
     ).toBe("unavailable");
+  });
+
+  test("treats the development mock provider's absent delegation runtime as enforced", () => {
+    expect(
+      projectMockProviderSecurityPosture({
+        provider: "mock",
+        modeId: "load-test",
+        providerOptions: undefined,
+      }).nativeDelegation,
+    ).toEqual({
+      status: "enforced",
+      summary: "The development mock provider has no native delegation runtime.",
+    });
   });
 });
