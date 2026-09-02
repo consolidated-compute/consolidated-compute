@@ -365,9 +365,11 @@ interface QueuedEvent {
 class MemoryAgentRuntime {
   readonly creations: CreateAgentFromMcpInput[] = [];
   readonly cancellations: string[] = [];
+  readonly loadedAgents: string[] = [];
   readonly streams: Array<{ agentId: string; prompt: AgentPromptInput }> = [];
   readonly finalResponses = new Map<string, string | null>();
   cancellation: AgentRunCancellationResult = { status: "settled" };
+  loadError: Error | null = null;
   requireRegisteredCancellation = false;
   beforeCreate: ((input: CreateAgentFromMcpInput) => Promise<void>) | null = null;
   blockCreation = false;
@@ -387,6 +389,11 @@ class MemoryAgentRuntime {
     await new Promise<void>((resolve) => {
       this.releaseCreation = resolve;
     });
+  }
+
+  async ensureAgentLoaded(agentId: string): Promise<void> {
+    this.loadedAgents.push(agentId);
+    if (this.loadError) throw this.loadError;
   }
 
   unblockCreation(): void {
@@ -546,6 +553,7 @@ describe("TeamRunService", () => {
       providerCatalog,
       daemonConfigStore,
       createAgent: (input) => runtime.createAgent(input),
+      ensureAgentLoaded: (agentId) => runtime.ensureAgentLoaded(agentId),
       agentManager: runtime,
       cancelAgentRun: (agentId) => runtime.cancelAgentRun(agentId),
       logger: createTestLogger(),
@@ -1891,6 +1899,21 @@ describe("TeamRunService", () => {
     expect(restarted.runtime.streams).toEqual([]);
 
     const request = (await restarted.repository.getRun(run.id))!.supervision!.humanRequest!;
+    restarted.runtime.loadError = new Error("Supervisor provider is temporarily unavailable");
+    await expect(
+      restarted.service.respondToSupervisionHumanRequest({
+        runId: run.id,
+        requestId: request.id,
+        expectedRequestRevision: request.revision,
+        actionId: "continue",
+        note: "Proceed with the bounded plan.",
+        idempotencyKey: "continue-supervised-escalation-1",
+      }),
+    ).rejects.toThrow("Supervisor provider is temporarily unavailable");
+    expect(
+      (await restarted.repository.getRun(run.id))?.supervision?.humanRequest,
+    ).not.toHaveProperty("resolution");
+    restarted.runtime.loadError = null;
     const resumed = await restarted.service.respondToSupervisionHumanRequest({
       runId: run.id,
       requestId: request.id,
@@ -1899,6 +1922,7 @@ describe("TeamRunService", () => {
       note: "Proceed with the bounded plan.",
       idempotencyKey: "continue-supervised-escalation-1",
     });
+    expect(restarted.runtime.loadedAgents).toEqual([firstAgentId, firstAgentId]);
     expect(resumed.supervision).toMatchObject({
       phase: "planning",
       humanRequest: {

@@ -45,6 +45,7 @@ import {
   TeamRepository,
   TeamRevisionConflictError,
   TeamRunNotFoundError,
+  TeamRunNotSupervisedError,
   type ResolveTeamRunSupervisionHumanRequestInput,
   type TeamRunUpdate,
 } from "./repository.js";
@@ -126,6 +127,7 @@ export interface TeamRunServiceOptions {
   providerCatalog: TeamProviderCatalog;
   daemonConfigStore: TeamAgentProfileConfigStore;
   createAgent(input: CreateAgentFromMcpInput): Promise<unknown>;
+  ensureAgentLoaded(agentId: string): Promise<unknown>;
   agentManager: TeamAgentStream & TeamFeatureCatalog;
   cancelAgentRun(agentId: string): Promise<AgentRunCancellationResult>;
   logger: Pick<Logger, "error">;
@@ -220,6 +222,7 @@ export class TeamRunService {
   private readonly providerCatalog: TeamProviderCatalog;
   private readonly daemonConfigStore: TeamAgentProfileConfigStore;
   private readonly createAgent: TeamRunServiceOptions["createAgent"];
+  private readonly ensureAgentLoaded: TeamRunServiceOptions["ensureAgentLoaded"];
   private readonly agentManager: TeamAgentStream & TeamFeatureCatalog;
   private readonly cancelAgentRun: TeamRunServiceOptions["cancelAgentRun"];
   private readonly logger: Pick<Logger, "error">;
@@ -246,6 +249,7 @@ export class TeamRunService {
     this.providerCatalog = options.providerCatalog;
     this.daemonConfigStore = options.daemonConfigStore;
     this.createAgent = options.createAgent;
+    this.ensureAgentLoaded = options.ensureAgentLoaded;
     this.agentManager = options.agentManager;
     this.cancelAgentRun = options.cancelAgentRun;
     this.logger = options.logger;
@@ -486,11 +490,19 @@ export class TeamRunService {
   ): Promise<PersistedTeamRunRecord> {
     const current = await this.requireRun(input.runId);
     const humanRequest = current.supervision?.humanRequest;
-    if (humanRequest && !humanRequest.resolution && !humanRequest.retirement) {
+    const hasPendingHumanRequest = Boolean(
+      humanRequest && !humanRequest.resolution && !humanRequest.retirement,
+    );
+    if (hasPendingHumanRequest) {
       await this.executions.get(input.runId);
     }
     return this.serializeAdmission(async () => {
       this.requireAcceptingStarts();
+      if (input.actionId !== "cancel" && hasPendingHumanRequest) {
+        const supervisorAgentId = current.supervision?.supervisor.agentId;
+        if (!supervisorAgentId) throw new TeamRunNotSupervisedError(input.runId);
+        await this.ensureAgentLoaded(supervisorAgentId);
+      }
       const resolved = await this.repository.resolveSupervisionHumanRequest(input);
       if (input.actionId === "cancel") return this.cancelRun(input.runId);
       this.launchExecution(input.runId);
