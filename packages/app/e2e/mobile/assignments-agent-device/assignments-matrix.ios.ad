@@ -11,6 +11,24 @@ settings appearance light
 wait "id=\"menu-button\"" 45000
 
 press "id=\"menu-button\""
+wait "id=\"sidebar-settings\"" 10000
+press "id=\"sidebar-settings\""
+wait "id=\"settings-host-picker\"" 20000
+press "id=\"settings-host-picker\""
+wait "id=\"settings-add-host\"" 10000
+press "id=\"settings-add-host\""
+wait "id=\"add-host-method-direct\"" 10000
+press "id=\"add-host-method-direct\""
+wait "id=\"direct-host-input\"" 10000
+fill "id=\"direct-host-input\"" "${SUPERVISED_HOST}"
+fill "id=\"direct-port-input\"" "${SUPERVISED_PORT}"
+fill "id=\"direct-password-input\"" "${SUPERVISED_PASSWORD}"
+keyboard dismiss
+press "id=\"direct-host-submit\""
+wait "id=\"settings-host-picker\"" 30000
+back
+wait "id=\"menu-button\"" 20000
+press "id=\"menu-button\""
 wait "id=\"sidebar-assignments\"" 10000
 press "id=\"sidebar-assignments\""
 wait "id=\"assignments-list\"" 30000
@@ -80,4 +98,37 @@ scroll bottom
 wait "text" "Planner output" 30000
 wait "text" "Synthetic plan approval resolved" 30000
 screenshot "${AD_ARTIFACTS}/assignment-history-artifact.png" --scale 1
+
+back
+wait "id=\"assignments-list\"" 30000
+wait "id=\"assignment-row-${SUPERVISED_SERVER_ID}-${SUPERVISED_ASSIGNMENT_ID}\"" 30000
+press "id=\"assignment-row-${SUPERVISED_SERVER_ID}-${SUPERVISED_ASSIGNMENT_ID}\""
+wait "id=\"assignment-detail-${SUPERVISED_SERVER_ID}-${SUPERVISED_ASSIGNMENT_ID}\"" 30000
+scroll bottom
+wait "id=\"assignment-run-${SUPERVISED_SERVER_ID}-${SUPERVISED_ASSIGNMENT_ID}-${SUPERVISED_RUN_ID}\"" 30000
+press "id=\"assignment-run-${SUPERVISED_SERVER_ID}-${SUPERVISED_ASSIGNMENT_ID}-${SUPERVISED_RUN_ID}\""
+wait "id=\"team-run-detail-${SUPERVISED_SERVER_ID}-${SUPERVISED_RUN_ID}\"" 30000
+wait "id=\"team-run-status-waiting_for_permission\"" 30000
+scroll down 0.5
+wait "id=\"team-run-provider-permission-open-agent\"" 10000
+screenshot "${AD_ARTIFACTS}/supervised-provider-permission.png" --scale 1
+press "id=\"team-run-provider-permission-open-agent\""
+wait "id=\"workspace-tab-agent_${SUPERVISED_WORKER_AGENT_ID}\"" 30000
+wait "id=\"permission-request-question\"" 30000
+press "id=\"permission-request-accept\""
+back
+wait "id=\"team-run-detail-${SUPERVISED_SERVER_ID}-${SUPERVISED_RUN_ID}\"" 30000
+scroll top
+wait "id=\"team-run-supervision-review\"" 30000
+screenshot "${AD_ARTIFACTS}/supervised-human-checkpoint.png" --scale 1
+press "id=\"team-run-supervision-review\""
+wait "id=\"team-supervision-response-sheet\"" 10000
+press "id=\"team-supervision-response-action-field\""
+wait "id=\"team-supervision-response-action-continue\"" 10000
+press "id=\"team-supervision-response-action-continue\""
+fill "id=\"team-supervision-response-note\"" "Approved on native."
+keyboard dismiss
+press "id=\"team-supervision-response-submit\""
+wait "id=\"team-run-status-succeeded\"" 30000
+screenshot "${AD_ARTIFACTS}/supervised-completed.png" --scale 1
 close

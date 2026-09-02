@@ -24,6 +24,10 @@ import {
   connectTeamsClient,
   type TeamsDaemonClient,
 } from "../packages/app/e2e/support/helpers/teams.js";
+import {
+  startSupervisedTeamSurfaceScenario,
+  type SupervisedTeamSurfaceScenario,
+} from "../packages/app/e2e/support/helpers/supervised-team-scenario.js";
 import { seedParentWithCrossWorkspaceSubagent } from "../packages/app/e2e/support/helpers/subagents.js";
 
 const PRIMARY_SERVER_ID = "srv_mobile_operations_primary";
@@ -46,6 +50,7 @@ async function main(): Promise<void> {
   let profilesClient: AgentProfilesDaemonClient | null = null;
   let teamsClient: TeamsDaemonClient | null = null;
   let assignmentsClient: AssignmentsDaemonClient | null = null;
+  let supervisedScenario: SupervisedTeamSurfaceScenario | null = null;
 
   try {
     secondaryDaemon = await startIsolatedHostDaemon(SECONDARY_SERVER_ID);
@@ -120,6 +125,9 @@ async function main(): Promise<void> {
         title: "Assignments: prove the three-role Artifact contract",
         url: "https://github.com/consolidated-compute/consolidated-compute/issues/72",
       },
+    });
+    supervisedScenario = await startSupervisedTeamSurfaceScenario({
+      serverId: "srv_mobile_supervised_surface",
     });
     const primaryParent = await primary.client.createAgent({
       provider: "mock",
@@ -220,6 +228,14 @@ async function main(): Promise<void> {
           agentId: secondaryAgent.id,
           providerSubagentId: OPERATIONS_DUPLICATE_PROVIDER_SUBAGENT_ID,
         },
+        supervised: {
+          serverId: supervisedScenario.serverId,
+          port: supervisedScenario.port,
+          password: supervisedScenario.password,
+          assignmentId: supervisedScenario.assignmentId,
+          runId: supervisedScenario.runId,
+          workerAgentId: supervisedScenario.workerAgentId,
+        },
       })}\n`,
     );
     await Promise.race([once(process, "SIGINT"), once(process, "SIGTERM")]);
@@ -232,6 +248,7 @@ async function main(): Promise<void> {
     await Promise.allSettled([
       primary?.cleanup() ?? Promise.resolve(),
       secondary?.cleanup() ?? Promise.resolve(),
+      supervisedScenario?.cleanup() ?? Promise.resolve(),
     ]);
     await Promise.allSettled([
       primaryDaemon.close(),

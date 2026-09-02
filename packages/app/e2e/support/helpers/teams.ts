@@ -28,12 +28,25 @@ export interface TeamsDaemonClient {
     expectedRevision: number;
     requestId?: string;
   }): Promise<{ teamId: string }>;
+  startAssignmentTeamRun(input: {
+    teamId: string;
+    expectedRevision: number;
+    idempotencyKey: string;
+    assignmentId: string;
+    expectedAssignmentRevision: number;
+    workspaceId: string;
+    supervision: { supervisorRoleId: string };
+  }): Promise<{ run: TeamRunDto }>;
   getTeamRun(runId: string, requestId?: string): Promise<{ run: TeamRunDto }>;
 }
 
-export function connectTeamsClient(options?: { port?: number }): Promise<TeamsDaemonClient> {
+export function connectTeamsClient(options?: {
+  password?: string;
+  port?: number;
+}): Promise<TeamsDaemonClient> {
   return connectDaemonClient<TeamsDaemonClient>({
     clientIdPrefix: "teams-e2e",
+    password: options?.password,
     port: options?.port,
   });
 }

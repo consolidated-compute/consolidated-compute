@@ -295,6 +295,13 @@ test("mobile Assignments replays keep one cross-platform Artifact contract", () 
   assert.match(iosReplay, /team-run-status-succeeded/);
   assert.equal(iosReplay.match(/wait "text" "Synthetic plan approval resolved" 30000/g)?.length, 2);
   assert.match(iosReplay, /assignment-history-artifact\.png/);
+  assert.match(iosReplay, /direct-password-input.*\$\{SUPERVISED_PASSWORD\}/);
+  assert.match(iosReplay, /team-run-provider-permission-open-agent/);
+  assert.match(iosReplay, /workspace-tab-agent_\$\{SUPERVISED_WORKER_AGENT_ID\}/);
+  assert.match(iosReplay, /team-run-supervision-review/);
+  assert.match(iosReplay, /team-supervision-response-action-continue/);
+  assert.match(iosReplay, /supervised-human-checkpoint\.png/);
+  assert.match(iosReplay, /supervised-completed\.png/);
 });
 
 test("mobile Operations, Visual, Teams, and Assignments reuse native development apps", () => {

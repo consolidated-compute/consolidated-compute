@@ -39,10 +39,12 @@ export interface AssignmentsDaemonClient {
 }
 
 export function connectAssignmentsClient(options?: {
+  password?: string;
   port?: number;
 }): Promise<AssignmentsDaemonClient> {
   return connectDaemonClient<AssignmentsDaemonClient>({
     clientIdPrefix: "assignments-e2e",
+    password: options?.password,
     port: options?.port,
   });
 }
