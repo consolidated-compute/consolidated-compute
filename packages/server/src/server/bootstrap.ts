@@ -130,6 +130,7 @@ import type { RequestedSpeechProviders } from "./speech/speech-types.js";
 import { createSpeechService } from "./speech/speech-runtime.js";
 import { AgentManager } from "./agent/agent-manager.js";
 import { AgentStorage } from "./agent/agent-storage.js";
+import { ensureUnarchivedAgentLoaded } from "./agent/agent-loading.js";
 import { attachAgentStoragePersistence } from "./persistence-hooks.js";
 import { createAgentMcpServer } from "./agent/mcp-server.js";
 import {
@@ -1176,6 +1177,8 @@ export async function createPaseoDaemon(
     providerCatalog: providerSnapshotManager,
     daemonConfigStore,
     createAgent,
+    ensureAgentLoaded: (agentId) =>
+      ensureUnarchivedAgentLoaded(agentId, { agentManager, agentStorage, logger }),
     agentManager,
     cancelAgentRun: (agentId) => agentManager.cancelAgentRun(agentId),
     logger,

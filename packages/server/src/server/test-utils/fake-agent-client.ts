@@ -59,11 +59,17 @@ interface FakeAgentSessionOptions {
   memoryMarker?: string | null;
   closeSession?: () => Promise<void>;
   onStartTurn?: (prompt: AgentPromptInput) => void;
+  resolveAssistantText?: TestAgentClientOptions["resolveAssistantText"];
 }
 
 export interface TestAgentClientOptions {
   closeSession?: () => Promise<void>;
   onStartTurn?: (prompt: AgentPromptInput) => void;
+  resolveAssistantText?: (input: {
+    provider: string;
+    config: Readonly<AgentSessionConfig>;
+    prompt: string;
+  }) => string | undefined;
   supportsMcpServers?: boolean;
 }
 
@@ -337,6 +343,7 @@ class FakeAgentSession implements AgentSession {
 
   private readonly closeSession: (() => Promise<void>) | undefined;
   private readonly onStartTurn: ((prompt: AgentPromptInput) => void) | undefined;
+  private readonly resolveAssistantText: TestAgentClientOptions["resolveAssistantText"] | undefined;
 
   constructor(options: FakeAgentSessionOptions) {
     this.capabilities = {
@@ -349,6 +356,7 @@ class FakeAgentSession implements AgentSession {
     this.memoryMarker = options.memoryMarker ?? null;
     this.closeSession = options.closeSession;
     this.onStartTurn = options.onStartTurn;
+    this.resolveAssistantText = options.resolveAssistantText;
     this.historyPath = path.join(
       tmpdir(),
       "paseo-fake-provider-history",
@@ -709,6 +717,11 @@ class FakeAgentSession implements AgentSession {
     this.interruptSignal = createDeferred<void>();
     const slashCommand = await this.resolveSlashCommandInput(prompt);
     const textPrompt = typeof prompt === "string" ? prompt : JSON.stringify(prompt);
+    const resolvedAssistantText = this.resolveAssistantText?.({
+      provider: this.providerName,
+      config: this.config,
+      prompt: textPrompt,
+    });
     try {
       if (slashCommand) {
         await this.emitSlashCommandTurn(slashCommand);
@@ -737,6 +750,16 @@ class FakeAgentSession implements AgentSession {
       await this.appendHistoryEvent(turnStarted);
       this.notifySubscribers(turnStarted);
 
+      if (resolvedAssistantText !== undefined) {
+        const userMessage: AgentStreamEvent = {
+          type: "timeline",
+          provider: this.providerName,
+          item: { type: "user_message", text: textPrompt },
+        };
+        await this.appendHistoryEvent(userMessage);
+        this.notifySubscribers(userMessage);
+      }
+
       if (textPrompt.toLowerCase().includes("emit a turn failure")) {
         const failed: AgentStreamEvent = {
           type: "turn_failed",
@@ -760,7 +783,10 @@ class FakeAgentSession implements AgentSession {
         return;
       }
 
-      const tool = buildToolCallForPrompt(this.providerName, textPrompt);
+      const tool =
+        resolvedAssistantText === undefined
+          ? buildToolCallForPrompt(this.providerName, textPrompt)
+          : null;
       if (tool) {
         const returnedEarly = await this.emitToolCallTurn(tool, textPrompt);
         if (returnedEarly) {
@@ -768,7 +794,7 @@ class FakeAgentSession implements AgentSession {
         }
       }
 
-      const assistantText = this.buildAssistantText(textPrompt);
+      const assistantText = resolvedAssistantText ?? this.buildDefaultAssistantText(textPrompt);
       const assistantChunkA: AgentStreamEvent = {
         type: "timeline",
         provider: this.providerName,
@@ -963,6 +989,17 @@ class FakeAgentSession implements AgentSession {
   }
 
   private buildAssistantText(prompt: string): string {
+    const resolved = this.resolveAssistantText?.({
+      provider: this.providerName,
+      config: this.config,
+      prompt,
+    });
+    if (resolved !== undefined) return resolved;
+
+    return this.buildDefaultAssistantText(prompt);
+  }
+
+  private buildDefaultAssistantText(prompt: string): string {
     const lower = prompt.toLowerCase();
 
     // Special-case for tests that ask the agent to run pwd but use a placeholder in the
@@ -1208,6 +1245,7 @@ class FakeAgentClient implements AgentClient {
       supportsMcpServers: this.options.supportsMcpServers,
       closeSession: this.options.closeSession,
       onStartTurn: this.options.onStartTurn,
+      resolveAssistantText: this.options.resolveAssistantText,
     });
   }
 
@@ -1233,6 +1271,7 @@ class FakeAgentClient implements AgentClient {
       memoryMarker: typeof marker === "string" ? marker : null,
       closeSession: this.options.closeSession,
       onStartTurn: this.options.onStartTurn,
+      resolveAssistantText: this.options.resolveAssistantText,
     });
   }
 
