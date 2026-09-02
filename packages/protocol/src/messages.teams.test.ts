@@ -514,4 +514,94 @@ describe("Team wire contracts", () => {
       features: { agentProfiles: true },
     });
   });
+
+  test("proves the old and new app-daemon supervision compatibility matrix", () => {
+    const LegacyServerInfoSchema = z.object({
+      status: z.literal("server_info"),
+      serverId: z.string(),
+      features: z
+        .object({ assignments: z.boolean().optional(), teams: z.boolean().optional() })
+        .optional(),
+    });
+    const LegacyRunSchema = TeamRunDtoSchema.omit({ supervision: true });
+    const LegacyRunResponseSchema = z.object({
+      type: z.literal("team.run.get.response"),
+      payload: z.object({ requestId: z.string(), run: LegacyRunSchema }),
+    });
+    const oldDaemonInfo = {
+      status: "server_info",
+      serverId: "server_1",
+      features: { assignments: true, teams: true },
+    } as const;
+    const newDaemonInfo = {
+      ...oldDaemonInfo,
+      features: {
+        ...oldDaemonInfo.features,
+        teamSupervision: true,
+        teamSupervisionAdmission: "available",
+      },
+    } as const;
+    const oldDaemonResponse = {
+      type: "team.run.get.response",
+      payload: { requestId: "request_old", run: publicRun },
+    } as const;
+    const newDaemonResponse = {
+      type: "team.run.get.response",
+      payload: {
+        requestId: "request_new",
+        run: {
+          ...publicRun,
+          supervision: {
+            status: "working",
+            supervisorRoleId: "supervisor",
+            supervisorAgentId: "agent_1",
+            completedWorkItems: 0,
+            totalWorkItems: 1,
+            updatedAt: run.updatedAt,
+          },
+        },
+      },
+    } as const;
+
+    const matrix = [
+      {
+        app: "old",
+        daemon: "old",
+        info: LegacyServerInfoSchema.parse(oldDaemonInfo),
+        response: LegacyRunResponseSchema.parse(oldDaemonResponse),
+      },
+      {
+        app: "new",
+        daemon: "old",
+        info: ServerInfoStatusPayloadSchema.parse(oldDaemonInfo),
+        response: SessionOutboundMessageSchema.parse(oldDaemonResponse),
+      },
+      {
+        app: "old",
+        daemon: "new",
+        info: LegacyServerInfoSchema.parse(newDaemonInfo),
+        response: LegacyRunResponseSchema.parse(newDaemonResponse),
+      },
+      {
+        app: "new",
+        daemon: "new",
+        info: ServerInfoStatusPayloadSchema.parse(newDaemonInfo),
+        response: SessionOutboundMessageSchema.parse(newDaemonResponse),
+      },
+    ];
+
+    expect(
+      matrix.map(({ app, daemon, info, response }) => ({
+        app,
+        daemon,
+        advertisesSupervision: info.features?.teamSupervision === true,
+        readsSupervision: "supervision" in response.payload.run,
+      })),
+    ).toEqual([
+      { app: "old", daemon: "old", advertisesSupervision: false, readsSupervision: false },
+      { app: "new", daemon: "old", advertisesSupervision: false, readsSupervision: false },
+      { app: "old", daemon: "new", advertisesSupervision: false, readsSupervision: false },
+      { app: "new", daemon: "new", advertisesSupervision: true, readsSupervision: true },
+    ]);
+  });
 });

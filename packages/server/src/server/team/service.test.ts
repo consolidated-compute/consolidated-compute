@@ -866,6 +866,77 @@ describe("TeamRunService", () => {
     ).rejects.toBeInstanceOf(TeamSupervisorRoleInvalidError);
   });
 
+  test("retains a supervised Workspace lock through stop_failed and releases it after retry", async () => {
+    const harness = await createHarness();
+    const { definition, run } = await startSupervisedRun(
+      harness,
+      "supervised-cancellation-recovery",
+    );
+    const supervisorAgentId = run.supervision?.supervisor.agentId;
+    if (!supervisorAgentId) throw new Error("Supervised run has no frozen supervisor agent");
+    await harness.runtime.waitForStream(supervisorAgentId);
+    harness.runtime.cancellation = { status: "refused" };
+
+    const refused = await harness.service.cancelRun(run.id);
+
+    expect(refused).toMatchObject({
+      state: { status: "stop_failed" },
+      steps: [{ state: { status: "stop_failed", agentId: supervisorAgentId } }],
+      supervision: { phase: "planning", decisions: [] },
+    });
+    const competingAssignment = await harness.assignments.createAssignment({
+      title: "Competing supervised run",
+      objective: "Do not acquire the Workspace while cancellation is unresolved.",
+      workItem: null,
+    });
+    await expect(
+      harness.service.admitSupervisedAssignmentRun({
+        teamId: definition.id,
+        expectedRevision: definition.revision,
+        idempotencyKey: "supervised-cancellation-competing-run",
+        assignmentId: competingAssignment.id,
+        expectedAssignmentRevision: competingAssignment.revision,
+        workspaceId: "wks_team_service",
+        supervisorRoleId: "role_supervisor",
+      }),
+    ).rejects.toBeInstanceOf(TeamWorkspaceHasActiveRunError);
+
+    harness.runtime.cancellation = { status: "settled" };
+    const canceled = await harness.service.cancelRun(run.id);
+
+    expect(canceled).toMatchObject({
+      state: { status: "canceled" },
+      steps: [{ state: { status: "canceled", agentId: supervisorAgentId } }],
+      supervision: { phase: "canceled", decisions: [] },
+    });
+    expect(harness.runtime.cancellations).toEqual([supervisorAgentId, supervisorAgentId]);
+    expect(harness.runtime.creations.map((creation) => creation.agentId)).toEqual([
+      supervisorAgentId,
+    ]);
+    expect(
+      harness.runtime.streams.filter((stream) => stream.agentId === supervisorAgentId),
+    ).toHaveLength(1);
+
+    const admittedAfterRecovery = await harness.service.admitSupervisedAssignmentRun({
+      teamId: definition.id,
+      expectedRevision: definition.revision,
+      idempotencyKey: "supervised-cancellation-recovered-run",
+      assignmentId: competingAssignment.id,
+      expectedAssignmentRevision: competingAssignment.revision,
+      workspaceId: "wks_team_service",
+      supervisorRoleId: "role_supervisor",
+    });
+    expect(admittedAfterRecovery.state.status).toBe("queued");
+    const recoveredSupervisorAgentId = admittedAfterRecovery.supervision?.supervisor.agentId;
+    if (!recoveredSupervisorAgentId) {
+      throw new Error("Recovered supervised run has no frozen supervisor agent");
+    }
+    await harness.runtime.waitForStream(recoveredSupervisorAgentId);
+    await expect(harness.service.cancelRun(admittedAfterRecovery.id)).resolves.toMatchObject({
+      state: { status: "canceled" },
+    });
+  });
+
   test("registers a supervisor prompt before releasing its cancellation fence", async () => {
     const harness = await createHarness();
     harness.daemonConfigStore.agentProfiles.push({
