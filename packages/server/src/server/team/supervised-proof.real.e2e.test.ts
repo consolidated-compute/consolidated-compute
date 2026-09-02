@@ -23,7 +23,7 @@ import type {
 import { CodexAppServerAgentClient } from "../agent/providers/codex-app-server-agent.js";
 import { CODEX_AGENT_PROFILE_SECURITY_PRESETS } from "../agent/providers/codex/security-controls.js";
 import { asInternals } from "../test-utils/class-mocks.js";
-import { DaemonClient, createTestPaseoDaemon } from "../test-utils/index.js";
+import { DaemonClient, createTestPaseoDaemon, type TestPaseoDaemon } from "../test-utils/index.js";
 
 const PASSWORD_HASH = "$2b$12$GMhF7pN4QnMlHOQXOqjd1OitKWPSmAO3FwB0PHzKtcZR/sAMryz76";
 const PASSWORD = "shared-secret";
@@ -76,49 +76,56 @@ test(
   async () => {
     const logger = pino({ level: "silent" });
     const temporaryDirectories: string[] = [];
-    const paseoHomeRoot = await trackedTemporaryDirectory(
-      temporaryDirectories,
-      "paseo-supervised-real-home-",
-    );
-    const staticDir = await trackedTemporaryDirectory(
-      temporaryDirectories,
-      "paseo-supervised-real-static-",
-    );
-    const workspaceRoot = await trackedTemporaryDirectory(
-      temporaryDirectories,
-      "paseo-supervised-real-workspace-",
-    );
-    const implementationFile = path.join(workspaceRoot, "supervised-proof.txt");
-    const implementationCommand = `printf 'REAL_SUPERVISED_IMPLEMENTATION' > '${implementationFile}'`;
-    const planToken = "REAL_SUPERVISED_PLAN_TOKEN: 7ce54f";
-    const implementationToken = "REAL_SUPERVISED_IMPLEMENT_TOKEN: 30b9d1";
-    const realCodex = new RecordingGateAgentClient(new CodexAppServerAgentClient(logger));
-    const daemon = await createTestPaseoDaemon({
-      paseoHomeRoot,
-      staticDir,
-      cleanup: false,
-      logger,
-      agentClients: { codex: realCodex },
-      agentProfiles: profiles,
-      auth: { password: PASSWORD_HASH },
-    });
-    const client = new DaemonClient({
-      url: `ws://127.0.0.1:${daemon.port}/ws`,
-      password: PASSWORD,
-      appVersion: "0.7.2",
-    });
-    const streamEvents = new Map<string, AgentStreamEvent[]>();
-    const unsubscribe = daemon.daemon.agentManager.subscribe(
-      (event) => {
-        if (event.type !== "agent_stream") return;
-        const events = streamEvents.get(event.agentId) ?? [];
-        events.push(event.event);
-        streamEvents.set(event.agentId, events);
-      },
-      { replayState: false },
-    );
+    let activeDaemon: TestPaseoDaemon | null = null;
+    let activeClient: DaemonClient | null = null;
+    let realCodex: RecordingGateAgentClient | null = null;
+    let unsubscribe = (): void => undefined;
 
     try {
+      const paseoHomeRoot = await trackedTemporaryDirectory(
+        temporaryDirectories,
+        "paseo-supervised-real-home-",
+      );
+      const staticDir = await trackedTemporaryDirectory(
+        temporaryDirectories,
+        "paseo-supervised-real-static-",
+      );
+      const workspaceRoot = await trackedTemporaryDirectory(
+        temporaryDirectories,
+        "paseo-supervised-real-workspace-",
+      );
+      const implementationFile = path.join(workspaceRoot, "supervised-proof.txt");
+      const implementationCommand = `printf 'REAL_SUPERVISED_IMPLEMENTATION' > '${implementationFile}'`;
+      const planToken = "REAL_SUPERVISED_PLAN_TOKEN: 7ce54f";
+      const implementationToken = "REAL_SUPERVISED_IMPLEMENT_TOKEN: 30b9d1";
+      realCodex = new RecordingGateAgentClient(new CodexAppServerAgentClient(logger));
+      const daemon = await createTestPaseoDaemon({
+        paseoHomeRoot,
+        staticDir,
+        cleanup: false,
+        logger,
+        agentClients: { codex: realCodex },
+        agentProfiles: profiles,
+        auth: { password: PASSWORD_HASH },
+      });
+      activeDaemon = daemon;
+      const client = new DaemonClient({
+        url: `ws://127.0.0.1:${daemon.port}/ws`,
+        password: PASSWORD,
+        appVersion: "0.7.2",
+      });
+      activeClient = client;
+      const streamEvents = new Map<string, AgentStreamEvent[]>();
+      unsubscribe = daemon.daemon.agentManager.subscribe(
+        (event) => {
+          if (event.type !== "agent_stream") return;
+          const events = streamEvents.get(event.agentId) ?? [];
+          events.push(event.event);
+          streamEvents.set(event.agentId, events);
+        },
+        { replayState: false },
+      );
+
       await client.connect();
       expect(client.getLastServerInfoMessage()?.features).toMatchObject({
         assignments: true,
@@ -126,12 +133,11 @@ test(
         teamSupervision: true,
         teamSupervisionAdmission: "available",
       });
-      const createdWorkspace = await client.createWorkspace({
-        source: { kind: "directory", path: workspaceRoot },
-      });
-      if (!createdWorkspace.workspace) {
-        throw new Error(createdWorkspace.error ?? "Failed to create proof Workspace");
-      }
+      const workspace = requireCreatedWorkspace(
+        await client.createWorkspace({
+          source: { kind: "directory", path: workspaceRoot },
+        }),
+      );
       const { team } = await client.createTeam({
         name: "Real Codex Supervised Proof",
         instructions:
@@ -202,7 +208,7 @@ test(
         idempotencyKey: "real-codex-supervised-proof",
         assignmentId: assignment.id,
         expectedAssignmentRevision: assignment.revision,
-        workspaceId: createdWorkspace.workspace.id,
+        workspaceId: workspace.id,
         supervision: { supervisorRoleId: "supervisor" },
       });
 
@@ -323,10 +329,10 @@ test(
         workspaceWriteObserved: existsSync(implementationFile),
       });
     } finally {
-      realCodex.releaseFirstCreation();
+      realCodex?.releaseFirstCreation();
       unsubscribe();
-      await client.close().catch(() => undefined);
-      await daemon.close();
+      await activeClient?.close().catch(() => undefined);
+      await activeDaemon?.close();
       await Promise.all(
         temporaryDirectories.map((directory) => rm(directory, { recursive: true, force: true })),
       );
@@ -492,6 +498,15 @@ function requireCompletedAgentId(step: {
     throw new Error(`Completed worker ${step.snapshot.stepId} has no agent`);
   }
   return step.state.agentId;
+}
+
+function requireCreatedWorkspace(
+  result: Awaited<ReturnType<DaemonClient["createWorkspace"]>>,
+): NonNullable<Awaited<ReturnType<DaemonClient["createWorkspace"]>>["workspace"]> {
+  if (!result.workspace) {
+    throw new Error(result.error ?? "Failed to create proof Workspace");
+  }
+  return result.workspace;
 }
 
 function requireOutputArtifactId(step: {
