@@ -13,10 +13,16 @@ import { Button } from "@/components/ui/button";
 import type { FieldControlSize } from "@/components/ui/control-geometry";
 import { Field, FormTextInput } from "@/components/ui/form-field";
 import { SelectField, type SelectFieldOption } from "@/components/ui/select-field";
+import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { useSessionStore } from "@/stores/session-store";
 import { useHostWorkspaces } from "@/stores/session-store-hooks";
 import { useAgentProfiles } from "@/agent-profiles";
-import { buildTeamRunWorkspaceOptions, type TeamRunFormValidationIssue } from "./run-form-model";
+import {
+  buildTeamRunWorkspaceOptions,
+  type TeamRunExecutionMode,
+  type TeamRunFormValidationIssue,
+} from "./run-form-model";
 import { useTeamRunFormFeatureCatalogs } from "./use-team-run-form-feature-catalogs";
 import { useTeamRunFormModel } from "./use-team-run-form-model";
 import { useTeamRunFormProviderSnapshot } from "./use-team-run-form-provider-snapshot";
@@ -51,12 +57,16 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
     [liveWorkspaces],
   );
   const { profiles } = useAgentProfiles(props.serverId);
+  const supervisionSupported = useSessionStore(
+    (store) => store.sessions[props.serverId]?.serverInfo?.features?.teamSupervision === true,
+  );
   const model = useTeamRunFormModel({
     serverId: props.serverId,
     team: props.team,
     workspaces: workspaceOptions,
     profiles,
     assignment: props.assignment,
+    supervisionSupported,
   });
   const state = useSyncExternalStore(model.subscribe, model.getState, model.getState);
   useTeamRunFormProviderSnapshot(model, state);
@@ -85,6 +95,32 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
         testID: `team-run-workspace-${workspace.workspaceId}`,
       })),
     [state.workspaces],
+  );
+  const executionOptions = useMemo<SegmentedControlOption<TeamRunExecutionMode>[]>(
+    () => [
+      {
+        value: "sequential",
+        label: t("teams.runs.form.executionModes.sequential"),
+        testID: "team-run-mode-sequential",
+      },
+      {
+        value: "supervised",
+        label: t("teams.runs.form.executionModes.supervised"),
+        testID: "team-run-mode-supervised",
+      },
+    ],
+    [t],
+  );
+  const supervisorOptions = useMemo<SelectFieldOption<string>[]>(
+    () =>
+      state.supervisorOptions.map((option) => ({
+        id: option.roleId,
+        value: option.roleId,
+        label: option.display.label,
+        description: option.display.description,
+        testID: `team-run-supervisor-${option.roleId}`,
+      })),
+    [state.supervisorOptions],
   );
   const close = useCallback(() => {
     if (pending) return;
@@ -163,6 +199,33 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
             />
           </Field>
         )}
+        {state.assignment && state.supervisionSupported ? (
+          <View style={styles.section}>
+            <Field label={t("teams.runs.form.execution")}>
+              <SegmentedControl
+                options={executionOptions}
+                value={state.executionMode}
+                onValueChange={model.setExecutionMode}
+                size={controlSize}
+                testID="team-run-execution-mode"
+              />
+            </Field>
+            {state.executionMode === "supervised" ? (
+              <SelectField
+                label={t("teams.runs.form.supervisor")}
+                value={state.selectedSupervisorRoleId}
+                selectedDisplay={state.selectedSupervisorDisplay}
+                options={supervisorOptions}
+                onChange={model.setSupervisor}
+                placeholder={t("teams.runs.form.selectSupervisor")}
+                emptyText={t("teams.runs.form.noSupervisors")}
+                disabled={pending}
+                size={controlSize}
+                testID="team-run-supervisor-field"
+              />
+            ) : null}
+          </View>
+        ) : null}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t("teams.runs.form.launchPlan")}</Text>
           {state.securityPreviewStatus === "unsupported" ? (

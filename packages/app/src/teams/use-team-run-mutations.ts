@@ -55,6 +55,7 @@ export function useTeamRunMutations() {
           ...shared,
           assignmentId: input.assignmentId,
           expectedAssignmentRevision: input.expectedAssignmentRevision,
+          ...(input.supervision ? { supervision: input.supervision } : {}),
         });
       }
       return client.startTeamRun({ ...shared, objective: input.objective });

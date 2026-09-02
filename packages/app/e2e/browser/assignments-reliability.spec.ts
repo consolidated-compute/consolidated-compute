@@ -20,10 +20,16 @@ const WORKER_PROFILE: AgentProfile = {
   modeId: "load-test",
 };
 
+const SUPERVISOR_PROFILE: AgentProfile = {
+  ...WORKER_PROFILE,
+  id: "assignment-supervisor",
+  name: "Assignment supervisor",
+};
+
 test.describe("Assignments reliability", () => {
   test("preserves authored intent, frozen runs, and exact Artifacts", async ({ page }) => {
     test.setTimeout(150_000);
-    const profiles = await seedAgentProfiles([WORKER_PROFILE]);
+    const profiles = await seedAgentProfiles([WORKER_PROFILE, SUPERVISOR_PROFILE]);
     const workspace = await seedWorkspace({
       repoPrefix: "assignments-reliability-",
       title: "Assignments reliability",
@@ -120,6 +126,18 @@ test.describe("Assignments reliability", () => {
           form.getByTestId("team-run-workspace-field"),
           `team-run-workspace-${workspace.workspaceId}`,
         );
+        await expect(form.getByTestId("team-run-mode-sequential")).toHaveAttribute(
+          "aria-selected",
+          "true",
+        );
+        await form.getByTestId("team-run-mode-supervised").click();
+        await expect(form.getByTestId("team-run-supervisor-field")).toContainText("Supervisor");
+        await expect(form.getByTestId("team-run-validation")).toContainText(
+          "disables provider-native delegation",
+          { timeout: 30_000 },
+        );
+        await expect(form.getByTestId("team-run-start")).toBeDisabled();
+        await form.getByTestId("team-run-mode-sequential").click();
         await expect(form.getByTestId("team-run-start")).toBeEnabled({ timeout: 30_000 });
         await form.getByTestId("team-run-start").click();
         await expect(
@@ -274,6 +292,12 @@ function oneRoleTeam(): TeamDefinitionInputDto {
         name: "Worker",
         instructions: "Return the final Assignment result.",
         profileId: WORKER_PROFILE.id,
+      },
+      {
+        id: "supervisor",
+        name: "Supervisor",
+        instructions: "Coordinate the saved worker plan.",
+        profileId: SUPERVISOR_PROFILE.id,
       },
     ],
     workflow: [{ id: "work", roleId: "worker", instructions: null }],

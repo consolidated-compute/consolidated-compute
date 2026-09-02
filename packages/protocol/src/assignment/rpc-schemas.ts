@@ -7,7 +7,11 @@ import {
   AssignmentInputDtoSchema,
   AssignmentPatchDtoSchema,
 } from "./types.js";
-import { TeamRunDtoSchema, TeamRunPreviewFingerprintSchema } from "../team/types.js";
+import {
+  TeamRunDtoSchema,
+  TeamRunPreviewFingerprintSchema,
+  TeamRunSupervisionStartDtoSchema,
+} from "../team/types.js";
 
 export const ASSIGNMENT_ARTIFACT_PAGE_MAX_LIMIT = 100;
 
@@ -93,6 +97,7 @@ export const AssignmentTeamRunStartRequestSchema = z.object({
   expectedAssignmentRevision: z.number().int().positive(),
   workspaceId: z.string(),
   expectedPreviewFingerprint: TeamRunPreviewFingerprintSchema.optional(),
+  supervision: TeamRunSupervisionStartDtoSchema.optional(),
 });
 
 const assignmentPayload = <const TType extends string>(type: TType) =>

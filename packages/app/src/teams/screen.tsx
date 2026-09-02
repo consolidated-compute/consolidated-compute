@@ -42,6 +42,7 @@ import {
 import { resolveActiveTeamKey, type TeamsView } from "./screen-state";
 import { TeamFormSheet } from "./team-form-sheet";
 import { TeamRunFormSheet } from "./team-run-form-sheet";
+import { TeamRunSupervisionBadge } from "./team-run-supervision-badge";
 import { useTeamMutations } from "./use-team-mutations";
 import { useTeamRun, useTeamRuns } from "./use-team-runs";
 import { useTeams } from "./use-teams";
@@ -683,7 +684,12 @@ function TeamRunRow({
           {displayedRun.workspace.displayName} · {formatTimeAgo(new Date(displayedRun.createdAt))}
         </Text>
       </View>
-      <StatusBadge label={t(`teams.runs.status.${displayedRun.state.status}`)} />
+      <View style={styles.runBadges}>
+        <StatusBadge label={t(`teams.runs.status.${displayedRun.state.status}`)} />
+        {displayedRun.supervision ? (
+          <TeamRunSupervisionBadge summary={displayedRun.supervision} />
+        ) : null}
+      </View>
       <ChevronRight size={16} color={styles.chevron.color} />
     </Pressable>
   );
@@ -919,6 +925,12 @@ const styles = StyleSheet.create((theme) => ({
     borderColor: theme.colors.border,
     borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface1,
+  },
+  runBadges: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    gap: theme.spacing[2],
   },
   error: { color: theme.colors.destructive, fontSize: theme.fontSize.sm },
 }));

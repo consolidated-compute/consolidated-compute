@@ -42,6 +42,22 @@ function team(): TeamDefinitionDto {
   };
 }
 
+function supervisedTeam(): TeamDefinitionDto {
+  const base = team();
+  return {
+    ...base,
+    roles: [
+      ...base.roles,
+      {
+        id: "supervisor",
+        name: "Supervisor",
+        instructions: "Coordinate the frozen worker workflow",
+        profileId: "supervisor-profile",
+      },
+    ],
+  };
+}
+
 const workspace: TeamRunWorkspaceOption = {
   workspaceId: "workspace-1",
   cwd: "/repo",
@@ -115,6 +131,46 @@ function securityPreview(fingerprint = "a".repeat(64)): TeamRunPreviewDto {
       },
     ],
     fingerprint,
+  };
+}
+
+function supervisedSecurityPreview(
+  nativeDelegationStatus: "enforced" | "policy_only" = "enforced",
+): TeamRunPreviewDto {
+  const resolvedLaunch = (profileId: string) => ({
+    profileId,
+    provider: "codex",
+    model: "gpt-5.6",
+    modeId: "plan",
+    thinkingOptionId: "high",
+    featureValues: {},
+    securityPosture: {
+      source: { provider: "codex" },
+      filesystemWrite: { status: "enforced" as const, summary: "Filesystem evidence" },
+      networkAccess: { status: "policy_only" as const, summary: "Network evidence" },
+      toolShell: { status: "unavailable" as const, summary: "Tool evidence" },
+      nativeDelegation: {
+        status: nativeDelegationStatus,
+        summary: "Native delegation is disabled",
+      },
+    },
+  });
+  return {
+    workspace: {
+      workspaceId: workspace.workspaceId,
+      projectId: "project-1",
+      cwd: workspace.cwd,
+      displayName: workspace.display.label,
+    },
+    roles: [
+      { roleId: "planner", roleName: "Planner", resolvedLaunch: resolvedLaunch("architect") },
+      {
+        roleId: "supervisor",
+        roleName: "Supervisor",
+        resolvedLaunch: resolvedLaunch("supervisor-profile"),
+      },
+    ],
+    fingerprint: "c".repeat(64),
   };
 }
 
@@ -237,6 +293,134 @@ describe("Team Run form model", () => {
         objective: "Implement Assignment surfaces",
         workspaceId: "workspace-1",
       },
+    });
+  });
+
+  it("defaults Assignment runs to sequential and freezes an eligible supervised role", () => {
+    const assignment: AssignmentDto = {
+      id: "asgn_0123456789abcdef",
+      revision: 7,
+      title: "Supervised Assignment UI",
+      objective: "Coordinate a bounded workflow",
+      workItem: null,
+      state: { status: "open" },
+      createdAt: "2026-08-27T00:00:00.000Z",
+      updatedAt: "2026-08-27T00:00:00.000Z",
+    };
+    const model = openTeamRunFormModel(
+      {
+        serverId: "host-a",
+        team: supervisedTeam(),
+        workspaces: [workspace],
+        profiles: [
+          profile({ featureValues: {} }),
+          profile({ id: "supervisor-profile", name: "Supervisor", featureValues: {} }),
+        ],
+        assignment,
+        supervisionSupported: true,
+      },
+      { generateIdempotencyKey: () => "supervised-key" },
+    );
+    model.applySecurityPreviewCapability(true);
+    model.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    const request = model.getState().securityPreviewRequest!;
+    model.applySecurityPreview(request.requestKey, supervisedSecurityPreview());
+
+    expect(model.getState()).toMatchObject({
+      executionMode: "sequential",
+      supervisorOptions: [
+        {
+          roleId: "supervisor",
+          display: { label: "Supervisor" },
+        },
+      ],
+      selectedSupervisorRoleId: "supervisor",
+      submission: { assignmentId: assignment.id },
+    });
+    expect(model.getState().submission).not.toHaveProperty("supervision");
+
+    model.setExecutionMode("supervised");
+    expect(model.getState()).toMatchObject({
+      executionMode: "supervised",
+      validationIssue: null,
+      submission: {
+        assignmentId: assignment.id,
+        supervision: { supervisorRoleId: "supervisor" },
+        expectedPreviewFingerprint: "c".repeat(64),
+      },
+    });
+
+    model.applySupervisionCapability(false);
+    expect(model.getState().executionMode).toBe("sequential");
+    expect(model.getState().submission).not.toHaveProperty("supervision");
+  });
+
+  it("blocks supervised admission without an unused role or enforced native delegation", () => {
+    const assignment: AssignmentDto = {
+      id: "asgn_0123456789abcdef",
+      revision: 7,
+      title: "Supervised Assignment UI",
+      objective: "Coordinate a bounded workflow",
+      workItem: null,
+      state: { status: "open" },
+      createdAt: "2026-08-27T00:00:00.000Z",
+      updatedAt: "2026-08-27T00:00:00.000Z",
+    };
+    const missingSupervisor = openTeamRunForm({
+      serverId: "host-a",
+      team: team(),
+      workspaces: [workspace],
+      profiles: [profile({ featureValues: {} })],
+      assignment,
+      supervisionSupported: true,
+    });
+    missingSupervisor.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    missingSupervisor.setExecutionMode("supervised");
+    expect(missingSupervisor.getState()).toMatchObject({
+      supervisorOptions: [],
+      validationIssue: "supervisor_unavailable",
+      canSubmit: false,
+    });
+
+    const unsupportedPreview = openTeamRunForm({
+      serverId: "host-a",
+      team: supervisedTeam(),
+      workspaces: [workspace],
+      profiles: [
+        profile({ featureValues: {} }),
+        profile({ id: "supervisor-profile", name: "Supervisor", featureValues: {} }),
+      ],
+      assignment,
+      supervisionSupported: true,
+    });
+    unsupportedPreview.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    unsupportedPreview.setExecutionMode("supervised");
+    expect(unsupportedPreview.getState()).toMatchObject({
+      securityPreviewStatus: "unsupported",
+      validationIssue: "native_delegation_unenforced",
+      canSubmit: false,
+    });
+
+    const unenforced = openTeamRunFormModel({
+      serverId: "host-a",
+      team: supervisedTeam(),
+      workspaces: [workspace],
+      profiles: [
+        profile({ featureValues: {} }),
+        profile({ id: "supervisor-profile", name: "Supervisor", featureValues: {} }),
+      ],
+      assignment,
+      supervisionSupported: true,
+    });
+    unenforced.applySecurityPreviewCapability(true);
+    unenforced.applyProviderCatalog("workspace-1", workspace.cwd, [provider()]);
+    unenforced.setExecutionMode("supervised");
+    const request = unenforced.getState().securityPreviewRequest!;
+    unenforced.applySecurityPreview(request.requestKey, supervisedSecurityPreview("policy_only"));
+    expect(unenforced.getState()).toMatchObject({
+      validationIssue: "native_delegation_unenforced",
+      canSubmit: false,
+      submission: null,
     });
   });
 

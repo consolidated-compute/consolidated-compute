@@ -1371,6 +1371,73 @@ test("keeps Assignment-backed Team run admission pending beyond the default dead
   await expect(responsePromise).rejects.toThrow("Admission response received");
 });
 
+test("gates and sends supervised Assignment-backed Team run admission", async () => {
+  const legacyTransport = createMockTransport();
+  const legacyClient = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_supervised_assignment_legacy_test",
+    logger: createMockLogger(),
+    reconnect: { enabled: false },
+    transportFactory: () => legacyTransport.transport,
+  });
+  clients.push(legacyClient);
+  const legacyConnect = legacyClient.connect();
+  legacyTransport.triggerOpen({ features: { assignments: true } });
+  await legacyConnect;
+
+  const input = {
+    teamId: "team-1",
+    expectedRevision: 1,
+    idempotencyKey: "retry-supervised-assignment-1",
+    assignmentId: "asgn_0123456789abcdef",
+    expectedAssignmentRevision: 2,
+    workspaceId: "workspace-1",
+    supervision: { supervisorRoleId: "supervisor" },
+    requestId: "req-supervised-assignment-run-1",
+  };
+  await expect(legacyClient.startAssignmentTeamRun(input)).rejects.toThrow(
+    "Update the host to use supervised Team Runs.",
+  );
+  expect(legacyTransport.sent).toEqual([]);
+
+  const supportedTransport = createMockTransport();
+  const supportedClient = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_supervised_assignment_test",
+    logger: createMockLogger(),
+    reconnect: { enabled: false },
+    transportFactory: () => supportedTransport.transport,
+  });
+  clients.push(supportedClient);
+  const supportedConnect = supportedClient.connect();
+  supportedTransport.triggerOpen({ features: { assignments: true, teamSupervision: true } });
+  await supportedConnect;
+
+  const responsePromise = supportedClient.startAssignmentTeamRun(input);
+  expect(parseSentFrame(supportedTransport.sent[0])).toEqual({
+    type: "assignment.team_run.start.request",
+    teamId: "team-1",
+    expectedRevision: 1,
+    idempotencyKey: "retry-supervised-assignment-1",
+    assignmentId: "asgn_0123456789abcdef",
+    expectedAssignmentRevision: 2,
+    workspaceId: "workspace-1",
+    supervision: { supervisorRoleId: "supervisor" },
+    requestId: "req-supervised-assignment-run-1",
+  });
+  supportedTransport.triggerMessage(
+    wrapSessionMessage({
+      type: "rpc_error",
+      payload: {
+        requestId: "req-supervised-assignment-run-1",
+        requestType: "assignment.team_run.start.request",
+        error: "Supervised admission response received",
+      },
+    }),
+  );
+  await expect(responsePromise).rejects.toThrow("Supervised admission response received");
+});
+
 test("honors explicit fetchAgent timeout below the session RPC default", async () => {
   useHeartbeatClock();
   const logger = createMockLogger();

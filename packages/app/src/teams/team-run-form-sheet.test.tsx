@@ -26,10 +26,17 @@ const { formModel, previewState, sheetState, submissionState } = vi.hoisted(() =
     selectedWorkspaceDisplay: { label: "Main" },
     selectedWorkspaceCwd: "/repo",
     catalogGeneration: 0,
+    profileGeneration: 0,
     objective: "Ship it",
+    assignment: null,
+    supervisionSupported: false,
+    executionMode: "sequential" as const,
+    supervisorOptions: [],
+    selectedSupervisorRoleId: null,
+    selectedSupervisorDisplay: null,
     roleResolutions: [],
     securityPreviewStatus: "ready",
-    securityPreview: null,
+    securityPreviewRequest: null,
     securityPreviewError: null as string | null,
     validationIssue: null,
     canSubmit: true,
@@ -50,10 +57,17 @@ const { formModel, previewState, sheetState, submissionState } = vi.hoisted(() =
       close: vi.fn(),
       applyWorkspaces: vi.fn(),
       applyProfiles: vi.fn(),
+      applySupervisionCapability: vi.fn(),
       applyProviderCatalog: vi.fn(),
+      applySecurityPreviewCapability: vi.fn(),
+      applySecurityPreviewPending: vi.fn(),
+      applySecurityPreview: vi.fn(),
+      applySecurityPreviewError: vi.fn(),
       applyFeatureCatalog: vi.fn(),
       setWorkspace: vi.fn(),
       setObjective: vi.fn(),
+      setExecutionMode: vi.fn(),
+      setSupervisor: vi.fn(),
       setSubmitError: vi.fn(),
     },
     previewState: {
@@ -179,6 +193,10 @@ vi.mock("@/components/ui/form-field", () => ({
 
 vi.mock("@/components/ui/select-field", () => ({
   SelectField: () => null,
+}));
+
+vi.mock("@/components/ui/segmented-control", () => ({
+  SegmentedControl: () => null,
 }));
 
 describe("TeamRunFormSheet", () => {

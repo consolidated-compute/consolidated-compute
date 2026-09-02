@@ -158,7 +158,11 @@ import type {
   BrowserAutomationExecuteRequest,
   BrowserAutomationExecuteResponse,
 } from "@getpaseo/protocol/browser-automation/rpc-schemas";
-import type { TeamDefinitionInputDto, TeamDefinitionPatchDto } from "@getpaseo/protocol/team/types";
+import type {
+  TeamDefinitionInputDto,
+  TeamDefinitionPatchDto,
+  TeamRunSupervisionStartDto,
+} from "@getpaseo/protocol/team/types";
 import type { AssignmentInputDto, AssignmentPatchDto } from "@getpaseo/protocol/assignment/types";
 
 export interface Logger {
@@ -274,6 +278,7 @@ export interface StartAssignmentTeamRunInput {
   expectedAssignmentRevision: number;
   workspaceId: string;
   expectedPreviewFingerprint?: string;
+  supervision?: TeamRunSupervisionStartDto;
   requestId?: string;
 }
 
@@ -5895,6 +5900,7 @@ export class DaemonClient {
   async startAssignmentTeamRun(input: StartAssignmentTeamRunInput) {
     this.requireAssignmentsSupport();
     if (input.expectedPreviewFingerprint !== undefined) this.requireTeamRunPreviewSupport();
+    if (input.supervision !== undefined) this.requireTeamSupervisionSupport();
     const { requestId, ...message } = input;
     return this.sendNamespacedCorrelatedSessionRequest<"assignment.team_run.start.response">({
       requestId,

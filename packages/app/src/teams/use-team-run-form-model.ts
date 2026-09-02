@@ -14,7 +14,8 @@ export function useTeamRunFormModel(snapshot: TeamRunFormSnapshot) {
   useEffect(() => {
     model.applyWorkspaces(snapshot.workspaces);
     model.applyProfiles(snapshot.profiles ?? null);
-  }, [model, snapshot.profiles, snapshot.workspaces]);
+    model.applySupervisionCapability(snapshot.supervisionSupported ?? false);
+  }, [model, snapshot.profiles, snapshot.supervisionSupported, snapshot.workspaces]);
 
   return model;
 }

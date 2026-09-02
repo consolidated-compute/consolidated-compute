@@ -12,6 +12,7 @@ import {
   type TeamDefinitionDto,
   type TeamRunPreviewDto,
   type TeamSecurityPostureDto,
+  type TeamRunSupervisionStartDto,
 } from "@getpaseo/protocol/team/types";
 import { filterSelectableModels } from "@/provider-selection/model-catalog";
 import type { WorkspaceDescriptor } from "@/stores/session-store";
@@ -62,7 +63,17 @@ export type TeamRunFormValidationIssue =
   | "profiles_loading"
   | "profile_unavailable"
   | "security_preview_loading"
-  | "security_preview_failed";
+  | "security_preview_failed"
+  | "supervisor_required"
+  | "supervisor_unavailable"
+  | "native_delegation_unenforced";
+
+export type TeamRunExecutionMode = "sequential" | "supervised";
+
+export interface TeamRunSupervisorOption {
+  roleId: string;
+  display: TeamRunFormDisplay;
+}
 
 interface TeamRunFormSubmissionBase {
   serverId: string;
@@ -76,8 +87,16 @@ interface TeamRunFormSubmissionBase {
 
 export type TeamRunFormSubmission = TeamRunFormSubmissionBase &
   (
-    | { assignmentId: string; expectedAssignmentRevision: number }
-    | { assignmentId?: never; expectedAssignmentRevision?: never }
+    | {
+        assignmentId: string;
+        expectedAssignmentRevision: number;
+        supervision?: TeamRunSupervisionStartDto;
+      }
+    | {
+        assignmentId?: never;
+        expectedAssignmentRevision?: never;
+        supervision?: never;
+      }
   );
 
 export interface TeamRunFormState {
@@ -91,6 +110,11 @@ export interface TeamRunFormState {
   profileGeneration: number;
   objective: string;
   assignment: AssignmentDto | null;
+  supervisionSupported: boolean;
+  executionMode: TeamRunExecutionMode;
+  supervisorOptions: TeamRunSupervisorOption[];
+  selectedSupervisorRoleId: string | null;
+  selectedSupervisorDisplay: TeamRunFormDisplay | null;
   roleResolutions: TeamRunRoleResolution[];
   securityPreviewStatus: "idle" | "pending" | "ready" | "error" | "unsupported";
   securityPreviewRequest: TeamRunSecurityPreviewRequest | null;
@@ -107,6 +131,7 @@ export interface TeamRunFormSnapshot {
   workspaces: readonly TeamRunWorkspaceOption[];
   profiles?: readonly AgentProfile[] | null;
   assignment?: AssignmentDto;
+  supervisionSupported?: boolean;
 }
 
 export interface TeamRunFormModel {
@@ -115,6 +140,7 @@ export interface TeamRunFormModel {
   close: () => void;
   applyWorkspaces: (workspaces: readonly TeamRunWorkspaceOption[]) => void;
   applyProfiles: (profiles: readonly AgentProfile[] | null) => void;
+  applySupervisionCapability: (supported: boolean) => void;
   applyProviderCatalog: (
     workspaceId: string,
     workspaceCwd: string,
@@ -131,6 +157,8 @@ export interface TeamRunFormModel {
   ) => void;
   setWorkspace: (workspaceId: string, display: TeamRunFormDisplay) => void;
   setObjective: (value: string) => void;
+  setExecutionMode: (mode: TeamRunExecutionMode) => void;
+  setSupervisor: (roleId: string, display: TeamRunFormDisplay) => void;
   setSubmitError: (value: string | null) => void;
 }
 
@@ -180,6 +208,16 @@ export function buildTeamRunWorkspaceOptions(
       },
     }))
     .sort((left, right) => left.display.label.localeCompare(right.display.label));
+}
+
+export function buildTeamRunSupervisorOptions(team: TeamDefinitionDto): TeamRunSupervisorOption[] {
+  const workerRoleIds = new Set(team.workflow.map((step) => step.roleId));
+  return team.roles
+    .filter((role) => !workerRoleIds.has(role.id))
+    .map((role) => ({
+      roleId: role.id,
+      display: { label: role.name },
+    }));
 }
 
 function generateIdempotencyKey(): string {
@@ -523,6 +561,9 @@ function buildSubmission(
     ...base,
     assignmentId: state.assignment.id,
     expectedAssignmentRevision: state.assignment.revision,
+    ...(state.executionMode === "supervised" && state.selectedSupervisorRoleId
+      ? { supervision: { supervisorRoleId: state.selectedSupervisorRoleId } }
+      : {}),
   };
 }
 
@@ -543,7 +584,34 @@ function baseValidationIssue(state: TeamRunFormState): TeamRunFormValidationIssu
   if (state.roleResolutions.some((role) => role.status !== "ready")) {
     return "profile_unavailable";
   }
+  if (state.executionMode === "supervised") {
+    if (
+      !state.selectedSupervisorRoleId ||
+      !state.supervisorOptions.some((option) => option.roleId === state.selectedSupervisorRoleId)
+    ) {
+      return state.supervisorOptions.length === 0
+        ? "supervisor_unavailable"
+        : "supervisor_required";
+    }
+    if (state.securityPreviewStatus === "unsupported") {
+      return "native_delegation_unenforced";
+    }
+    if (
+      state.securityPreviewStatus === "ready" &&
+      !supervisedRoleResolutions(state).every(
+        (resolution) => resolution.securityPosture?.nativeDelegation?.status === "enforced",
+      )
+    ) {
+      return "native_delegation_unenforced";
+    }
+  }
   return null;
+}
+
+function supervisedRoleResolutions(state: TeamRunFormState): TeamRunRoleResolution[] {
+  const roleIds = new Set(state.team.workflow.map((step) => step.roleId));
+  if (state.selectedSupervisorRoleId) roleIds.add(state.selectedSupervisorRoleId);
+  return state.roleResolutions.filter((resolution) => roleIds.has(resolution.roleId));
 }
 
 export function openTeamRunForm(
@@ -560,6 +628,8 @@ export function openTeamRunForm(
   const featureCatalogs = new Map<string, FeatureCatalogResult>();
   const idempotencyKey = (options.generateIdempotencyKey ?? generateIdempotencyKey)();
   const initialWorkspace = snapshot.workspaces.length === 1 ? snapshot.workspaces[0]! : null;
+  const supervisorOptions = buildTeamRunSupervisorOptions(snapshot.team);
+  const initialSupervisor = supervisorOptions.length === 1 ? supervisorOptions[0]! : null;
   let closed = false;
   const listeners = new Set<() => void>();
   let state: TeamRunFormState = {
@@ -573,6 +643,11 @@ export function openTeamRunForm(
     profileGeneration: 0,
     objective: snapshot.assignment?.objective ?? "",
     assignment: snapshot.assignment ?? null,
+    supervisionSupported: snapshot.supervisionSupported ?? false,
+    executionMode: "sequential",
+    supervisorOptions,
+    selectedSupervisorRoleId: initialSupervisor?.roleId ?? null,
+    selectedSupervisorDisplay: initialSupervisor?.display ?? null,
     roleResolutions: [],
     securityPreviewStatus: "idle",
     securityPreviewRequest: null,
@@ -679,6 +754,15 @@ export function openTeamRunForm(
         profileGeneration: changed ? state.profileGeneration + 1 : state.profileGeneration,
       });
     },
+    applySupervisionCapability: (supported) => {
+      if (state.supervisionSupported === supported) return;
+      publish({
+        ...state,
+        supervisionSupported: supported,
+        executionMode: supported ? state.executionMode : "sequential",
+        submitError: null,
+      });
+    },
     applyProviderCatalog: (workspaceId, workspaceCwd, entries) => {
       if (
         workspaceId !== state.selectedWorkspaceId ||
@@ -767,6 +851,21 @@ export function openTeamRunForm(
     setObjective: (objective) => {
       if (state.assignment) return;
       publish({ ...state, objective, submitError: null });
+    },
+    setExecutionMode: (executionMode) => {
+      if (executionMode === "supervised" && (!state.assignment || !state.supervisionSupported)) {
+        return;
+      }
+      publish({ ...state, executionMode, submitError: null });
+    },
+    setSupervisor: (roleId, display) => {
+      if (!state.supervisorOptions.some((option) => option.roleId === roleId)) return;
+      publish({
+        ...state,
+        selectedSupervisorRoleId: roleId,
+        selectedSupervisorDisplay: display,
+        submitError: null,
+      });
     },
     setSubmitError: (submitError) => publish({ ...state, submitError }),
   };
