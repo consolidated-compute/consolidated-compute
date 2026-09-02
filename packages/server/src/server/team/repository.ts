@@ -157,6 +157,11 @@ export interface ResolveTeamRunSupervisionHumanRequestInput {
   idempotencyKey: string;
 }
 
+export interface TeamRunSupervisionHumanRequestValidation {
+  run: PersistedTeamRunRecord;
+  requiresResolution: boolean;
+}
+
 export interface SettleTeamRunSupervisedWorkerInput {
   runId: string;
   expectedSupervisionRevision: number;
@@ -1000,55 +1005,35 @@ export class TeamRepository {
     });
   }
 
+  async validateSupervisionHumanRequest(
+    input: ResolveTeamRunSupervisionHumanRequestInput,
+  ): Promise<TeamRunSupervisionHumanRequestValidation> {
+    return this.serializeMutation(async () => {
+      const run = await this.requireRun(input.runId);
+      const validation = requireValidSupervisionHumanRequestResponse(run, input);
+      return { run, requiresResolution: validation.requiresResolution };
+    });
+  }
+
   async resolveSupervisionHumanRequest(
     input: ResolveTeamRunSupervisionHumanRequestInput,
   ): Promise<PersistedTeamRunRecord> {
     return this.serializeMutation(async () => {
       const current = await this.requireRun(input.runId);
-      if (!current.supervision) throw new TeamRunNotSupervisedError(input.runId);
-      PersistedTeamEntityIdSchema.parse(input.requestId);
-      PersistedTeamEntityIdSchema.parse(input.actionId);
-      const request = current.supervision.humanRequest;
-      if (!request || request.id !== input.requestId) {
-        throw new TeamRunSupervisionHumanRequestConflictError(input.runId, input.requestId);
-      }
-      if (request.resolution) {
-        if (
-          request.resolution.idempotencyKey === input.idempotencyKey &&
-          request.resolution.actionId === input.actionId &&
-          request.resolution.note === input.note
-        ) {
-          return current;
-        }
-        throw new TeamRunSupervisionHumanRequestConflictError(input.runId, input.requestId);
-      }
-      if (request.revision !== input.expectedRequestRevision) {
-        throw new TeamRunSupervisionHumanRequestRevisionConflictError(
-          input.runId,
-          input.requestId,
-          input.expectedRequestRevision,
-          request.revision,
-        );
-      }
-      const action = request.actions.find((candidate) => candidate.id === input.actionId);
-      if (
-        !action ||
-        (action.requiresNote && input.note === null) ||
-        current.state.status !== "running" ||
-        current.supervision.phase !== "awaiting_human" ||
-        current.steps.some((step) => isActiveTeamRunStepStatus(step.state.status))
-      ) {
-        throw new TeamRunSupervisionHumanRequestConflictError(input.runId, input.requestId);
-      }
+      const validation = requireValidSupervisionHumanRequestResponse(current, input);
+      if (!validation.requiresResolution) return current;
+      const { request, action } = validation;
+      const supervision = current.supervision;
+      if (!supervision) throw new TeamRunNotSupervisedError(input.runId);
 
       const updatedAt = this.now().toISOString();
-      const eventId = this.generateAvailableSupervisionEventId(current.supervision);
+      const eventId = this.generateAvailableSupervisionEventId(supervision);
       const run = PersistedTeamRunRecordSchema.parse({
         ...current,
         supervision: appendSupervisionEvent(
           {
-            ...current.supervision,
-            revision: current.supervision.revision + 1,
+            ...supervision,
+            revision: supervision.revision + 1,
             phase: "planning",
             humanRequest: {
               ...request,
@@ -2096,6 +2081,48 @@ function decodeSupervisionEventCursor(token: string, runId: string): TeamRunSupe
     if (error instanceof TeamRunSupervisionEventPageError) throw error;
     throw new TeamRunSupervisionEventPageError("Invalid supervision event cursor");
   }
+}
+
+function requireValidSupervisionHumanRequestResponse(
+  current: PersistedTeamRunRecord,
+  input: ResolveTeamRunSupervisionHumanRequestInput,
+) {
+  if (!current.supervision) throw new TeamRunNotSupervisedError(input.runId);
+  PersistedTeamEntityIdSchema.parse(input.requestId);
+  PersistedTeamEntityIdSchema.parse(input.actionId);
+  const request = current.supervision.humanRequest;
+  if (!request || request.id !== input.requestId) {
+    throw new TeamRunSupervisionHumanRequestConflictError(input.runId, input.requestId);
+  }
+  if (request.resolution) {
+    if (
+      request.resolution.idempotencyKey === input.idempotencyKey &&
+      request.resolution.actionId === input.actionId &&
+      request.resolution.note === input.note
+    ) {
+      return { requiresResolution: false as const, request, action: null };
+    }
+    throw new TeamRunSupervisionHumanRequestConflictError(input.runId, input.requestId);
+  }
+  if (request.revision !== input.expectedRequestRevision) {
+    throw new TeamRunSupervisionHumanRequestRevisionConflictError(
+      input.runId,
+      input.requestId,
+      input.expectedRequestRevision,
+      request.revision,
+    );
+  }
+  const action = request.actions.find((candidate) => candidate.id === input.actionId);
+  if (
+    !action ||
+    (action.requiresNote && input.note === null) ||
+    current.state.status !== "running" ||
+    current.supervision.phase !== "awaiting_human" ||
+    current.steps.some((step) => isActiveTeamRunStepStatus(step.state.status))
+  ) {
+    throw new TeamRunSupervisionHumanRequestConflictError(input.runId, input.requestId);
+  }
+  return { requiresResolution: true as const, request, action };
 }
 
 function hasErrorCode(error: unknown, code: string): boolean {

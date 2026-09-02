@@ -488,26 +488,28 @@ export class TeamRunService {
   async respondToSupervisionHumanRequest(
     input: RespondToTeamRunSupervisionHumanRequestInput,
   ): Promise<PersistedTeamRunRecord> {
-    const current = await this.requireRun(input.runId);
-    const humanRequest = current.supervision?.humanRequest;
-    const hasPendingHumanRequest = Boolean(
-      humanRequest && !humanRequest.resolution && !humanRequest.retirement,
+    const initial = await this.requireRun(input.runId);
+    return this.withWorkspaceOperation(initial.workspace.workspaceId, () =>
+      this.serializeAdmission(async () => {
+        this.requireAcceptingStarts();
+        const validation = await this.repository.validateSupervisionHumanRequest(input);
+        if (validation.requiresResolution) {
+          await this.executions.get(input.runId);
+        }
+        if (input.actionId !== "cancel" && validation.requiresResolution) {
+          const supervisorAgentId = validation.run.supervision?.supervisor.agentId;
+          if (!supervisorAgentId) throw new TeamRunNotSupervisedError(input.runId);
+          await this.ensureAgentLoaded(supervisorAgentId);
+        }
+        const resolved = await this.repository.resolveSupervisionHumanRequest(input);
+        if (input.actionId === "cancel") {
+          this.requestTermination(input.runId, "cancel");
+          return this.stopActiveRun(input.runId, false);
+        }
+        this.launchExecution(input.runId);
+        return resolved;
+      }),
     );
-    if (hasPendingHumanRequest) {
-      await this.executions.get(input.runId);
-    }
-    return this.serializeAdmission(async () => {
-      this.requireAcceptingStarts();
-      if (input.actionId !== "cancel" && hasPendingHumanRequest) {
-        const supervisorAgentId = current.supervision?.supervisor.agentId;
-        if (!supervisorAgentId) throw new TeamRunNotSupervisedError(input.runId);
-        await this.ensureAgentLoaded(supervisorAgentId);
-      }
-      const resolved = await this.repository.resolveSupervisionHumanRequest(input);
-      if (input.actionId === "cancel") return this.cancelRun(input.runId);
-      this.launchExecution(input.runId);
-      return resolved;
-    });
   }
 
   async waitForRun(runId: string): Promise<PersistedTeamRunRecord> {

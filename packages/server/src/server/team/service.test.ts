@@ -700,6 +700,32 @@ describe("TeamRunService", () => {
     return { assignment, definition, run };
   }
 
+  async function startWaitingSupervisedRun(harness: Harness, idempotencyKey: string) {
+    const started = await startSupervisedRun(harness, idempotencyKey);
+    const supervisorAgentId = started.run.supervision?.supervisor.agentId;
+    if (!supervisorAgentId) throw new Error("Supervised run has no frozen supervisor agent");
+    await harness.runtime.waitForStream(supervisorAgentId);
+    harness.runtime.finalResponses.set(
+      supervisorAgentId,
+      JSON.stringify({
+        kind: "escalate",
+        actionId: `action_escalate_${idempotencyKey}`,
+        summary: "Wait for the frozen human decision.",
+        workItemId: null,
+      }),
+    );
+    await harness.runtime.pushEvent(supervisorAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: `turn_escalate_${idempotencyKey}`,
+    });
+    const waiting = await harness.service.waitForRun(started.run.id);
+    if (!waiting.supervision?.humanRequest) {
+      throw new Error("Supervised run did not persist its human request");
+    }
+    return { ...started, supervisorAgentId, waiting };
+  }
+
   test("persists supervised admission before launching its frozen supervisor", async () => {
     const harness = await createHarness();
     harness.daemonConfigStore.agentProfiles.push({
@@ -1899,6 +1925,17 @@ describe("TeamRunService", () => {
     expect(restarted.runtime.streams).toEqual([]);
 
     const request = (await restarted.repository.getRun(run.id))!.supervision!.humanRequest!;
+    await expect(
+      restarted.service.respondToSupervisionHumanRequest({
+        runId: run.id,
+        requestId: request.id,
+        expectedRequestRevision: request.revision + 1,
+        actionId: "continue",
+        note: "This stale response must not load the supervisor.",
+        idempotencyKey: "stale-supervised-escalation-1",
+      }),
+    ).rejects.toMatchObject({ code: "team_run_supervision_human_request_revision_conflict" });
+    expect(restarted.runtime.loadedAgents).toEqual([]);
     restarted.runtime.loadError = new Error("Supervisor provider is temporarily unavailable");
     await expect(
       restarted.service.respondToSupervisionHumanRequest({
@@ -1958,6 +1995,64 @@ describe("TeamRunService", () => {
         humanRequest: { resolution: { actionId: "continue" } },
       },
     });
+  });
+
+  test("rejects a queued continue after cancellation without loading the supervisor", async () => {
+    const harness = await createHarness();
+    const { waiting, supervisorAgentId } = await startWaitingSupervisedRun(
+      harness,
+      "cancel-before-continue",
+    );
+    const request = waiting.supervision!.humanRequest!;
+    const workspaceId = waiting.workspace.workspaceId;
+    const internals = harness.service as unknown as {
+      acquireWorkspaceOperation(workspaceId: string): Promise<() => void>;
+      workspaceOperationTails: Map<string, Promise<void>>;
+    };
+    const releaseBlocker = await internals.acquireWorkspaceOperation(workspaceId);
+    const blockerTail = internals.workspaceOperationTails.get(workspaceId);
+    if (!blockerTail) throw new Error("Workspace operation blocker was not registered");
+
+    const canceling = harness.service.cancelRun(waiting.id);
+    let cancelTail = internals.workspaceOperationTails.get(workspaceId);
+    while (cancelTail === blockerTail) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      cancelTail = internals.workspaceOperationTails.get(workspaceId);
+    }
+    if (!cancelTail) throw new Error("Cancellation did not enter the Workspace operation queue");
+
+    const continuing = harness.service
+      .respondToSupervisionHumanRequest({
+        runId: waiting.id,
+        requestId: request.id,
+        expectedRequestRevision: request.revision,
+        actionId: "continue",
+        note: "This response is stale after cancellation.",
+        idempotencyKey: "continue-after-cancel",
+      })
+      .then(
+        (run) => ({ status: "fulfilled" as const, run }),
+        (error: unknown) => ({ status: "rejected" as const, error }),
+      );
+    let continueTail = internals.workspaceOperationTails.get(workspaceId);
+    while (continueTail === cancelTail && harness.runtime.loadedAgents.length === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      continueTail = internals.workspaceOperationTails.get(workspaceId);
+    }
+    expect(continueTail).not.toBe(cancelTail);
+    expect(harness.runtime.loadedAgents).toEqual([]);
+
+    releaseBlocker();
+    await expect(canceling).resolves.toMatchObject({ state: { status: "canceled" } });
+    const continued = await continuing;
+    expect(continued).toMatchObject({
+      status: "rejected",
+      error: { code: "team_run_supervision_human_request_conflict" },
+    });
+    expect(harness.runtime.loadedAgents).toEqual([]);
+    expect(
+      harness.runtime.streams.filter((stream) => stream.agentId === supervisorAgentId),
+    ).toHaveLength(1);
   });
 
   test("observes Workspace archival during safe-wait startup reconciliation", async () => {
