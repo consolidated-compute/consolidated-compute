@@ -206,12 +206,10 @@ export async function clickToolCallBesideScrollToBottomButton(page: Page): Promi
     })}`,
   ).toBeDefined();
   const visibleToolCall = candidate!;
-  const initialToolCallCenterY = visibleToolCall.bounds.y + visibleToolCall.bounds.height / 2;
-  await getVisibleChatScroll(page).evaluate((scroll, deltaY) => {
-    (scroll as HTMLElement).scrollTop += deltaY;
-  }, initialToolCallCenterY - buttonCenterY);
-
   const alignedToolCall = toolCalls.nth(visibleToolCall.index);
+  // Scroll and virtualization corrections can carry the tool call through the target band. Keep
+  // correcting against live geometry and require it to settle before testing the actual hit area.
+  let alignedSamples = 0;
   await expect
     .poll(async () => {
       const [currentButtonBounds, currentToolCallBounds] = await Promise.all([
@@ -219,13 +217,21 @@ export async function clickToolCallBesideScrollToBottomButton(page: Page): Promi
         alignedToolCall.boundingBox(),
       ]);
       if (!currentButtonBounds || !currentToolCallBounds) {
+        alignedSamples = 0;
         return false;
       }
+      const currentButtonCenterY = currentButtonBounds.y + currentButtonBounds.height / 2;
       const toolCallCenterY = currentToolCallBounds.y + currentToolCallBounds.height / 2;
-      return (
-        toolCallCenterY >= currentButtonBounds.y &&
-        toolCallCenterY <= currentButtonBounds.y + currentButtonBounds.height
-      );
+      const correction = toolCallCenterY - currentButtonCenterY;
+      if (Math.abs(correction) > currentButtonBounds.height / 4) {
+        alignedSamples = 0;
+        await getVisibleChatScroll(page).evaluate((scroll, deltaY) => {
+          (scroll as HTMLElement).scrollTop += deltaY;
+        }, correction);
+        return false;
+      }
+      alignedSamples += 1;
+      return alignedSamples >= 3;
     })
     .toBe(true);
 
