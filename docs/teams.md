@@ -70,6 +70,10 @@ sequential run with a one-hour deadline, four host-wide active slots, one active
 schedule, and the exact accepted provider/model pairs. Durable admission completes the occurrence;
 execution outcome remains in Team Run history. Missing or terminal targets are permanent schedule
 failures. Lock, quota, and launch failures remain visible occurrence failures and are never queued.
+Every fired occurrence counts toward `maxRuns`, including a visible admission failure. Restart
+reconciliation reuses a running occurrence ID, so the Team service returns the already-admitted run
+instead of launching a duplicate. Missed cadence slots are skipped. Pausing or deleting a schedule
+affects future firings and does not cancel a Team Run that the occurrence already admitted.
 
 Supervised execution uses the same Team Run record rather than a second coordinator store. Its
 admission snapshot is Assignment-only and freezes an unused Team role as supervisor, the existing

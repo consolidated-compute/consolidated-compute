@@ -1804,7 +1804,13 @@ export class VoiceAssistantWebSocketServer {
             }
           : {}),
         // COMPAT(assignments): added in v0.6.x, remove gate after 2027-02-27.
-        ...(this.assignmentRepository && this.teamRunService ? { assignments: true } : {}),
+        ...(this.assignmentRepository && this.teamRunService
+          ? {
+              assignments: true,
+              // COMPAT(assignmentTeamSchedules): added in v0.8.0, remove gate after 2027-03-02.
+              assignmentTeamSchedules: true,
+            }
+          : {}),
         // COMPAT(agentConfigApply): added in v0.3.2, remove gate after 2027-02-11.
         agentConfigApply: true,
       },

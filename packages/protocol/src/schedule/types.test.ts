@@ -46,6 +46,7 @@ describe("Assignment Team Run schedule schemas", () => {
     expect(
       ScheduleRunSchema.parse({
         id: "occurrence-1",
+        trigger: "scheduled",
         scheduledFor: "2026-09-02T12:00:00.000Z",
         startedAt: "2026-09-02T12:00:00.000Z",
         endedAt: "2026-09-02T12:00:01.000Z",
@@ -55,6 +56,6 @@ describe("Assignment Team Run schedule schemas", () => {
         output: null,
         error: null,
       }),
-    ).toMatchObject({ teamRunId: "team-run-1" });
+    ).toMatchObject({ trigger: "scheduled", teamRunId: "team-run-1" });
   });
 });

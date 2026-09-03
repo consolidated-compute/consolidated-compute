@@ -52,6 +52,7 @@ export type ScheduleTarget = z.infer<typeof ScheduleTargetSchema>;
 
 export const ScheduleRunSchema = z.object({
   id: z.string(),
+  trigger: z.enum(["scheduled", "manual"]).optional(),
   scheduledFor: z.string(),
   startedAt: z.string(),
   endedAt: z.string().nullable(),
@@ -119,5 +120,6 @@ export interface UpdateScheduleInput {
 
 export interface ScheduleExecutionResult {
   agentId: string | null;
+  teamRunId?: string | null;
   output: string | null;
 }
