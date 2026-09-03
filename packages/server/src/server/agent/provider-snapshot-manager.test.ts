@@ -460,6 +460,126 @@ describe("ProviderSnapshotManager public surface", () => {
     }
   });
 
+  test("coalesces overlapping explicit refreshes for the same provider", async () => {
+    const cwd = "/tmp/project";
+    let resolveCatalog!: (catalog: { models: AgentModelDefinition[]; modes: AgentMode[] }) => void;
+    const catalog = new Promise<{
+      models: AgentModelDefinition[];
+      modes: AgentMode[];
+    }>((settleCatalog) => {
+      resolveCatalog = settleCatalog;
+    });
+    const fetchCatalog = vi.fn(() => catalog);
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      extraClients: {
+        codex: createExtraClient("codex", {
+          isAvailable: async () => true,
+          fetchCatalog,
+        }),
+      },
+    });
+
+    try {
+      const first = manager.refreshSnapshotForCwd({ cwd, providers: ["codex"] });
+      await vi.waitFor(() => expect(fetchCatalog).toHaveBeenCalledTimes(1));
+
+      const second = manager.refreshSnapshotForCwd({ cwd, providers: ["codex"] });
+      await Promise.resolve();
+      expect(fetchCatalog).toHaveBeenCalledTimes(1);
+
+      resolveCatalog({
+        models: [{ provider: "codex", id: "gpt-5.6-sol", label: "GPT 5.6 Sol" }],
+        modes: [],
+      });
+      await Promise.all([first, second]);
+
+      await expect(manager.listModels({ cwd, provider: "codex", wait: false })).resolves.toEqual([
+        { provider: "codex", id: "gpt-5.6-sol", label: "GPT 5.6 Sol" },
+      ]);
+    } finally {
+      manager.destroy();
+    }
+  });
+
+  test("runs a forced refresh after an overlapping passive warm-up", async () => {
+    const cwd = "/tmp/project";
+    let resolveWarmUp!: (catalog: { models: AgentModelDefinition[]; modes: AgentMode[] }) => void;
+    let resolveRefresh!: (catalog: { models: AgentModelDefinition[]; modes: AgentMode[] }) => void;
+    const warmUpCatalog = new Promise<{
+      models: AgentModelDefinition[];
+      modes: AgentMode[];
+    }>((settleWarmUp) => {
+      resolveWarmUp = settleWarmUp;
+    });
+    const refreshCatalog = new Promise<{
+      models: AgentModelDefinition[];
+      modes: AgentMode[];
+    }>((settleRefresh) => {
+      resolveRefresh = settleRefresh;
+    });
+    const fetchCatalog = vi
+      .fn<
+        (
+          options: FetchCatalogOptions,
+        ) => Promise<{ models: AgentModelDefinition[]; modes: AgentMode[] }>
+      >()
+      .mockImplementationOnce(() => warmUpCatalog)
+      .mockImplementationOnce(() => refreshCatalog);
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      extraClients: {
+        codex: createExtraClient("codex", {
+          isAvailable: async () => true,
+          fetchCatalog,
+        }),
+      },
+    });
+
+    try {
+      const warmUp = manager.warmUpSnapshotForCwd({ cwd, providers: ["codex"] });
+      await vi.waitFor(() => expect(fetchCatalog).toHaveBeenCalledTimes(1));
+
+      const refresh = manager.refreshSnapshotForCwd({ cwd, providers: ["codex"] });
+      await Promise.resolve();
+      expect(fetchCatalog).toHaveBeenCalledTimes(1);
+
+      resolveWarmUp({
+        models: [{ provider: "codex", id: "stale", label: "Stale" }],
+        modes: [],
+      });
+      await vi.waitFor(() => expect(fetchCatalog).toHaveBeenCalledTimes(2));
+      expect(manager.getSnapshot(cwd).find((entry) => entry.provider === "codex")?.status).toBe(
+        "loading",
+      );
+
+      let providerReadSettled = false;
+      const providerRead = manager
+        .getProvider({ cwd, provider: "codex", wait: true })
+        .then((entry) => {
+          providerReadSettled = true;
+          return entry;
+        });
+      await Promise.resolve();
+      expect(providerReadSettled).toBe(false);
+
+      resolveRefresh({
+        models: [{ provider: "codex", id: "fresh", label: "Fresh" }],
+        modes: [],
+      });
+      const [, , entry] = await Promise.all([warmUp, refresh, providerRead]);
+
+      expect(fetchCatalog.mock.calls.map(([options]) => options.force)).toEqual([false, true]);
+      expect(entry.status).toBe("ready");
+      expect(entry.models).toEqual([{ provider: "codex", id: "fresh", label: "Fresh" }]);
+      await expect(manager.listModels({ cwd, provider: "codex", wait: false })).resolves.toEqual([
+        { provider: "codex", id: "fresh", label: "Fresh" },
+      ]);
+    } finally {
+      manager.destroy();
+    }
+  });
+
   test("refreshTimeoutMs option overrides the default and yields a timeout error", async () => {
     // never-resolving isAvailable forces the timeout path
     const isAvailable = vi.fn(waitUntilAborted);

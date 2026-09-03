@@ -185,6 +185,7 @@ interface ProviderLoadOptions {
   force: boolean;
 }
 interface ProviderLoad {
+  force: boolean;
   promise: Promise<void>;
 }
 
@@ -892,7 +893,17 @@ export class ProviderSnapshotManager {
     }
 
     const existingLoad = this.getProviderLoad(options.snapshotCwd, options.provider);
-    if (existingLoad && !options.force) {
+    if (existingLoad) {
+      if (options.force && !existingLoad.force) {
+        const startForcedLoad = () => {
+          this.resetSnapshotToLoading(options.snapshotCwd, [options.provider], {
+            preserveExisting: false,
+          });
+          this.emitChange(options.snapshotCwd);
+          return this.loadProvider(options);
+        };
+        return existingLoad.promise.then(startForcedLoad, startForcedLoad);
+      }
       return existingLoad.promise;
     }
     const existingEntry = this.snapshots.get(options.snapshotCwd)?.get(options.provider);
@@ -901,6 +912,7 @@ export class ProviderSnapshotManager {
     }
 
     const load: ProviderLoad = {
+      force: options.force,
       promise: Promise.resolve(),
     };
     this.setProviderLoad(options.snapshotCwd, options.provider, load);
