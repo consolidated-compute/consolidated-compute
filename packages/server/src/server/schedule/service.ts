@@ -924,10 +924,10 @@ export class ScheduleService {
       } else if (updated.status === "completed") {
         // Completed concurrently (e.g. the target agent was archived mid-run);
         // record the run outcome but leave the schedule terminal — don't advance.
-      } else if (params.manual) {
-        // Manual one-shot runs do not advance the cadence or recompute completion.
       } else if (shouldCompleteSchedule(updated, now)) {
         updated = completeSchedule(updated, now);
+      } else if (params.manual) {
+        // Manual one-shot runs below maxRuns do not advance the cadence.
       } else if (updated.status === "paused") {
         updated = {
           ...updated,

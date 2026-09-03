@@ -2709,7 +2709,7 @@ describe("ScheduleService", () => {
     expect(created.nextRunAt).toBe(now.toISOString());
   });
 
-  test("runOnce records a run without changing nextRunAt or completing the schedule", async () => {
+  test("runOnce counts the manual occurrence toward maxRuns immediately", async () => {
     const service = createScheduleService({
       paseoHome: tempDir,
       logger: createTestLogger(),
@@ -2735,14 +2735,15 @@ describe("ScheduleService", () => {
     expect(created.nextRunAt).toBe("2026-01-01T09:30:00.000Z");
 
     const after = await service.runOnce(created.id);
-    expect(after.nextRunAt).toBe("2026-01-01T09:30:00.000Z");
-    expect(after.status).toBe("active");
+    expect(after.nextRunAt).toBeNull();
+    expect(after.status).toBe("completed");
     expect(after.runs).toHaveLength(1);
     expect(after.runs[0]).toMatchObject({
       status: "succeeded",
       agentId: "00000000-0000-0000-0000-000000000099",
       output: "manual:manual fire",
     });
+    await expect(service.runOnce(created.id)).rejects.toThrow("already completed");
   });
 
   test("update mutates cadence, prompt, name, and target fields in place", async () => {
