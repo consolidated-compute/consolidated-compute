@@ -1347,6 +1347,7 @@ export function openScheduleForm(snapshot: ScheduleFormSnapshot): ScheduleFormMo
     setTargetKind(kind) {
       if (closed || snapshot.mode !== "create" || state.targetKind === kind) return;
       let selectedServerId = state.selectedServerId;
+      let hostChanged = false;
       if (kind === "assignment-team-run") {
         const compatibleHosts = hosts.filter(
           (host) => host.supportsAssignmentTeamSchedules === true,
@@ -1357,9 +1358,25 @@ export function openScheduleForm(snapshot: ScheduleFormSnapshot): ScheduleFormMo
         );
         if (!selectedHostSupportsTarget && compatibleHosts.length === 1) {
           selectedServerId = compatibleHosts[0]!.serverId;
+          hostChanged = true;
         }
       }
-      const nextState = { ...state, targetKind: kind, selectedServerId, submitError: null };
+      let nextState: ScheduleFormState = {
+        ...state,
+        targetKind: kind,
+        selectedServerId,
+        submitError: null,
+      };
+      if (hostChanged) {
+        userModified = { ...userModified, serverId: true, workingDir: true };
+        nextState = clearProviderSelection({
+          ...nextState,
+          workingDir: "",
+          projectDisplay: null,
+          selectedProjectOptionId: "",
+          providerResolutionByServerId: {},
+        });
+      }
       publish(kind === "assignment-team-run" ? resetAssignmentTeamSelection(nextState) : nextState);
     },
     setHost(serverId) {

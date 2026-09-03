@@ -278,5 +278,17 @@ test.describe("Schedules", () => {
     await expect(error).toContainText("Synthetic schedule action failure", { timeout: 30_000 });
     await error.getByRole("button", { name: "Dismiss" }).click();
     await expect(error).toHaveCount(0);
+
+    await page.getByTestId(`schedule-kebab-${scheduleId}`).click();
+    await Promise.all([
+      page.waitForEvent("dialog").then((dialog) => dialog.accept()),
+      page.getByTestId(`schedule-menu-delete-${scheduleId}`).click(),
+    ]);
+    await expect(error).toContainText("Synthetic schedule action failure", { timeout: 30_000 });
+    await expect(page.getByTestId(`schedule-row-${scheduleId}`)).toBeVisible();
+    await error.getByRole("button", { name: "Retry" }).click();
+    await expect(error).toContainText("Synthetic schedule action failure", { timeout: 30_000 });
+    await error.getByRole("button", { name: "Dismiss" }).click();
+    await expect(error).toHaveCount(0);
   });
 });

@@ -252,18 +252,35 @@ describe("schedule form model", () => {
     expect(form.getState().canSubmit).toBe(false);
   });
 
-  it("selects the only compatible host when changing to a Team Run target", () => {
+  it("selects the only compatible host and clears the prior agent scope", () => {
     const form = open({
       mode: "create",
       defaults: { serverId: "host-b", projectTargets: PROJECT_TARGETS, preferences: {} },
     });
+    form.setProject(buildProjectOptionId("host-b", "project-b"), { label: "Project B" });
+    form.applyProviderSnapshot("host-b", providerSnapshot(HOST_B_MODELS));
+    form.setModel("mock", "model-b");
 
     form.setTargetKind("assignment-team-run");
 
     expect(form.getState()).toMatchObject({
       targetKind: "assignment-team-run",
       selectedServerId: "host-a",
+      workingDir: "",
+      projectDisplay: null,
+      selectedProjectOptionId: "",
+      selectedProvider: null,
+      selectedModel: "",
       assignmentTeamCatalogStatus: "loading",
+    });
+
+    form.setTargetKind("new-agent");
+    expect(form.getState()).toMatchObject({
+      targetKind: "new-agent",
+      selectedServerId: "host-a",
+      workingDir: "",
+      selectedProjectOptionId: "",
+      canSubmit: false,
     });
   });
 
