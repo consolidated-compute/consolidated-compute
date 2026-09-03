@@ -209,6 +209,61 @@ export const TeamRunStepSnapshotDtoSchema = z.object({
     .optional(),
 });
 
+const TeamRunStepUsageValuesDtoSchema = z.object({
+  inputTokens: z.number().nonnegative().optional(),
+  cachedInputTokens: z.number().nonnegative().optional(),
+  outputTokens: z.number().nonnegative().optional(),
+  totalCostUsd: z.number().nonnegative().optional(),
+  contextWindowMaxTokens: z.number().nonnegative().optional(),
+  contextWindowUsedTokens: z.number().nonnegative().optional(),
+});
+
+export const TeamRunStepUsageDtoSchema = z.discriminatedUnion("status", [
+  TeamRunStepUsageValuesDtoSchema.extend({ status: z.literal("reported") }),
+  TeamRunStepUsageValuesDtoSchema.extend({ status: z.literal("partial") }),
+  z.object({ status: z.literal("unavailable") }),
+]);
+
+export const TeamRunUnattendedPolicyDtoSchema = z.object({
+  source: z.object({
+    type: z.enum(["schedule", "hub"]),
+    scopeId: z.string(),
+  }),
+  executionWindow: z.discriminatedUnion("type", [
+    z.object({ type: z.literal("schedule") }),
+    z.object({
+      type: z.literal("event"),
+      opensAt: z.string(),
+      closesAt: z.string(),
+    }),
+  ]),
+  maxRuntimeMs: z.number().int().positive(),
+  deadlineAt: z.string(),
+  maxActiveRunsOnHost: z.number().int().positive(),
+  maxActiveRunsForSource: z.number().int().positive(),
+  launchAllowlist: z.array(
+    z.object({
+      provider: z.string(),
+      models: z.array(z.string().nullable()),
+    }),
+  ),
+});
+
+export const TeamRunTerminationDtoSchema = z.object({
+  reason: z.enum(["cancel", "workspace", "shutdown", "deadline"]),
+  requestedAt: z.string(),
+});
+
+export const TeamRunUsageDtoSchema = z.object({
+  status: z.enum(["reported", "partial", "unavailable"]),
+  reportedSteps: z.number().int().nonnegative(),
+  unavailableSteps: z.number().int().nonnegative(),
+  inputTokens: z.number().nonnegative().optional(),
+  cachedInputTokens: z.number().nonnegative().optional(),
+  outputTokens: z.number().nonnegative().optional(),
+  totalCostUsd: z.number().nonnegative().optional(),
+});
+
 const PendingStepStateDtoSchema = z.object({ status: z.literal("pending") });
 const CreatingStepStateDtoSchema = z.object({
   status: z.literal("creating"),
@@ -240,6 +295,7 @@ const SucceededStepStateDtoSchema = z.object({
   agentId: z.string(),
   startedAt: z.string(),
   endedAt: z.string(),
+  usage: TeamRunStepUsageDtoSchema.optional(),
 });
 const FailedStepStateDtoSchema = z.object({
   status: z.literal("failed"),
@@ -359,6 +415,9 @@ export const TeamRunDtoSchema = z.object({
   workspace: TeamRunWorkspaceDtoSchema,
   steps: z.array(TeamRunStepDtoSchema),
   supervision: TeamRunSupervisionSummaryDtoSchema.optional(),
+  unattendedPolicy: TeamRunUnattendedPolicyDtoSchema.optional(),
+  termination: TeamRunTerminationDtoSchema.optional(),
+  usage: TeamRunUsageDtoSchema.optional(),
   state: TeamRunStateDtoSchema,
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -386,6 +445,10 @@ export type TeamDefinitionPatchDto = z.infer<typeof TeamDefinitionPatchDtoSchema
 export type TeamDefinitionDto = z.infer<typeof TeamDefinitionDtoSchema>;
 export type TeamRunWorkspaceDto = z.infer<typeof TeamRunWorkspaceDtoSchema>;
 export type TeamRunStepSnapshotDto = z.infer<typeof TeamRunStepSnapshotDtoSchema>;
+export type TeamRunStepUsageDto = z.infer<typeof TeamRunStepUsageDtoSchema>;
+export type TeamRunUnattendedPolicyDto = z.infer<typeof TeamRunUnattendedPolicyDtoSchema>;
+export type TeamRunTerminationDto = z.infer<typeof TeamRunTerminationDtoSchema>;
+export type TeamRunUsageDto = z.infer<typeof TeamRunUsageDtoSchema>;
 export type TeamRunStepStateDto = z.infer<typeof TeamRunStepStateDtoSchema>;
 export type TeamRunStepDto = z.infer<typeof TeamRunStepDtoSchema>;
 export type TeamRunStateDto = z.infer<typeof TeamRunStateDtoSchema>;

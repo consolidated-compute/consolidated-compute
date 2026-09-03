@@ -11,6 +11,7 @@ import type {
   AgentPromptInput,
   AgentSessionConfig,
   AgentStreamEvent,
+  AgentUsage,
 } from "../agent/agent-sdk-types.js";
 import { formatProviderModel, type CreateAgentFromMcpInput } from "../agent/create-agent/create.js";
 import type { ProviderSnapshotManager } from "../agent/provider-snapshot-manager.js";
@@ -706,6 +707,7 @@ export async function* executeTeamStep(
   yield { type: "agent_created", agentId: input.plannedAgentId };
 
   const pendingPermissions = new Set<string>();
+  let latestUsage: AgentUsage | undefined;
   const stream = dependencies.agentManager.streamAgent(input.plannedAgentId, prompt);
   for await (const event of stream) {
     if (event.type === "turn_started") {
@@ -722,10 +724,14 @@ export async function* executeTeamStep(
       yield { ...event, pendingPermissionCount: pendingPermissions.size };
       continue;
     }
+    if (event.type === "usage_updated") {
+      latestUsage = event.usage;
+      continue;
+    }
     if (event.type === "turn_completed") {
       const finalResponse =
         (await dependencies.agentManager.getLastAssistantMessage(input.plannedAgentId)) ?? "";
-      yield { ...event, finalResponse };
+      yield { ...event, usage: event.usage ?? latestUsage, finalResponse };
       return;
     }
     if (event.type === "turn_failed" || event.type === "turn_canceled") {

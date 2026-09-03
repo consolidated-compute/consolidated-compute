@@ -29,7 +29,9 @@ import {
   PersistedTeamRunRecordSchema,
   type PersistedTeamDefinition,
   type PersistedTeamRunRecord,
+  type PersistedTeamRunStepUsage,
   type PersistedTeamRunSupervision,
+  type TeamRunUnattendedPolicyInput,
   isActiveTeamRunStatus,
   isActiveTeamRunStepStatus,
   isTerminalTeamRunStepStatus,
@@ -40,6 +42,12 @@ import {
   resolveSupervisedTeamAgentAuthority,
   type SupervisedTeamAgentAuthority,
 } from "./agent-authority.js";
+import {
+  enforceTeamRunUnattendedConcurrency,
+  freezeTeamRunUnattendedPolicy,
+  requireMatchingTeamRunUnattendedPolicy,
+  requireTeamRunUnattendedDeadlineOpen,
+} from "./unattended-policy.js";
 
 export const TEAM_RUN_PAGE_DEFAULT_LIMIT = 50;
 export const TEAM_RUN_PAGE_MAX_LIMIT = 100;
@@ -76,6 +84,7 @@ export interface CreateAssignmentTeamRunInput extends Pick<
   expectedRevision: number;
   assignmentId: string;
   expectedAssignmentRevision: number;
+  unattendedPolicy?: TeamRunUnattendedPolicyInput;
 }
 
 export interface CreateSupervisedAssignmentTeamRunInput extends Omit<
@@ -103,9 +112,11 @@ export type TeamRunAdmissionIdentity =
       expectedAssignmentRevision: number;
       workspaceId: string;
       supervisorRoleId?: string;
+      unattendedPolicy?: TeamRunUnattendedPolicyInput;
     };
 
-export type TeamRunUpdate = Pick<PersistedTeamRunRecord, "steps" | "state">;
+export type TeamRunUpdate = Pick<PersistedTeamRunRecord, "steps" | "state"> &
+  Partial<Pick<PersistedTeamRunRecord, "termination">>;
 export type TeamRunUpdater = (
   run: PersistedTeamRunRecord,
 ) => TeamRunUpdate | Promise<TeamRunUpdate>;
@@ -166,7 +177,9 @@ export interface SettleTeamRunSupervisedWorkerInput {
   runId: string;
   expectedSupervisionRevision: number;
   attemptId: string;
-  outcome: { status: "succeeded" } | { status: "failed"; error: string };
+  outcome:
+    | { status: "succeeded"; usage: PersistedTeamRunStepUsage }
+    | { status: "failed"; error: string };
 }
 
 export interface ListTeamRunsInput {
@@ -707,6 +720,7 @@ export class TeamRepository {
         expectedAssignmentRevision: input.expectedAssignmentRevision,
         workspaceId: input.workspace.workspaceId,
         ...(input.supervision ? { supervisorRoleId: input.supervision.supervisor.roleId } : {}),
+        ...(input.unattendedPolicy ? { unattendedPolicy: input.unattendedPolicy } : {}),
       };
       const collection = await this.readRuns();
       const existing = collection.records.find(
@@ -766,6 +780,18 @@ export class TeamRepository {
       const supervision = input.supervision
         ? { ...input.supervision, updatedAt: timestamp }
         : undefined;
+      const unattendedPolicy = input.unattendedPolicy
+        ? freezeTeamRunUnattendedPolicy({
+            policy: input.unattendedPolicy,
+            launches: supervision
+              ? [supervision.supervisor, ...supervision.workerTemplates]
+              : steps.map((step) => step.snapshot),
+            admittedAt: timestamp,
+          })
+        : undefined;
+      if (unattendedPolicy) {
+        enforceTeamRunUnattendedConcurrency(unattendedPolicy, collection.records);
+      }
       const run = PersistedTeamRunRecordSchema.parse({
         id: runId,
         teamId: input.teamId,
@@ -779,6 +805,7 @@ export class TeamRepository {
         workspace: input.workspace,
         steps,
         ...(supervision ? { supervision } : {}),
+        ...(unattendedPolicy ? { unattendedPolicy } : {}),
         state: { status: "queued" },
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -794,8 +821,17 @@ export class TeamRepository {
       const current = await this.requireRun(runId);
       const preserved = PersistedTeamRunRecordSchema.parse(current);
       const update = await updater(current);
+      const termination = update.termination ?? preserved.termination;
+      if (
+        preserved.termination &&
+        update.termination &&
+        !equal(update.termination, preserved.termination)
+      ) {
+        throw new Error(`Team Run ${runId} termination provenance is immutable`);
+      }
       const mutableStateChanged =
         !equal(update.state, preserved.state) ||
+        !equal(termination, preserved.termination) ||
         !equal(
           update.steps.map((step) => step.state),
           preserved.steps.map((step) => step.state),
@@ -803,6 +839,7 @@ export class TeamRepository {
       if (!mutableStateChanged) return preserved;
 
       const updatedAt = this.now().toISOString();
+      if (!termination) requireTeamRunUnattendedDeadlineOpen(preserved, updatedAt);
       const supervisionPhase = terminalSupervisionPhase(update.state.status);
       const supervision =
         preserved.supervision && isActiveTeamRunStatus(preserved.state.status) && supervisionPhase
@@ -828,6 +865,7 @@ export class TeamRepository {
           state: step.state,
         })),
         ...(supervision ? { supervision } : {}),
+        ...(termination ? { termination } : {}),
         createdAt: preserved.createdAt,
         updatedAt,
       });
@@ -866,6 +904,7 @@ export class TeamRepository {
       }
 
       const timestamp = this.now().toISOString();
+      requireTeamRunUnattendedDeadlineOpen(current, timestamp);
       const supervisor = current.supervision.supervisor;
       const turn =
         current.steps.filter((step) => step.snapshot.supervision?.kind === "supervisor").length + 1;
@@ -959,6 +998,7 @@ export class TeamRepository {
         ? this.generateAvailableArtifactId(reservedArtifactIds)
         : null;
       const committedAt = this.now().toISOString();
+      requireTeamRunUnattendedDeadlineOpen(preserved, committedAt);
       const decision = {
         ...input.decision,
         createdAt: committedAt,
@@ -1027,6 +1067,7 @@ export class TeamRepository {
       if (!supervision) throw new TeamRunNotSupervisedError(input.runId);
 
       const updatedAt = this.now().toISOString();
+      requireTeamRunUnattendedDeadlineOpen(current, updatedAt);
       const eventId = this.generateAvailableSupervisionEventId(supervision);
       const run = PersistedTeamRunRecordSchema.parse({
         ...current,
@@ -1110,6 +1151,7 @@ export class TeamRepository {
       );
 
       const timestamp = this.now().toISOString();
+      requireTeamRunUnattendedDeadlineOpen(current, timestamp);
       const steps = current.steps.slice();
       steps[active.stepIndex] = {
         ...active.step,
@@ -1121,6 +1163,7 @@ export class TeamRepository {
                 agentId: active.agentId!,
                 startedAt: active.step.state.startedAt,
                 endedAt: timestamp,
+                usage: input.outcome.usage,
               }
             : {
                 status: "failed",
@@ -1251,13 +1294,22 @@ export class TeamRepository {
     const commonMatches =
       run.teamRevision === identity.expectedRevision &&
       run.workspace.workspaceId === identity.workspaceId;
+    let unattendedPolicyMatches = true;
+    try {
+      requireMatchingTeamRunUnattendedPolicy(
+        run.unattendedPolicy,
+        identity.kind === "assignment" ? identity.unattendedPolicy : undefined,
+      );
+    } catch {
+      unattendedPolicyMatches = false;
+    }
     const kindMatches =
       identity.kind === "objective"
         ? run.assignmentId === undefined && run.objective === identity.objective
         : run.assignmentId === identity.assignmentId &&
           run.assignmentRevision === identity.expectedAssignmentRevision &&
           run.supervision?.supervisor.roleId === identity.supervisorRoleId;
-    if (commonMatches && kindMatches) return;
+    if (commonMatches && kindMatches && unattendedPolicyMatches) return;
     throw new TeamRunIdempotencyConflictError(identity.teamId, identity.idempotencyKey, run.id);
   }
 

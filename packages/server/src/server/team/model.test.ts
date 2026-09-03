@@ -509,6 +509,80 @@ describe("Team Run contract", () => {
     expect(PersistedTeamRunRecordSchema.parse(run)).toEqual(run);
   });
 
+  test("accepts a frozen unattended policy on an Assignment-backed run", () => {
+    const run: PersistedTeamRunRecord = createAssignmentRun();
+    run.unattendedPolicy = {
+      source: { type: "schedule", scopeId: "schedule-nightly" },
+      executionWindow: { type: "schedule" },
+      maxRuntimeMs: 3_600_000,
+      maxActiveRunsOnHost: 4,
+      maxActiveRunsForSource: 1,
+      launchAllowlist: [{ provider: "codex", models: ["gpt-5.6"] }],
+      deadlineAt: "2026-08-25T13:00:00.000Z",
+    };
+
+    expect(PersistedTeamRunRecordSchema.parse(run)).toEqual(run);
+  });
+
+  test("rejects unattended policy on an objective-only run", () => {
+    const run: PersistedTeamRunRecord = createRun();
+    run.unattendedPolicy = {
+      source: { type: "schedule", scopeId: "schedule-nightly" },
+      executionWindow: { type: "schedule" },
+      maxRuntimeMs: 3_600_000,
+      maxActiveRunsOnHost: 4,
+      maxActiveRunsForSource: 1,
+      launchAllowlist: [{ provider: "codex", models: ["gpt-5.6"] }],
+      deadlineAt: "2026-08-25T13:00:00.000Z",
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Unattended Team Runs require a frozen Assignment",
+    );
+  });
+
+  test("rejects admission outside a frozen Hub event window", () => {
+    const run: PersistedTeamRunRecord = createAssignmentRun();
+    run.unattendedPolicy = {
+      source: { type: "hub", scopeId: "hub-trigger-42" },
+      executionWindow: {
+        type: "event",
+        opensAt: "2026-08-25T12:05:00.000Z",
+        closesAt: "2026-08-25T13:05:00.000Z",
+      },
+      maxRuntimeMs: 3_600_000,
+      maxActiveRunsOnHost: 4,
+      maxActiveRunsForSource: 1,
+      launchAllowlist: [{ provider: "codex", models: ["gpt-5.6"] }],
+      deadlineAt: "2026-08-25T13:00:00.000Z",
+    };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Run admission must occur inside its frozen event execution window",
+    );
+  });
+
+  test("rejects deadline termination without a frozen unattended policy", () => {
+    const run: PersistedTeamRunRecord = createRun();
+    run.termination = { reason: "deadline", requestedAt: timestamp };
+
+    const result = PersistedTeamRunRecordSchema.safeParse(run);
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "Only an unattended Team Run can terminate at a deadline",
+    );
+  });
+
   test("accepts a bounded supervised Assignment admission snapshot", () => {
     const run = createSupervisedAssignmentRun();
 

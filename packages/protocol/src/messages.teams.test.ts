@@ -219,6 +219,42 @@ describe("Team wire contracts", () => {
     });
   });
 
+  test("keeps unattended bounds, termination, and usage optional across version drift", () => {
+    const unattendedRun = {
+      ...publicRun,
+      unattendedPolicy: {
+        source: { type: "schedule" as const, scopeId: "schedule-1" },
+        executionWindow: { type: "schedule" as const },
+        maxRuntimeMs: 60_000,
+        deadlineAt: "2026-08-26T12:02:00.000Z",
+        maxActiveRunsOnHost: 3,
+        maxActiveRunsForSource: 1,
+        launchAllowlist: [{ provider: "codex", models: ["gpt-5.6-sol"] }],
+      },
+      termination: {
+        reason: "deadline" as const,
+        requestedAt: "2026-08-26T12:02:00.000Z",
+      },
+      usage: {
+        status: "partial" as const,
+        reportedSteps: 1,
+        unavailableSteps: 1,
+        inputTokens: 12,
+        totalCostUsd: 0.03,
+      },
+    };
+
+    expect(TeamRunDtoSchema.parse(unattendedRun)).toEqual(unattendedRun);
+    expect(TeamRunDtoSchema.parse(publicRun)).toEqual(publicRun);
+
+    const LegacyRunSchema = TeamRunDtoSchema.omit({
+      unattendedPolicy: true,
+      termination: true,
+      usage: true,
+    });
+    expect(LegacyRunSchema.parse(unattendedRun)).toEqual(publicRun);
+  });
+
   test("keeps security posture optional for historical Team Runs", () => {
     const { securityPosture: _securityPosture, ...legacyResolvedLaunch } = publicResolvedLaunch;
     const legacyRun = {

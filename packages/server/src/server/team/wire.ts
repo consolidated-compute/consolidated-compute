@@ -14,6 +14,7 @@ import type {
   PersistedTeamRunRecord,
   PersistedTeamRunSupervision,
 } from "./model.js";
+import { aggregateTeamRunUsage } from "./usage.js";
 
 export function toTeamDefinitionDto(definition: PersistedTeamDefinition): TeamDefinitionDto {
   return TeamDefinitionDtoSchema.parse(definition);
@@ -47,6 +48,7 @@ export function toTeamRunDto(run: PersistedTeamRunRecord): TeamRunDto {
   return TeamRunDtoSchema.parse({
     ...run,
     ...(supervision ? { supervision } : {}),
+    usage: aggregateTeamRunUsage(run),
   });
 }
 

@@ -35,6 +35,7 @@ import {
   TEAM_OBJECTIVE_MAX_CHARS,
   type PersistedTeamDefinition,
   type PersistedTeamRunRecord,
+  type TeamRunUnattendedPolicyInput,
 } from "./model.js";
 import {
   TeamRepository,
@@ -369,6 +370,7 @@ class MemoryAgentRuntime {
   readonly streams: Array<{ agentId: string; prompt: AgentPromptInput }> = [];
   readonly finalResponses = new Map<string, string | null>();
   cancellation: AgentRunCancellationResult = { status: "settled" };
+  cancellationError: Error | null = null;
   loadError: Error | null = null;
   requireRegisteredCancellation = false;
   beforeCreate: ((input: CreateAgentFromMcpInput) => Promise<void>) | null = null;
@@ -426,6 +428,7 @@ class MemoryAgentRuntime {
 
   async cancelAgentRun(agentId: string): Promise<AgentRunCancellationResult> {
     this.cancellations.push(agentId);
+    if (this.cancellationError) throw this.cancellationError;
     if (this.requireRegisteredCancellation && !this.registeredStreams.has(agentId)) {
       return { status: "not_running" };
     }
@@ -505,6 +508,33 @@ interface Harness {
   service: TeamRunService;
 }
 
+class MemoryDeadlineScheduler {
+  readonly scheduled: Array<{ callback: () => void; delayMs: number; canceled: boolean }> = [];
+  private readonly scheduleWaiters = new Set<() => void>();
+
+  schedule = (callback: () => void, delayMs: number): (() => void) => {
+    const task = { callback, delayMs, canceled: false };
+    this.scheduled.push(task);
+    for (const waiter of this.scheduleWaiters) waiter();
+    this.scheduleWaiters.clear();
+    return () => {
+      task.canceled = true;
+    };
+  };
+
+  async waitForCount(count: number): Promise<void> {
+    if (this.scheduled.length >= count) return;
+    await new Promise<void>((resolve) => this.scheduleWaiters.add(resolve));
+    await this.waitForCount(count);
+  }
+
+  fire(index = 0): void {
+    const task = this.scheduled[index];
+    if (!task || task.canceled) throw new Error(`No active deadline task at index ${index}`);
+    task.callback();
+  }
+}
+
 describe("TeamRunService", () => {
   let paseoHome: string;
   const services: TeamRunService[] = [];
@@ -526,9 +556,11 @@ describe("TeamRunService", () => {
     supervisedControlPlaneProtection?: TeamSupervisedControlPlaneProtection;
     initialize?: boolean;
     now?: () => Date;
+    deadlineScheduler?: MemoryDeadlineScheduler;
   }): Promise<Harness> {
     const repository =
-      options?.repository ?? new TeamRepository({ paseoHome, now: () => new Date(timestamp) });
+      options?.repository ??
+      new TeamRepository({ paseoHome, now: options?.now ?? (() => new Date(timestamp)) });
     const definitions = await repository.listDefinitions();
     const definition =
       definitions.definitions[0] ?? (await repository.createDefinition(createDefinitionInput()));
@@ -536,7 +568,7 @@ describe("TeamRunService", () => {
       options?.assignmentRepository ??
       new AssignmentRepository({
         paseoHome,
-        now: () => new Date(timestamp),
+        now: options?.now ?? (() => new Date(timestamp)),
         activeRunStore: repository,
       });
     const workspaceRegistry = new MemoryWorkspaceRegistry(options?.workspace ?? createWorkspace());
@@ -563,6 +595,9 @@ describe("TeamRunService", () => {
         if (!id) throw new Error("Test exhausted planned agent IDs");
         return id;
       },
+      ...(options?.deadlineScheduler
+        ? { scheduleDeadline: options.deadlineScheduler.schedule }
+        : {}),
     });
     services.push(service);
     if (options?.initialize !== false) await service.initialize();
@@ -649,6 +684,7 @@ describe("TeamRunService", () => {
     harness: Harness,
     assignment: { id: string; revision: number },
     idempotencyKey = "assignment-start-1",
+    unattendedPolicy?: TeamRunUnattendedPolicyInput,
   ) {
     return harness.service.startAssignmentRun({
       teamId: harness.definition.id,
@@ -657,7 +693,22 @@ describe("TeamRunService", () => {
       assignmentId: assignment.id,
       expectedAssignmentRevision: assignment.revision,
       workspaceId: "wks_team_service",
+      ...(unattendedPolicy ? { unattendedPolicy } : {}),
     });
+  }
+
+  function createUnattendedPolicy(
+    overrides: Partial<TeamRunUnattendedPolicyInput> = {},
+  ): TeamRunUnattendedPolicyInput {
+    return {
+      source: { type: "schedule", scopeId: "schedule-1" },
+      executionWindow: { type: "schedule" },
+      maxRuntimeMs: 60_000,
+      maxActiveRunsOnHost: 3,
+      maxActiveRunsForSource: 1,
+      launchAllowlist: [{ provider: "codex", models: ["gpt-5.6"] }],
+      ...overrides,
+    };
   }
 
   async function startSupervisedRun(harness: Harness, idempotencyKey: string) {
@@ -2688,6 +2739,290 @@ describe("TeamRunService", () => {
     });
   });
 
+  test("cancels active unattended work and persists a failed deadline boundary", async () => {
+    let currentTime = timestamp;
+    const deadlineScheduler = new MemoryDeadlineScheduler();
+    const harness = await createHarness({
+      now: () => new Date(currentTime),
+      deadlineScheduler,
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Bounded unattended execution",
+      objective: "Stop work at the frozen runtime deadline.",
+      workItem: null,
+    });
+
+    const run = await startAssignmentRun(
+      harness,
+      assignment,
+      "unattended-deadline",
+      createUnattendedPolicy(),
+    );
+    await harness.runtime.waitForStream(firstAgentId);
+
+    expect(run.unattendedPolicy).toMatchObject({
+      deadlineAt: "2026-08-25T12:01:00.000Z",
+      maxRuntimeMs: 60_000,
+    });
+    expect(deadlineScheduler.scheduled).toMatchObject([{ delayMs: 60_000, canceled: false }]);
+
+    currentTime = "2026-08-25T12:01:00.000Z";
+    const terminal = waitForRunState(
+      harness.repository,
+      run.id,
+      (candidate) => candidate.state.status === "failed",
+    );
+    deadlineScheduler.fire();
+    const failed = await terminal;
+
+    expect(failed).toMatchObject({
+      state: { status: "failed", error: "Unattended Team Run deadline elapsed" },
+      termination: {
+        reason: "deadline",
+        requestedAt: "2026-08-25T12:01:00.000Z",
+      },
+    });
+    expect(failed.steps[0]!.state.status).toBe("failed");
+    expect(failed.steps[1]!.state.status).toBe("pending");
+    expect(harness.runtime.cancellations).toEqual([firstAgentId]);
+    expect(harness.runtime.creations).toHaveLength(1);
+  });
+
+  test("retries a refused deadline cancellation until the active agent stops", async () => {
+    let currentTime = timestamp;
+    const deadlineScheduler = new MemoryDeadlineScheduler();
+    const harness = await createHarness({
+      now: () => new Date(currentTime),
+      deadlineScheduler,
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Refused deadline cancellation",
+      objective: "Retry the provider boundary without releasing the Workspace lock.",
+      workItem: null,
+    });
+    const run = await startAssignmentRun(
+      harness,
+      assignment,
+      "refused-deadline-cancellation",
+      createUnattendedPolicy(),
+    );
+    await harness.runtime.waitForStream(firstAgentId);
+    harness.runtime.cancellation = { status: "refused" };
+
+    currentTime = "2026-08-25T12:01:00.000Z";
+    const refused = waitForRunState(
+      harness.repository,
+      run.id,
+      (candidate) => candidate.state.status === "stop_failed",
+    );
+    deadlineScheduler.fire();
+    await refused;
+    await deadlineScheduler.waitForCount(2);
+
+    expect(deadlineScheduler.scheduled[1]).toMatchObject({ delayMs: 1_000, canceled: false });
+    harness.runtime.cancellation = { status: "settled" };
+    const terminal = waitForRunState(
+      harness.repository,
+      run.id,
+      (candidate) => candidate.state.status === "failed",
+    );
+    deadlineScheduler.fire(1);
+    const failed = await terminal;
+
+    expect(failed).toMatchObject({
+      state: { status: "failed" },
+      termination: { reason: "deadline" },
+    });
+    expect(harness.runtime.cancellations).toEqual([firstAgentId, firstAgentId]);
+  });
+
+  test("retries a thrown deadline cancellation from the persisted stopping state", async () => {
+    let currentTime = timestamp;
+    const deadlineScheduler = new MemoryDeadlineScheduler();
+    const harness = await createHarness({
+      now: () => new Date(currentTime),
+      deadlineScheduler,
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Failed deadline cancellation call",
+      objective: "Retry after a transient provider cancellation failure.",
+      workItem: null,
+    });
+    const run = await startAssignmentRun(
+      harness,
+      assignment,
+      "thrown-deadline-cancellation",
+      createUnattendedPolicy(),
+    );
+    await harness.runtime.waitForStream(firstAgentId);
+    harness.runtime.cancellationError = new Error("transient cancellation failure");
+
+    currentTime = "2026-08-25T12:01:00.000Z";
+    deadlineScheduler.fire();
+    await deadlineScheduler.waitForCount(2);
+    await expect(harness.repository.getRun(run.id)).resolves.toMatchObject({
+      state: { status: "stopping" },
+      termination: { reason: "deadline" },
+    });
+
+    harness.runtime.cancellationError = null;
+    const terminal = waitForRunState(
+      harness.repository,
+      run.id,
+      (candidate) => candidate.state.status === "failed",
+    );
+    deadlineScheduler.fire(1);
+    const failed = await terminal;
+
+    expect(failed).toMatchObject({
+      state: { status: "failed" },
+      termination: { reason: "deadline" },
+    });
+    expect(harness.runtime.cancellations).toEqual([firstAgentId, firstAgentId]);
+  });
+
+  test("does not let a completion observed at the deadline become success", async () => {
+    let currentTime = timestamp;
+    const harness = await createHarness({ now: () => new Date(currentTime) });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Deadline completion race",
+      objective: "Keep a late provider completion from crossing the frozen deadline.",
+      workItem: null,
+    });
+    const run = await startAssignmentRun(
+      harness,
+      assignment,
+      "deadline-completion-race",
+      createUnattendedPolicy(),
+    );
+    await harness.runtime.waitForStream(firstAgentId);
+
+    currentTime = "2026-08-25T12:01:00.000Z";
+    await harness.runtime.pushEvent(firstAgentId, {
+      type: "turn_completed",
+      provider: "codex",
+      turnId: "turn-at-deadline",
+      usage: { inputTokens: 8, outputTokens: 3 },
+    });
+    const failed = await harness.service.waitForRun(run.id);
+
+    expect(failed).toMatchObject({
+      state: { status: "failed" },
+      termination: { reason: "deadline" },
+    });
+    expect(failed.steps[0]!.state.status).toBe("failed");
+    expect(failed.steps[1]!.state.status).toBe("pending");
+    expect(harness.runtime.creations).toHaveLength(1);
+    await expect(
+      harness.assignments.getArtifact(run.steps[0]!.snapshot.outputArtifact!.id),
+    ).resolves.toBeNull();
+  });
+
+  test("records the deadline when cancellation races the frozen boundary", async () => {
+    let currentTime = timestamp;
+    const harness = await createHarness({ now: () => new Date(currentTime) });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Deadline cancellation race",
+      objective: "Keep the committed termination provenance deterministic.",
+      workItem: null,
+    });
+    const run = await startAssignmentRun(
+      harness,
+      assignment,
+      "deadline-cancellation-race",
+      createUnattendedPolicy(),
+    );
+    await harness.runtime.waitForStream(firstAgentId);
+
+    currentTime = "2026-08-25T12:01:00.000Z";
+    const failed = await harness.service.cancelRun(run.id);
+
+    expect(failed).toMatchObject({
+      state: { status: "failed" },
+      termination: {
+        reason: "deadline",
+        requestedAt: "2026-08-25T12:01:00.000Z",
+      },
+    });
+    expect(harness.runtime.cancellations).toEqual([firstAgentId]);
+  });
+
+  test("cancels and retries expired active agents during startup reconciliation", async () => {
+    let currentTime = timestamp;
+    const deadlineScheduler = new MemoryDeadlineScheduler();
+    const harness = await createHarness({
+      initialize: false,
+      now: () => new Date(currentTime),
+      deadlineScheduler,
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Expired while offline",
+      objective: "Reconcile the frozen deadline before accepting new work.",
+      workItem: null,
+    });
+    const run = await harness.repository.createAssignmentRun(
+      {
+        teamId: harness.definition.id,
+        expectedRevision: harness.definition.revision,
+        idempotencyKey: "expired-before-restart",
+        assignmentId: assignment.id,
+        expectedAssignmentRevision: assignment.revision,
+        workspace: {
+          workspaceId: "wks_team_service",
+          projectId: "prj_team_service",
+          cwd: "/repo/team-service",
+          displayName: "Team service test",
+        },
+        steps: acceptedSteps(harness.definition),
+        unattendedPolicy: createUnattendedPolicy(),
+      },
+      harness.assignments,
+    );
+    await harness.repository.updateRun(run.id, (current) => {
+      const steps = current.steps.slice();
+      steps[0] = {
+        ...steps[0]!,
+        state: {
+          status: "running",
+          plannedAgentId: firstAgentId,
+          agentId: firstAgentId,
+          startedAt: timestamp,
+        },
+      };
+      return { steps, state: { status: "running", startedAt: timestamp } };
+    });
+    harness.runtime.cancellation = { status: "refused" };
+
+    currentTime = "2026-08-25T12:02:00.000Z";
+    await harness.service.initialize();
+
+    await expect(harness.repository.getRun(run.id)).resolves.toMatchObject({
+      state: { status: "stop_failed" },
+      termination: { reason: "deadline" },
+    });
+    expect(deadlineScheduler.scheduled).toMatchObject([{ delayMs: 1_000, canceled: false }]);
+
+    harness.runtime.cancellation = { status: "settled" };
+    const terminal = waitForRunState(
+      harness.repository,
+      run.id,
+      (candidate) => candidate.state.status === "failed",
+    );
+    deadlineScheduler.fire();
+    const failed = await terminal;
+
+    expect(failed).toMatchObject({
+      state: { status: "failed" },
+      termination: {
+        reason: "deadline",
+        requestedAt: "2026-08-25T12:02:00.000Z",
+      },
+    });
+    expect(harness.runtime.loadedAgents).toEqual([firstAgentId, firstAgentId]);
+    expect(harness.runtime.cancellations).toEqual([firstAgentId, firstAgentId]);
+    expect(harness.runtime.creations).toEqual([]);
+  });
+
   test("fails an Assignment-backed step before advancement when required output is blank", async () => {
     const harness = await createHarness();
     const assignment = await harness.assignments.createAssignment({
@@ -2826,9 +3161,26 @@ describe("TeamRunService", () => {
     expect(completed.state.status).toBe("succeeded");
     expect(completed.teamSnapshot.name).toBe("Delivery Team");
     expect(completed.steps.map((step) => step.state)).toMatchObject([
-      { status: "succeeded", plannedAgentId: firstAgentId, agentId: firstAgentId },
-      { status: "succeeded", plannedAgentId: secondAgentId, agentId: secondAgentId },
+      {
+        status: "succeeded",
+        plannedAgentId: firstAgentId,
+        agentId: firstAgentId,
+        usage: { status: "reported", inputTokens: 10, outputTokens: 4 },
+      },
+      {
+        status: "succeeded",
+        plannedAgentId: secondAgentId,
+        agentId: secondAgentId,
+        usage: { status: "reported", inputTokens: 6, outputTokens: 2 },
+      },
     ]);
+    expect(toTeamRunDto(completed).usage).toEqual({
+      status: "reported",
+      reportedSteps: 2,
+      unavailableSteps: 0,
+      inputTokens: 16,
+      outputTokens: 6,
+    });
     expect(harness.runtime.creations.map((creation) => creation.agentId)).toEqual([
       firstAgentId,
       secondAgentId,
