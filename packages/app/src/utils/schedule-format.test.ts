@@ -70,7 +70,7 @@ describe("schedule title helpers", () => {
   it("keeps Assignment Team Run schedules out of existing editors", () => {
     expect(isScheduleEditable(createSchedule({ targetType: "agent" }))).toBe(true);
     expect(isScheduleEditable(createSchedule({ targetType: "new-agent" }))).toBe(true);
-    expect(isScheduleEditable(createSchedule({ targetType: "assignment-team-run" }))).toBe(false);
+    expect(isScheduleEditable(createSchedule({ targetType: "assignment-team-run" }))).toBe(true);
   });
 
   it("labels engine records by product meaning", () => {

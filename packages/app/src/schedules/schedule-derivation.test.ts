@@ -29,6 +29,9 @@ function resolve(
   options?: {
     agents?: Array<[string, ScheduleTargetAgent]>;
     projects?: Array<[string, string]>;
+    assignmentTeamTargets?: Array<
+      [string, { assignment: string; team: string; workspace: string }]
+    >;
     agentDataLoaded?: boolean;
   },
 ) {
@@ -38,6 +41,7 @@ function resolve(
     now: NOW,
     agentsByKey: new Map(options?.agents ?? []),
     projectNameByCwd: new Map(options?.projects ?? []),
+    assignmentTeamTargetsByKey: new Map(options?.assignmentTeamTargets ?? []),
     agentDataLoaded: options?.agentDataLoaded ?? true,
   });
 }
@@ -142,5 +146,15 @@ describe("resolveSchedule target line", () => {
     });
 
     expect(resolve(schedule).target).toEqual({ label: "Assignment Team Run", provider: null });
+    expect(
+      resolve(schedule, {
+        assignmentTeamTargets: [
+          [
+            JSON.stringify(["host-1", "assignment-1", "team-1", "workspace-1"]),
+            { assignment: "Fix CI", team: "Delivery", workspace: "main" },
+          ],
+        ],
+      }).target,
+    ).toEqual({ label: "Fix CI · Delivery · main", provider: null });
   });
 });

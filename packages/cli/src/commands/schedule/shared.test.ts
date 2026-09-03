@@ -83,6 +83,56 @@ describe("parseScheduleCreateInput cwd/host validation", () => {
   });
 });
 
+describe("parseScheduleCreateInput Assignment Team Run target", () => {
+  test("builds the target from explicit Assignment, Team, and Workspace flags", () => {
+    expect(
+      parseScheduleCreateInput({
+        prompt: "Run the Assignment",
+        cron: "0 9 * * *",
+        host: "dev:6767",
+        assignment: " assignment-1 ",
+        team: " team-1 ",
+        workspace: " workspace-1 ",
+      }),
+    ).toMatchObject({
+      target: {
+        type: "assignment-team-run",
+        assignmentId: "assignment-1",
+        teamId: "team-1",
+        workspaceId: "workspace-1",
+      },
+    });
+  });
+
+  test("requires the complete target tuple", () => {
+    expect(() =>
+      parseScheduleCreateInput({
+        prompt: "Run the Assignment",
+        cron: "0 9 * * *",
+        assignment: "assignment-1",
+        team: "team-1",
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        code: "INCOMPLETE_ASSIGNMENT_TEAM_TARGET",
+      }),
+    );
+  });
+
+  test("rejects agent launch flags for an Assignment Team Run", () => {
+    expect(() =>
+      parseScheduleCreateInput({
+        prompt: "Run the Assignment",
+        cron: "0 9 * * *",
+        assignment: "assignment-1",
+        team: "team-1",
+        workspace: "workspace-1",
+        provider: "codex",
+      }),
+    ).toThrow(expect.objectContaining({ code: "INVALID_ASSIGNMENT_TEAM_TARGET" }));
+  });
+});
+
 describe("parseScheduleCreateInput first-run timing", () => {
   test("--every compiles to cron and waits for the next slot", () => {
     const input = parseScheduleCreateInput(baseOptions);

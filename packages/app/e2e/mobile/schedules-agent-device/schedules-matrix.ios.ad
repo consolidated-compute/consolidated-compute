@@ -1,0 +1,35 @@
+context platform=ios timeout=600000 retries=1
+env APP_ID=sh.paseo.debug
+
+open "${APP_ID}"
+settings clear-app-state "${APP_ID}"
+settings permission reset notifications
+open "${APP_ID}" --relaunch --metro-host "${METRO_HOST}" --metro-port "${METRO_PORT}" --launch-url "${DEV_CLIENT_URL}"
+alert wait 45000
+alert dismiss
+settings appearance light
+wait "id=\"menu-button\"" 45000
+
+press "id=\"menu-button\""
+wait "id=\"sidebar-schedules\"" 10000
+press "id=\"sidebar-schedules\""
+wait "id=\"schedules-list\"" 30000
+press "id=\"schedules-empty-new\""
+wait "id=\"schedule-form-sheet\"" 30000
+press "id=\"schedule-target-assignment-team-run\""
+press "id=\"schedule-assignment-trigger\""
+wait "id=\"schedule-assignment-option-${PRIMARY_ASSIGNMENT_ID}\"" 30000
+press "id=\"schedule-assignment-option-${PRIMARY_ASSIGNMENT_ID}\""
+press "id=\"schedule-team-trigger\""
+wait "id=\"schedule-team-option-${PRIMARY_TEAM_ID}\"" 30000
+press "id=\"schedule-team-option-${PRIMARY_TEAM_ID}\""
+press "id=\"schedule-workspace-trigger\""
+wait "id=\"schedule-workspace-option-${PRIMARY_WORKSPACE_ID}\"" 30000
+press "id=\"schedule-workspace-option-${PRIMARY_WORKSPACE_ID}\""
+scroll down 0.7
+wait "id=\"schedule-team-role-status-${PRIMARY_TEAM_ROLE_ID}-ready\"" 30000
+wait "id=\"schedule-team-role-status-${PRIMARY_TEAM_SUPERVISOR_ROLE_ID}-ready\"" 30000
+screenshot "${AD_ARTIFACTS}/schedule-team-run-ready.png" --scale 1
+press "id=\"schedule-form-cancel\""
+wait "id=\"schedules-list\"" 10000
+close

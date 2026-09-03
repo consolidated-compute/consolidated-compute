@@ -37,6 +37,7 @@ export interface ScheduleLogRow {
   status: string;
   startedAt: string;
   agentId: string | null;
+  teamRunId: string | null;
   output: string | null;
   error: string | null;
 }
@@ -48,6 +49,7 @@ export const scheduleLogSchema: OutputSchema<ScheduleLogRow> = {
     { header: "STATUS", field: "status", width: 12 },
     { header: "STARTED", field: "startedAt", width: 24 },
     { header: "AGENT", field: "agentId", width: 12 },
+    { header: "TEAM RUN", field: "teamRunId", width: 14 },
     { header: "OUTPUT", field: "output", width: 40 },
     { header: "ERROR", field: "error", width: 40 },
   ],
@@ -59,6 +61,7 @@ export function toScheduleLogRow(run: ScheduleRunRecord): ScheduleLogRow {
     status: run.status,
     startedAt: run.startedAt,
     agentId: run.agentId ? run.agentId.slice(0, 7) : null,
+    teamRunId: run.teamRunId ?? null,
     output: run.output,
     error: run.error,
   };

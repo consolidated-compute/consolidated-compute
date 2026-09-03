@@ -4975,6 +4975,49 @@ describe("update_schedule MCP tool", () => {
   });
 });
 
+describe("Assignment Team Run schedule MCP catalog", () => {
+  const logger = createTestLogger();
+
+  it("lists and inspects Team schedules while keeping heartbeats agent-owned", async () => {
+    const { agentManager, agentStorage } = createTestDeps();
+    const teamSchedule = createStoredSchedule({
+      prompt: "Run the Assignment",
+      cadence: { type: "cron", expression: "0 9 * * *" },
+      target: {
+        type: "assignment-team-run",
+        assignmentId: "assignment-1",
+        teamId: "team-1",
+        workspaceId: "workspace-1",
+      },
+    });
+    const heartbeat = createStoredSchedule({
+      prompt: "Check status",
+      cadence: { type: "cron", expression: "*/5 * * * *" },
+      target: { type: "agent", agentId: "agent-1" },
+    });
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      providerSnapshotManager: createOpenCodeManager().manager,
+      scheduleService: {
+        list: vi.fn(async () => [teamSchedule, heartbeat]),
+        inspect: vi.fn(async () => teamSchedule),
+      } as unknown as ScheduleService,
+      logger,
+    });
+
+    const listed = await registeredTool(server, "list_schedules").handler({});
+    expect(listed.structuredContent).toEqual({
+      schedules: [expect.objectContaining({ id: teamSchedule.id })],
+    });
+
+    const inspected = await registeredTool(server, "inspect_schedule").handler({
+      id: teamSchedule.id,
+    });
+    expect(inspected.structuredContent.target).toEqual(teamSchedule.target);
+  });
+});
+
 describe("schedule_logs MCP tool", () => {
   const logger = createTestLogger();
 

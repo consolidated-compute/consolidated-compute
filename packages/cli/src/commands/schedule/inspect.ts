@@ -7,6 +7,7 @@ import {
 } from "./schema.js";
 import {
   connectScheduleClient,
+  isStandaloneSchedule,
   toScheduleCommandError,
   type ScheduleCommandOptions,
 } from "./shared.js";
@@ -22,7 +23,7 @@ export async function runInspectCommand(
     if (payload.error || !payload.schedule) {
       throw new Error(payload.error ?? `Schedule not found: ${id}`);
     }
-    if (payload.schedule.target.type !== "new-agent") {
+    if (!isStandaloneSchedule(payload.schedule)) {
       throw new Error(`Schedule not found: ${id}`);
     }
     const rows = createScheduleInspectRows(payload.schedule);

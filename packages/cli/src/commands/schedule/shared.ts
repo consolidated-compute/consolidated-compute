@@ -18,6 +18,16 @@ export interface ScheduleCommandOptions extends CommandOptions {
   host?: string;
 }
 
+export function isStandaloneSchedule(schedule: ScheduleRecord | ScheduleListItem): boolean {
+  switch (schedule.target.type) {
+    case "agent":
+      return false;
+    case "new-agent":
+    case "assignment-team-run":
+      return true;
+  }
+}
+
 export async function connectScheduleClient(
   host: string | undefined,
 ): Promise<{ client: ScheduleDaemonClient; host: string }> {
@@ -48,14 +58,15 @@ export function toScheduleCommandError(code: string, action: string, error: unkn
   };
 }
 
-export async function requireNewAgentSchedule(
+export async function requireStandaloneSchedule(
   client: ScheduleDaemonClient,
   id: string,
-): Promise<void> {
+): Promise<ScheduleRecord> {
   const payload = await client.scheduleInspect({ id });
-  if (payload.error || !payload.schedule || payload.schedule.target.type !== "new-agent") {
+  if (payload.error || !payload.schedule || !isStandaloneSchedule(payload.schedule)) {
     throw new Error(payload.error ?? `Schedule not found: ${id}`);
   }
+  return payload.schedule;
 }
 
 export function formatCadence(cadence: ScheduleCadence): string {
@@ -67,17 +78,18 @@ export function formatCadence(cadence: ScheduleCadence): string {
 }
 
 export function formatTarget(target: ScheduleTarget | ScheduleListItem["target"]): string {
-  if (target.type === "self") {
-    return `self:${target.agentId.slice(0, 7)}`;
+  switch (target.type) {
+    case "self":
+      return `self:${target.agentId.slice(0, 7)}`;
+    case "agent":
+      return `agent:${target.agentId.slice(0, 7)}`;
+    case "assignment-team-run":
+      return `assignment:${target.assignmentId.slice(0, 12)}/team:${target.teamId.slice(0, 12)}`;
+    case "new-agent": {
+      const modelSuffix = target.config.model ? `/${target.config.model}` : "";
+      return `new-agent:${target.config.provider}${modelSuffix}`;
+    }
   }
-  if (target.type === "agent") {
-    return `agent:${target.agentId.slice(0, 7)}`;
-  }
-  if (target.type === "assignment-team-run") {
-    return `assignment:${target.assignmentId.slice(0, 12)}/team:${target.teamId.slice(0, 12)}`;
-  }
-  const modelSuffix = target.config.model ? `/${target.config.model}` : "";
-  return `new-agent:${target.config.provider}${modelSuffix}`;
 }
 
 export function formatDurationMs(durationMs: number): string {
@@ -138,7 +150,7 @@ function resolveScheduleTarget(args: {
   return { type: "agent", agentId: targetValue };
 }
 
-export function parseScheduleCreateInput(options: {
+interface ScheduleCreateOptions {
   prompt: string;
   every?: string;
   cron?: string;
@@ -149,11 +161,83 @@ export function parseScheduleCreateInput(options: {
   mode?: string;
   thinking?: string;
   cwd?: string;
+  assignment?: string;
+  team?: string;
+  workspace?: string;
   host?: string;
   maxRuns?: string;
   expiresIn?: string;
   runNow?: boolean;
-}): CreateScheduleInput {
+}
+
+function parseAssignmentTeamTarget(options: ScheduleCreateOptions): ScheduleTarget | null {
+  const assignmentId = options.assignment?.trim();
+  const teamId = options.team?.trim();
+  const workspaceId = options.workspace?.trim();
+  const hasAnyTargetFlag = Boolean(assignmentId || teamId || workspaceId);
+  if (!hasAnyTargetFlag) return null;
+  if (!assignmentId || !teamId || !workspaceId) {
+    throw {
+      code: "INCOMPLETE_ASSIGNMENT_TEAM_TARGET",
+      message: "--assignment, --team, and --workspace must be provided together",
+    } satisfies CommandError;
+  }
+  return { type: "assignment-team-run", assignmentId, teamId, workspaceId };
+}
+
+function validateAssignmentTeamTargetOptions(
+  options: ScheduleCreateOptions,
+  target: ScheduleTarget | null,
+): void {
+  if (target?.type !== "assignment-team-run") return;
+  const hasAgentLaunchOption =
+    options.provider !== undefined || options.mode !== undefined || options.thinking !== undefined;
+  if (hasAgentLaunchOption || options.cwd !== undefined || options.target !== undefined) {
+    throw {
+      code: "INVALID_ASSIGNMENT_TEAM_TARGET",
+      message:
+        "--assignment/--team/--workspace cannot be combined with agent target or launch flags",
+    } satisfies CommandError;
+  }
+}
+
+function buildNewAgentTarget(input: {
+  options: ScheduleCreateOptions;
+  cwd: string | undefined;
+  modeId: string | undefined;
+  thinkingOptionId: string | undefined;
+}): ScheduleTarget {
+  const resolvedProviderModel = resolveProviderAndModel({ provider: input.options.provider });
+  return {
+    type: "new-agent",
+    config: {
+      provider: resolvedProviderModel.provider,
+      cwd: input.cwd ?? process.cwd(),
+      ...(resolvedProviderModel.model ? { model: resolvedProviderModel.model } : {}),
+      ...(input.modeId ? { modeId: input.modeId } : {}),
+      ...(input.thinkingOptionId ? { thinkingOptionId: input.thinkingOptionId } : {}),
+    },
+  };
+}
+
+function buildScheduleCreateLimits(
+  options: ScheduleCreateOptions,
+): Pick<CreateScheduleInput, "name" | "maxRuns" | "expiresAt"> {
+  const name = options.name?.trim();
+  const maxRuns =
+    options.maxRuns === undefined ? undefined : parsePositiveInt(options.maxRuns, "--max-runs");
+  const expiresAt =
+    options.expiresIn === undefined
+      ? undefined
+      : new Date(Date.now() + parseDuration(options.expiresIn)).toISOString();
+  return {
+    ...(name ? { name } : {}),
+    ...(maxRuns !== undefined ? { maxRuns } : {}),
+    ...(expiresAt ? { expiresAt } : {}),
+  };
+}
+
+export function parseScheduleCreateInput(options: ScheduleCreateOptions): CreateScheduleInput {
   const prompt = options.prompt.trim();
   if (!prompt) {
     throw {
@@ -170,8 +254,11 @@ export function parseScheduleCreateInput(options: {
     } satisfies CommandError;
   }
 
+  const assignmentTeamTarget = parseAssignmentTeamTarget(options);
+  validateAssignmentTeamTargetOptions(options, assignmentTeamTarget);
+
   const cwdInput = options.cwd?.trim();
-  if (options.host !== undefined && !cwdInput) {
+  if (options.host !== undefined && !cwdInput && !assignmentTeamTarget) {
     throw {
       code: "MISSING_CWD",
       message:
@@ -193,41 +280,23 @@ export function parseScheduleCreateInput(options: {
   const hasExplicitNewAgentOption =
     options.provider !== undefined || options.mode !== undefined || options.thinking !== undefined;
   const createNewAgentTarget = (): ScheduleTarget => {
-    const resolvedProviderModel = resolveProviderAndModel({
-      provider: options.provider,
+    return buildNewAgentTarget({
+      options,
+      cwd: cwdInput,
+      modeId,
+      thinkingOptionId,
     });
-    return {
-      type: "new-agent",
-      config: {
-        provider: resolvedProviderModel.provider,
-        cwd: cwdInput ?? process.cwd(),
-        ...(resolvedProviderModel.model ? { model: resolvedProviderModel.model } : {}),
-        ...(modeId ? { modeId } : {}),
-        ...(thinkingOptionId ? { thinkingOptionId } : {}),
-      },
-    };
   };
-  const target = resolveScheduleTarget({
-    targetValue,
-    hasExplicitNewAgentOption,
-    createNewAgentTarget,
-  });
-
-  const maxRuns =
-    options.maxRuns === undefined ? undefined : parsePositiveInt(options.maxRuns, "--max-runs");
-  const expiresAt =
-    options.expiresIn === undefined
-      ? undefined
-      : new Date(Date.now() + parseDuration(options.expiresIn)).toISOString();
+  const target =
+    assignmentTeamTarget ??
+    resolveScheduleTarget({ targetValue, hasExplicitNewAgentOption, createNewAgentTarget });
 
   return {
     prompt,
     cadence,
     target,
     runOnCreate,
-    ...(options.name?.trim() ? { name: options.name.trim() } : {}),
-    ...(maxRuns !== undefined ? { maxRuns } : {}),
-    ...(expiresAt ? { expiresAt } : {}),
+    ...buildScheduleCreateLimits(options),
   };
 }
 

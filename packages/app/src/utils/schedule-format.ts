@@ -29,11 +29,32 @@ export function isNewAgentSchedule(schedule: ScheduleSummary): boolean {
 }
 
 export function isScheduleEditable(schedule: ScheduleSummary): boolean {
-  return schedule.target.type !== "assignment-team-run";
+  switch (schedule.target.type) {
+    case "agent":
+    case "new-agent":
+    case "assignment-team-run":
+      return true;
+  }
+}
+
+export function hasScheduleExecutionActions(schedule: ScheduleSummary): boolean {
+  switch (schedule.target.type) {
+    case "agent":
+      return false;
+    case "new-agent":
+    case "assignment-team-run":
+      return true;
+  }
 }
 
 export function scheduleProductName(schedule: ScheduleSummary): "Heartbeat" | "Schedule" {
-  return schedule.target.type === "agent" ? "Heartbeat" : "Schedule";
+  switch (schedule.target.type) {
+    case "agent":
+      return "Heartbeat";
+    case "new-agent":
+    case "assignment-team-run":
+      return "Schedule";
+  }
 }
 
 export function resolveScheduleTitle(schedule: ScheduleSummary): string {

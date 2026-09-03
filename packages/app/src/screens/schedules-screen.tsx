@@ -21,6 +21,8 @@ import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useAggregatedAgents } from "@/hooks/use-aggregated-agents";
 import { useProjects } from "@/hooks/use-projects";
+import { useAssignments } from "@/assignments/use-assignments";
+import { useTeams } from "@/teams/use-teams";
 import {
   useSchedules,
   type AggregateLoadState,
@@ -30,9 +32,11 @@ import {
 import { getHostRuntimeStore, useHosts } from "@/runtime/host-runtime";
 import {
   resolveSchedule,
+  assignmentTeamTargetKey,
   type ScheduleBucket,
   type ScheduleTargetAgent,
 } from "@/schedules/schedule-derivation";
+import { useSessionStore } from "@/stores/session-store";
 import { resolveSchedulesScreenBodyState } from "./schedules-screen-state";
 import {
   buildProjectNameByCwd,
@@ -67,6 +71,9 @@ function SchedulesScreenContent(): ReactElement {
   const schedules = loadState.status === "loaded" ? loadState.data : EMPTY_SCHEDULES;
   const { agents } = useAggregatedAgents({ includeArchived: true });
   const { projects } = useProjects();
+  const assignmentsData = useAssignments();
+  const teamsData = useTeams();
+  const sessions = useSessionStore((state) => state.sessions);
   const hosts = useHosts();
   const runtime = getHostRuntimeStore();
   const runtimeVersion = useSyncExternalStore(
@@ -123,6 +130,27 @@ function SchedulesScreenContent(): ReactElement {
     [projects],
   );
 
+  const assignmentTeamTargetsByKey = useMemo(() => {
+    const labels = new Map<string, { assignment: string; team: string; workspace: string }>();
+    for (const schedule of schedules) {
+      const target = schedule.target;
+      if (target.type !== "assignment-team-run") continue;
+      const assignment = assignmentsData.assignments.find(
+        (entry) => entry.serverId === schedule.serverId && entry.id === target.assignmentId,
+      );
+      const team = teamsData.teams.find(
+        (entry) => entry.serverId === schedule.serverId && entry.id === target.teamId,
+      );
+      const workspace = sessions[schedule.serverId]?.workspaces.get(target.workspaceId);
+      labels.set(assignmentTeamTargetKey({ serverId: schedule.serverId, ...target }), {
+        assignment: assignment?.title ?? target.assignmentId,
+        team: team?.name ?? target.teamId,
+        workspace: workspace?.title ?? workspace?.name ?? target.workspaceId,
+      });
+    }
+    return labels;
+  }, [assignmentsData.assignments, schedules, sessions, teamsData.teams]);
+
   // Resolve every schedule's derived state and target line once, then partition
   // by the host and status filters. Sorted newest-first for a stable order
   // across hosts.
@@ -136,10 +164,11 @@ function SchedulesScreenContent(): ReactElement {
         now,
         agentsByKey,
         projectNameByCwd,
+        assignmentTeamTargetsByKey,
         agentDataLoaded: agentDirReadyHosts.has(schedule.serverId),
       }),
     }));
-  }, [schedules, agentsByKey, projectNameByCwd, agentDirReadyHosts]);
+  }, [schedules, agentsByKey, projectNameByCwd, assignmentTeamTargetsByKey, agentDirReadyHosts]);
 
   const visibleRows = useMemo<ScheduleRowView[]>(() => {
     const singleHost = hosts.length <= 1;
