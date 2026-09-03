@@ -3,6 +3,7 @@ import type {
   TeamDefinitionInputDto,
   TeamDefinitionPatchDto,
   TeamRunDto,
+  TeamRunPreviewDto,
 } from "@getpaseo/protocol/team/types";
 import { connectDaemonClient } from "./daemon-client-loader";
 
@@ -28,6 +29,12 @@ export interface TeamsDaemonClient {
     expectedRevision: number;
     requestId?: string;
   }): Promise<{ teamId: string }>;
+  previewTeamRun(input: {
+    teamId: string;
+    expectedRevision: number;
+    workspaceId: string;
+    requestId?: string;
+  }): Promise<{ preview: TeamRunPreviewDto }>;
   startAssignmentTeamRun(input: {
     teamId: string;
     expectedRevision: number;

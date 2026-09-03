@@ -331,6 +331,9 @@ export const es: TranslationResources = {
         supervisor: "Supervisor",
         selectSupervisor: "Selecciona un rol supervisor",
         noSupervisors: "Añade un rol del equipo que no forme parte del flujo de trabajo",
+        approvalFingerprint: "Huella de aprobación",
+        approvalFingerprintDescription:
+          "Identifica el espacio de trabajo y la configuración de inicio exactos que el daemon volverá a comprobar al iniciar.",
         validation: {
           ...en.teams.runs.form.validation,
           supervisor_required: "Selecciona un rol supervisor.",

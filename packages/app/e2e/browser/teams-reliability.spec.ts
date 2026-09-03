@@ -92,6 +92,14 @@ test.describe("Teams reliability", () => {
           await expect(preview).toContainText("mock · ten-second-stream · load-test");
           await expectUnavailableSecurityPosture(page, `team-run-role-posture-${role.id}`);
         }
+        const { preview: expectedPreview } = await client.previewTeamRun({
+          teamId: authored.id,
+          expectedRevision: authored.revision,
+          workspaceId: workspace.workspaceId,
+        });
+        await expect(form.getByTestId("team-run-security-preview-fingerprint")).toContainText(
+          expectedPreview.fingerprint,
+        );
         await expect(form.getByTestId("team-run-start")).toBeEnabled();
         await form.getByTestId("team-run-start").click();
         await expect(page.getByTestId("team-run-status")).toContainText("Waiting for permission", {

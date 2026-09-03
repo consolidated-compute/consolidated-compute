@@ -331,6 +331,9 @@ export const ja: TranslationResources = {
         supervisor: "監督者",
         selectSupervisor: "監督者ロールを選択",
         noSupervisors: "ワーカーワークフローに含まれないチームロールを追加してください",
+        approvalFingerprint: "承認フィンガープリント",
+        approvalFingerprintDescription:
+          "開始時にデーモンが再確認する正確なワークスペースと起動構成を識別します。",
         validation: {
           ...en.teams.runs.form.validation,
           supervisor_required: "監督者ロールを選択してください。",

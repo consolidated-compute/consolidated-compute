@@ -327,6 +327,8 @@ export const zhCN: TranslationResources = {
         supervisor: "监督者",
         selectSupervisor: "选择监督者角色",
         noSupervisors: "添加一个不属于工作流的团队角色",
+        approvalFingerprint: "审批指纹",
+        approvalFingerprintDescription: "标识守护程序将在启动时重新检查的确切工作区和启动配置。",
         validation: {
           ...en.teams.runs.form.validation,
           supervisor_required: "请选择监督者角色。",

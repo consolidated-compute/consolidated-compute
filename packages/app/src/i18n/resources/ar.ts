@@ -327,6 +327,9 @@ export const ar: TranslationResources = {
         supervisor: "المشرف",
         selectSupervisor: "اختر دور المشرف",
         noSupervisors: "أضف دورًا في الفريق غير مشارك في سير عمل المنفذين",
+        approvalFingerprint: "بصمة الموافقة",
+        approvalFingerprintDescription:
+          "تحدد مساحة العمل وإعداد التشغيل الدقيقين اللذين سيعيد البرنامج الخفي التحقق منهما عند البدء.",
         validation: {
           ...en.teams.runs.form.validation,
           supervisor_required: "اختر دور المشرف.",

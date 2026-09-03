@@ -328,6 +328,9 @@ export const ko: TranslationResources = {
         supervisor: "감독자",
         selectSupervisor: "감독자 역할 선택",
         noSupervisors: "작업자 워크플로에 포함되지 않은 팀 역할을 추가하세요",
+        approvalFingerprint: "승인 지문",
+        approvalFingerprintDescription:
+          "시작할 때 데몬이 다시 확인할 정확한 작업 공간과 실행 구성을 식별합니다.",
         validation: {
           ...en.teams.runs.form.validation,
           supervisor_required: "감독자 역할을 선택하세요.",
