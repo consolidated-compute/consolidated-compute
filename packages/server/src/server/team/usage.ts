@@ -11,10 +11,10 @@ const ADDITIVE_USAGE_FIELDS = [
   "inputTokens",
   "cachedInputTokens",
   "outputTokens",
-  "totalCostUsd",
 ] as const satisfies readonly (keyof AgentUsage)[];
 
 const POINT_IN_TIME_USAGE_FIELDS = [
+  "totalCostUsd",
   "contextWindowMaxTokens",
   "contextWindowUsedTokens",
 ] as const satisfies readonly (keyof AgentUsage)[];
@@ -33,9 +33,9 @@ export function snapshotTeamRunStepUsage(
     );
     if (available.length > 0) values[field] = available.reduce((sum, value) => sum + value, 0);
   }
-  const latest = reported.at(-1)!;
   for (const field of POINT_IN_TIME_USAGE_FIELDS) {
-    if (latest[field] !== undefined) values[field] = latest[field];
+    const latest = reported.findLast((usage) => usage[field] !== undefined);
+    if (latest?.[field] !== undefined) values[field] = latest[field];
   }
 
   return PersistedTeamRunStepUsageSchema.parse({
@@ -49,17 +49,26 @@ export function aggregateTeamRunUsage(run: Pick<PersistedTeamRunRecord, "steps">
   const reported = settled.flatMap((step) => {
     if (step.state.status !== "succeeded") return [];
     const usage = step.state.usage;
-    return usage && usage.status !== "unavailable" ? [usage] : [];
+    return usage && usage.status !== "unavailable" ? [{ agentId: step.state.agentId, usage }] : [];
   });
   const unavailableSteps = settled.length - reported.length;
-  const hasPartialStep = reported.some((usage) => usage.status === "partial");
+  const hasPartialStep = reported.some(({ usage }) => usage.status === "partial");
   let status: TeamRunUsageDto["status"] = "reported";
   if (reported.length === 0) status = "unavailable";
   else if (unavailableSteps > 0 || hasPartialStep) status = "partial";
   const totals: AgentUsage = {};
   for (const field of ADDITIVE_USAGE_FIELDS) {
-    const values = reported.flatMap((usage) => (usage[field] === undefined ? [] : [usage[field]]));
+    const values = reported.flatMap(({ usage }) =>
+      usage[field] === undefined ? [] : [usage[field]],
+    );
     if (values.length > 0) totals[field] = values.reduce((sum, value) => sum + value, 0);
+  }
+  const latestCostByAgent = new Map<string, number>();
+  for (const { agentId, usage } of reported) {
+    if (usage.totalCostUsd !== undefined) latestCostByAgent.set(agentId, usage.totalCostUsd);
+  }
+  if (latestCostByAgent.size > 0) {
+    totals.totalCostUsd = [...latestCostByAgent.values()].reduce((sum, value) => sum + value, 0);
   }
   return {
     status,

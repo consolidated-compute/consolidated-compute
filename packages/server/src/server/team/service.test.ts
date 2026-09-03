@@ -370,6 +370,7 @@ class MemoryAgentRuntime {
   readonly streams: Array<{ agentId: string; prompt: AgentPromptInput }> = [];
   readonly finalResponses = new Map<string, string | null>();
   cancellation: AgentRunCancellationResult = { status: "settled" };
+  cancellationError: Error | null = null;
   loadError: Error | null = null;
   requireRegisteredCancellation = false;
   beforeCreate: ((input: CreateAgentFromMcpInput) => Promise<void>) | null = null;
@@ -427,6 +428,7 @@ class MemoryAgentRuntime {
 
   async cancelAgentRun(agentId: string): Promise<AgentRunCancellationResult> {
     this.cancellations.push(agentId);
+    if (this.cancellationError) throw this.cancellationError;
     if (this.requireRegisteredCancellation && !this.registeredStreams.has(agentId)) {
       return { status: "not_running" };
     }
@@ -508,14 +510,23 @@ interface Harness {
 
 class MemoryDeadlineScheduler {
   readonly scheduled: Array<{ callback: () => void; delayMs: number; canceled: boolean }> = [];
+  private readonly scheduleWaiters = new Set<() => void>();
 
   schedule = (callback: () => void, delayMs: number): (() => void) => {
     const task = { callback, delayMs, canceled: false };
     this.scheduled.push(task);
+    for (const waiter of this.scheduleWaiters) waiter();
+    this.scheduleWaiters.clear();
     return () => {
       task.canceled = true;
     };
   };
+
+  async waitForCount(count: number): Promise<void> {
+    if (this.scheduled.length >= count) return;
+    await new Promise<void>((resolve) => this.scheduleWaiters.add(resolve));
+    await this.waitForCount(count);
+  }
 
   fire(index = 0): void {
     const task = this.scheduled[index];
@@ -2775,6 +2786,99 @@ describe("TeamRunService", () => {
     expect(failed.steps[1]!.state.status).toBe("pending");
     expect(harness.runtime.cancellations).toEqual([firstAgentId]);
     expect(harness.runtime.creations).toHaveLength(1);
+  });
+
+  test("retries a refused deadline cancellation until the active agent stops", async () => {
+    let currentTime = timestamp;
+    const deadlineScheduler = new MemoryDeadlineScheduler();
+    const harness = await createHarness({
+      now: () => new Date(currentTime),
+      deadlineScheduler,
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Refused deadline cancellation",
+      objective: "Retry the provider boundary without releasing the Workspace lock.",
+      workItem: null,
+    });
+    const run = await startAssignmentRun(
+      harness,
+      assignment,
+      "refused-deadline-cancellation",
+      createUnattendedPolicy(),
+    );
+    await harness.runtime.waitForStream(firstAgentId);
+    harness.runtime.cancellation = { status: "refused" };
+
+    currentTime = "2026-08-25T12:01:00.000Z";
+    const refused = waitForRunState(
+      harness.repository,
+      run.id,
+      (candidate) => candidate.state.status === "stop_failed",
+    );
+    deadlineScheduler.fire();
+    await refused;
+    await deadlineScheduler.waitForCount(2);
+
+    expect(deadlineScheduler.scheduled[1]).toMatchObject({ delayMs: 1_000, canceled: false });
+    harness.runtime.cancellation = { status: "settled" };
+    const terminal = waitForRunState(
+      harness.repository,
+      run.id,
+      (candidate) => candidate.state.status === "failed",
+    );
+    deadlineScheduler.fire(1);
+    const failed = await terminal;
+
+    expect(failed).toMatchObject({
+      state: { status: "failed" },
+      termination: { reason: "deadline" },
+    });
+    expect(harness.runtime.cancellations).toEqual([firstAgentId, firstAgentId]);
+  });
+
+  test("retries a thrown deadline cancellation from the persisted stopping state", async () => {
+    let currentTime = timestamp;
+    const deadlineScheduler = new MemoryDeadlineScheduler();
+    const harness = await createHarness({
+      now: () => new Date(currentTime),
+      deadlineScheduler,
+    });
+    const assignment = await harness.assignments.createAssignment({
+      title: "Failed deadline cancellation call",
+      objective: "Retry after a transient provider cancellation failure.",
+      workItem: null,
+    });
+    const run = await startAssignmentRun(
+      harness,
+      assignment,
+      "thrown-deadline-cancellation",
+      createUnattendedPolicy(),
+    );
+    await harness.runtime.waitForStream(firstAgentId);
+    harness.runtime.cancellationError = new Error("transient cancellation failure");
+
+    currentTime = "2026-08-25T12:01:00.000Z";
+    deadlineScheduler.fire();
+    await deadlineScheduler.waitForCount(2);
+    await expect(harness.repository.getRun(run.id)).resolves.toMatchObject({
+      state: { status: "stopping" },
+      termination: { reason: "deadline" },
+    });
+
+    harness.runtime.cancellationError = null;
+    const terminal = waitForRunState(
+      harness.repository,
+      run.id,
+      (candidate) => candidate.state.status === "failed",
+    );
+    deadlineScheduler.fire(1);
+    const failed = await terminal;
+
+    expect(failed).toMatchObject({
+      state: { status: "failed" },
+      termination: { reason: "deadline" },
+    });
+    expect(harness.runtime.cancellations).toEqual([firstAgentId, firstAgentId]);
   });
 
   test("does not let a completion observed at the deadline become success", async () => {

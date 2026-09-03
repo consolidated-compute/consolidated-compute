@@ -25,7 +25,7 @@ describe("Team Run usage snapshots", () => {
         {
           inputTokens: 5,
           outputTokens: 3,
-          totalCostUsd: 0.02,
+          totalCostUsd: 0.03,
           contextWindowMaxTokens: 100_000,
           contextWindowUsedTokens: 20,
         },
@@ -45,6 +45,11 @@ describe("Team Run usage snapshots", () => {
     expect(snapshotTeamRunStepUsage([{ inputTokens: 7 }, undefined])).toEqual({
       status: "partial",
       inputTokens: 7,
+    });
+    expect(snapshotTeamRunStepUsage([{ totalCostUsd: 0.25 }, { inputTokens: 7 }])).toEqual({
+      status: "reported",
+      inputTokens: 7,
+      totalCostUsd: 0.25,
     });
   });
 
@@ -84,5 +89,44 @@ describe("Team Run usage snapshots", () => {
       reportedSteps: 0,
       unavailableSteps: 0,
     });
+  });
+
+  test("retains the latest cumulative cost for a reused agent", () => {
+    const reusedAgentId = "b3112a42-7f32-4810-a2e0-8f747b5473c3";
+    const otherAgentId = "84d66a18-211f-4713-9c61-6ac728a56c12";
+    const steps = [
+      {
+        state: {
+          status: "succeeded" as const,
+          plannedAgentId: reusedAgentId,
+          agentId: reusedAgentId,
+          startedAt: "2026-09-02T12:00:00.000Z",
+          endedAt: "2026-09-02T12:01:00.000Z",
+          usage: { status: "reported" as const, totalCostUsd: 0.25 },
+        },
+      },
+      {
+        state: {
+          status: "succeeded" as const,
+          plannedAgentId: reusedAgentId,
+          agentId: reusedAgentId,
+          startedAt: "2026-09-02T12:01:00.000Z",
+          endedAt: "2026-09-02T12:02:00.000Z",
+          usage: { status: "reported" as const, totalCostUsd: 0.5 },
+        },
+      },
+      {
+        state: {
+          status: "succeeded" as const,
+          plannedAgentId: otherAgentId,
+          agentId: otherAgentId,
+          startedAt: "2026-09-02T12:02:00.000Z",
+          endedAt: "2026-09-02T12:03:00.000Z",
+          usage: { status: "reported" as const, totalCostUsd: 0.2 },
+        },
+      },
+    ] as PersistedTeamRunRecord["steps"];
+
+    expect(aggregateTeamRunUsage({ steps })).toMatchObject({ totalCostUsd: 0.7 });
   });
 });

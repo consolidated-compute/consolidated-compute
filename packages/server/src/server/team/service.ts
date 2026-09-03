@@ -77,6 +77,7 @@ type TeamRunStep = PersistedTeamRunRecord["steps"][number];
 type TeamRunTerminationReason = "cancel" | "workspace" | "shutdown" | "deadline";
 
 export type TeamRunDeadlineScheduler = (callback: () => void, delayMs: number) => () => void;
+const TEAM_RUN_DEADLINE_RETRY_MS = 1_000;
 
 const ACTIVE_STEP_STATUSES: ReadonlySet<TeamRunStepStatus> = new Set([
   "creating",
@@ -1470,7 +1471,11 @@ export class TeamRunService {
       if (!active) {
         return terminationRunUpdate(run, reason, timestamp);
       }
-      if (active.step.state.status === "stopping") return unchangedRun(run);
+      if (active.step.state.status === "stopping") {
+        agentIdToCancel = active.step.state.agentId;
+        shouldCancel = agentIdToCancel !== null;
+        return unchangedRun(run);
+      }
       if (!("plannedAgentId" in active.step.state)) return unchangedRun(run);
       agentIdToCancel = "agentId" in active.step.state ? active.step.state.agentId : null;
       shouldCancel = agentIdToCancel !== null;
@@ -1717,15 +1722,25 @@ export class TeamRunService {
       }
       this.requestTermination(runId, "deadline");
       const stopped = await this.stopActiveRun(runId);
-      if (
-        !isTerminalTeamRunStatus(stopped.state.status) &&
-        stopped.state.status !== "stop_failed"
-      ) {
+      if (stopped.state.status === "stop_failed") {
+        this.scheduleUnattendedDeadlineRetry(runId);
+      } else if (!isTerminalTeamRunStatus(stopped.state.status)) {
         await this.finishTermination(runId, "deadline", "Unattended Team Run deadline elapsed");
       }
     } catch (error) {
       this.logger.error({ err: error, runId }, "Failed to enforce unattended Team Run deadline");
+      this.scheduleUnattendedDeadlineRetry(runId);
     }
+  }
+
+  private scheduleUnattendedDeadlineRetry(runId: string): void {
+    if (!this.acceptingStarts) return;
+    this.clearDeadlineTimer(runId);
+    const cancel = this.scheduleDeadline(() => {
+      this.deadlineTimers.delete(runId);
+      void this.expireUnattendedRun(runId);
+    }, TEAM_RUN_DEADLINE_RETRY_MS);
+    this.deadlineTimers.set(runId, cancel);
   }
 
   private clearDeadlineTimer(runId: string): void {
