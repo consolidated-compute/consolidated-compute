@@ -892,7 +892,7 @@ export class ProviderSnapshotManager {
     }
 
     const existingLoad = this.getProviderLoad(options.snapshotCwd, options.provider);
-    if (existingLoad && !options.force) {
+    if (existingLoad) {
       return existingLoad.promise;
     }
     const existingEntry = this.snapshots.get(options.snapshotCwd)?.get(options.provider);
