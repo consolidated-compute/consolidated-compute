@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { CLIENT_CAPS } from "@getpaseo/protocol/client-capabilities";
 import type { AgentProfile } from "@getpaseo/protocol/messages";
 import type { TeamRunDto } from "@getpaseo/protocol/team/types";
 import { expect, test } from "vitest";
@@ -82,6 +83,132 @@ async function assistantTimelineText(client: DaemonClient, agentId: string): Pro
     .flatMap((entry) => (entry.item.type === "assistant_message" ? [entry.item.text] : []))
     .join("");
 }
+
+test("runs Assignment Team schedules and hides them from a legacy socket", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "paseo-assignment-schedule-workspace-"));
+  const daemon = await createTestPaseoDaemon({
+    agentProfiles: [
+      ...profiles,
+      {
+        id: "scheduled-operator",
+        name: "Scheduled Operator",
+        provider: "codex",
+        model: "gpt-5.4-mini",
+        modeId: "default",
+      },
+    ],
+  });
+  const client = new DaemonClient({
+    url: `ws://127.0.0.1:${daemon.port}/ws`,
+    appVersion: "0.8.0",
+  });
+  const legacyClient = new DaemonClient({
+    url: `ws://127.0.0.1:${daemon.port}/ws`,
+    appVersion: "0.7.2",
+    capabilities: { [CLIENT_CAPS.assignmentTeamSchedules]: false },
+  });
+
+  try {
+    await client.connect();
+    expect(client.getLastServerInfoMessage()?.features?.assignmentTeamSchedules).toBe(true);
+    const createdWorkspace = await client.createWorkspace({
+      source: { kind: "directory", path: cwd },
+    });
+    if (!createdWorkspace.workspace) {
+      throw new Error(createdWorkspace.error ?? "Failed to create scheduled Team Workspace");
+    }
+    const { team } = await client.createTeam({
+      name: "Scheduled Assignment Team",
+      instructions: "Run the Assignment through the schedule-owned occurrence.",
+      roles: [
+        {
+          id: "operator",
+          name: "Operator",
+          instructions:
+            'Create a file named "scheduled.txt" with the content "allowed". Respond with exactly: SCHEDULED_ARTIFACT',
+          profileId: "scheduled-operator",
+        },
+      ],
+      workflow: [{ id: "operate", roleId: "operator", instructions: null }],
+    });
+    const { assignment } = await client.createAssignment({
+      title: "Scheduled Assignment",
+      objective: "Prove one durable scheduled Team occurrence.",
+      workItem: null,
+    });
+    const createdSchedule = await client.scheduleCreate({
+      name: "Scheduled Assignment proof",
+      prompt: "Fire the selected Assignment Team Run.",
+      cadence: { type: "every", everyMs: 60_000 },
+      target: {
+        type: "assignment-team-run",
+        teamId: team.id,
+        assignmentId: assignment.id,
+        workspaceId: createdWorkspace.workspace.id,
+      },
+      runOnCreate: false,
+    });
+    if (createdSchedule.error || !createdSchedule.schedule) {
+      throw new Error(createdSchedule.error ?? "Schedule creation returned no schedule");
+    }
+
+    await legacyClient.connect();
+    const legacyList = await legacyClient.scheduleList();
+    expect(legacyList.schedules.map((schedule) => schedule.id)).not.toContain(
+      createdSchedule.schedule.id,
+    );
+    await expect(legacyClient.scheduleInspect({ id: createdSchedule.schedule.id })).rejects.toThrow(
+      `Schedule not found: ${createdSchedule.schedule.id}`,
+    );
+
+    const fired = await client.scheduleRunOnce({ id: createdSchedule.schedule.id });
+    if (fired.error || !fired.schedule) {
+      throw new Error(fired.error ?? "Schedule run-once returned no schedule");
+    }
+    const occurrence = fired.schedule.runs[0];
+    if (!occurrence?.teamRunId) {
+      throw new Error("Scheduled occurrence did not retain its admitted Team Run ID");
+    }
+    expect(occurrence).toMatchObject({
+      trigger: "manual",
+      status: "succeeded",
+      agentId: null,
+      output: null,
+      error: null,
+    });
+
+    const waitingRun = await waitForRunStatus(
+      client,
+      occurrence.teamRunId,
+      "waiting_for_permission",
+    );
+    const waitingStep = waitingRun.steps[0];
+    if (!waitingStep || !("agentId" in waitingStep.state) || waitingStep.state.agentId === null) {
+      throw new Error("Scheduled Team step waiting for permission has no agent");
+    }
+    const permissionState = await client.waitForFinish(waitingStep.state.agentId, 15_000);
+    const permission = permissionState.final?.pendingPermissions?.[0];
+    if (!permission) throw new Error("Scheduled Team agent has no pending permission");
+
+    const paused = await client.schedulePause({ id: createdSchedule.schedule.id });
+    expect(paused.schedule?.status).toBe("paused");
+    await client.scheduleDelete({ id: createdSchedule.schedule.id });
+    await client.respondToPermissionAndWait(waitingStep.state.agentId, permission.id, {
+      behavior: "allow",
+    });
+
+    const completed = await daemon.daemon.teamRunService.waitForRun(occurrence.teamRunId);
+    expect(completed.state.status).toBe("succeeded");
+    await expect(client.scheduleInspect({ id: createdSchedule.schedule.id })).rejects.toThrow(
+      `Schedule not found: ${createdSchedule.schedule.id}`,
+    );
+  } finally {
+    await legacyClient.close().catch(() => undefined);
+    await client.close().catch(() => undefined);
+    await daemon.close();
+    await rm(cwd, { recursive: true, force: true });
+  }
+}, 60_000);
 
 test("freezes a three-role Assignment run and hands forward only declared Artifacts", async () => {
   const prompts: AgentPromptInput[] = [];

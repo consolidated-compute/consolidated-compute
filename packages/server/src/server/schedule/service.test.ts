@@ -39,6 +39,7 @@ import {
   ScheduleTargetGoneError,
   type ScheduleServiceOptions,
 } from "./service.js";
+import { TeamScheduledRunPermanentTargetError } from "../team/service.js";
 import { ScheduleStore } from "./store.js";
 import type { ScheduleExecutionResult, StoredSchedule } from "@getpaseo/protocol/schedule/types";
 
@@ -78,7 +79,11 @@ let workspaceArchiveInProgress = false;
 
 type TestScheduleServiceOptions = Omit<
   ScheduleServiceOptions,
-  "createAgent" | "createDirectoryWorkspace" | "createPaseoWorktreeWorkspace" | "archiveWorkspace"
+  | "createAgent"
+  | "createDirectoryWorkspace"
+  | "createPaseoWorktreeWorkspace"
+  | "archiveWorkspace"
+  | "admitAssignmentTeamRun"
 > & {
   agentManager: AgentManager;
   providerSnapshotManager: Pick<ProviderSnapshotManager, "resolveCreateConfig">;
@@ -86,6 +91,7 @@ type TestScheduleServiceOptions = Omit<
   createDirectoryWorkspace?: ScheduleServiceOptions["createDirectoryWorkspace"];
   createPaseoWorktreeWorkspace?: ScheduleServiceOptions["createPaseoWorktreeWorkspace"];
   archiveWorkspace?: ScheduleServiceOptions["archiveWorkspace"];
+  admitAssignmentTeamRun?: ScheduleServiceOptions["admitAssignmentTeamRun"];
 };
 
 function createScheduleService(options: TestScheduleServiceOptions): ScheduleService {
@@ -185,6 +191,11 @@ function createScheduleService(options: TestScheduleServiceOptions): ScheduleSer
         };
       }),
     archiveWorkspace: options.archiveWorkspace ?? archiveDefaultWorkspace,
+    admitAssignmentTeamRun:
+      options.admitAssignmentTeamRun ??
+      (async () => {
+        throw new Error("Unexpected Assignment Team Run schedule admission");
+      }),
   });
 }
 
@@ -350,6 +361,453 @@ describe("ScheduleService", () => {
       output: "ran:Review new PRs",
     });
     expect(inspected.nextRunAt).toBe("2026-01-01T00:02:00.000Z");
+  });
+
+  test("admits a due Assignment Team Run occurrence and records its durable identity", async () => {
+    const admissions: Array<{
+      scheduleId: string;
+      occurrenceId: string;
+      teamId: string;
+      assignmentId: string;
+      workspaceId: string;
+    }> = [];
+    const service = createScheduleService({
+      paseoHome: tempDir,
+      logger: createTestLogger(),
+      agentManager: new AgentManager({ logger: createTestLogger() }),
+      agentStorage,
+      providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
+      now: () => now,
+      admitAssignmentTeamRun: async (input) => {
+        admissions.push(input);
+        return { id: "trun_scheduled_1" };
+      },
+    });
+    const created = await service.create({
+      prompt: "This schedule text must not become the Assignment objective.",
+      cadence: { type: "every", everyMs: 60_000 },
+      target: {
+        type: "assignment-team-run",
+        teamId: "team_scheduled",
+        assignmentId: "asgn_0000000000000001",
+        workspaceId: "wks_scheduled",
+      },
+      runOnCreate: false,
+    });
+
+    now = new Date("2026-01-01T00:01:00.000Z");
+    await service.tick();
+
+    const inspected = await service.inspect(created.id);
+    expect(inspected.runs).toHaveLength(1);
+    expect(admissions).toEqual([
+      {
+        scheduleId: created.id,
+        occurrenceId: inspected.runs[0]!.id,
+        teamId: "team_scheduled",
+        assignmentId: "asgn_0000000000000001",
+        workspaceId: "wks_scheduled",
+      },
+    ]);
+    expect(inspected.runs[0]).toMatchObject({
+      status: "succeeded",
+      trigger: "scheduled",
+      agentId: null,
+      teamRunId: "trun_scheduled_1",
+      output: null,
+      error: null,
+    });
+    expect(inspected.nextRunAt).toBe("2026-01-01T00:02:00.000Z");
+  });
+
+  test("runs an Assignment Team Run schedule once through the same durable occurrence path", async () => {
+    const occurrenceIds: string[] = [];
+    const service = createScheduleService({
+      paseoHome: tempDir,
+      logger: createTestLogger(),
+      agentManager: new AgentManager({ logger: createTestLogger() }),
+      agentStorage,
+      providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
+      now: () => now,
+      admitAssignmentTeamRun: async (input) => {
+        occurrenceIds.push(input.occurrenceId);
+        return { id: "trun_manual_1" };
+      },
+    });
+    const created = await service.create({
+      prompt: "Ignored Team schedule text",
+      cadence: { type: "every", everyMs: 60_000 },
+      target: {
+        type: "assignment-team-run",
+        teamId: "team_manual",
+        assignmentId: "asgn_0000000000000002",
+        workspaceId: "wks_manual",
+      },
+      runOnCreate: false,
+    });
+
+    const inspected = await service.runOnce(created.id);
+
+    expect(occurrenceIds).toEqual([inspected.runs[0]!.id]);
+    expect(inspected.runs).toMatchObject([
+      {
+        status: "succeeded",
+        trigger: "manual",
+        teamRunId: "trun_manual_1",
+        scheduledFor: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+    expect(inspected.nextRunAt).toBe("2026-01-01T00:01:00.000Z");
+  });
+
+  test("records a recurrence collision as a failed occurrence without queuing it", async () => {
+    const occurrenceIds: string[] = [];
+    const service = createScheduleService({
+      paseoHome: tempDir,
+      logger: createTestLogger(),
+      agentManager: new AgentManager({ logger: createTestLogger() }),
+      agentStorage,
+      providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
+      now: () => now,
+      admitAssignmentTeamRun: async (input) => {
+        occurrenceIds.push(input.occurrenceId);
+        if (occurrenceIds.length > 1) {
+          throw new Error("Workspace wks_collision already has an active Team Run");
+        }
+        return { id: "trun_collision_owner" };
+      },
+    });
+    const created = await service.create({
+      prompt: "Ignored Team schedule text",
+      cadence: { type: "every", everyMs: 60_000 },
+      target: {
+        type: "assignment-team-run",
+        teamId: "team_collision",
+        assignmentId: "asgn_0000000000000003",
+        workspaceId: "wks_collision",
+      },
+      runOnCreate: false,
+    });
+
+    now = new Date("2026-01-01T00:01:00.000Z");
+    await service.tick();
+    now = new Date("2026-01-01T00:02:00.000Z");
+    await service.tick();
+
+    const inspected = await service.inspect(created.id);
+    expect(occurrenceIds).toHaveLength(2);
+    expect(new Set(occurrenceIds).size).toBe(2);
+    expect(inspected.runs).toMatchObject([
+      { status: "succeeded", teamRunId: "trun_collision_owner", error: null },
+      {
+        status: "failed",
+        error: "Workspace wks_collision already has an active Team Run",
+      },
+    ]);
+    expect(inspected.status).toBe("active");
+    expect(inspected.nextRunAt).toBe("2026-01-01T00:03:00.000Z");
+  });
+
+  test("completes permanent Team targets while preserving transient admission failures", async () => {
+    const service = createScheduleService({
+      paseoHome: tempDir,
+      logger: createTestLogger(),
+      agentManager: new AgentManager({ logger: createTestLogger() }),
+      agentStorage,
+      providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
+      now: () => now,
+      admitAssignmentTeamRun: async (input) => {
+        if (input.teamId === "team_gone") {
+          throw new TeamScheduledRunPermanentTargetError(
+            "team_not_found",
+            "Scheduled Team not found: team_gone",
+          );
+        }
+        throw new Error("Agent Profile 'reviewer' does not exist on this host");
+      },
+    });
+    const permanent = await service.create({
+      prompt: "Ignored Team schedule text",
+      cadence: { type: "every", everyMs: 60_000 },
+      target: {
+        type: "assignment-team-run",
+        teamId: "team_gone",
+        assignmentId: "asgn_0000000000000004",
+        workspaceId: "wks_gone",
+      },
+      runOnCreate: false,
+    });
+    const transient = await service.create({
+      prompt: "Ignored Team schedule text",
+      cadence: { type: "every", everyMs: 60_000 },
+      target: {
+        type: "assignment-team-run",
+        teamId: "team_profile_failure",
+        assignmentId: "asgn_0000000000000005",
+        workspaceId: "wks_profile_failure",
+      },
+      runOnCreate: false,
+    });
+
+    now = new Date("2026-01-01T00:01:00.000Z");
+    await service.tick();
+
+    await expect(service.inspect(permanent.id)).resolves.toMatchObject({
+      status: "completed",
+      nextRunAt: null,
+      runs: [{ status: "failed", error: "Scheduled Team not found: team_gone" }],
+    });
+    await expect(service.inspect(transient.id)).resolves.toMatchObject({
+      status: "active",
+      nextRunAt: "2026-01-01T00:02:00.000Z",
+      runs: [
+        {
+          status: "failed",
+          error: "Agent Profile 'reviewer' does not exist on this host",
+        },
+      ],
+    });
+  });
+
+  test("counts a failed Team admission toward maxRuns", async () => {
+    const service = createScheduleService({
+      paseoHome: tempDir,
+      logger: createTestLogger(),
+      agentManager: new AgentManager({ logger: createTestLogger() }),
+      agentStorage,
+      providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
+      now: () => now,
+      admitAssignmentTeamRun: async () => {
+        throw new Error("Host reached its active unattended Team Run limit");
+      },
+    });
+    const created = await service.create({
+      prompt: "Ignored Team schedule text",
+      cadence: { type: "every", everyMs: 60_000 },
+      target: {
+        type: "assignment-team-run",
+        teamId: "team_max_runs",
+        assignmentId: "asgn_0000000000000006",
+        workspaceId: "wks_max_runs",
+      },
+      maxRuns: 1,
+      runOnCreate: false,
+    });
+
+    now = new Date("2026-01-01T00:01:00.000Z");
+    await service.tick();
+
+    await expect(service.inspect(created.id)).resolves.toMatchObject({
+      status: "completed",
+      nextRunAt: null,
+      runs: [{ status: "failed", error: "Host reached its active unattended Team Run limit" }],
+    });
+  });
+
+  test("recovers an admitted Team Run across the occurrence persistence crash window", async () => {
+    const firstService = createScheduleService({
+      paseoHome: tempDir,
+      logger: createTestLogger(),
+      agentManager: new AgentManager({ logger: createTestLogger() }),
+      agentStorage,
+      providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
+      now: () => now,
+    });
+    const created = await firstService.create({
+      prompt: "Ignored Team schedule text",
+      cadence: { type: "every", everyMs: 60_000 },
+      target: {
+        type: "assignment-team-run",
+        teamId: "team_recovery",
+        assignmentId: "asgn_0000000000000007",
+        workspaceId: "wks_recovery",
+      },
+      maxRuns: 1,
+      runOnCreate: false,
+    });
+    await firstService.stop();
+
+    const occurrenceId = "00000000-0000-4000-8000-000000000115";
+    const store = new ScheduleStore(join(tempDir, "schedules"));
+    await store.update(created.id, (schedule) => ({
+      ...schedule,
+      runs: [
+        {
+          id: occurrenceId,
+          trigger: "scheduled",
+          scheduledFor: "2026-01-01T00:01:00.000Z",
+          startedAt: "2026-01-01T00:01:00.000Z",
+          endedAt: null,
+          status: "running",
+          agentId: null,
+          output: null,
+          error: null,
+        },
+      ],
+    }));
+
+    const admissions: Parameters<ScheduleServiceOptions["admitAssignmentTeamRun"]>[0][] = [];
+    now = new Date("2026-01-01T00:10:00.000Z");
+    const recoveredService = createScheduleService({
+      paseoHome: tempDir,
+      logger: createTestLogger(),
+      agentManager: new AgentManager({ logger: createTestLogger() }),
+      agentStorage,
+      providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
+      now: () => now,
+      admitAssignmentTeamRun: async (input) => {
+        admissions.push(input);
+        return { id: "trun_recovered" };
+      },
+    });
+
+    await recoveredService.start();
+    await recoveredService.stop();
+
+    expect(admissions).toEqual([
+      {
+        scheduleId: created.id,
+        occurrenceId,
+        teamId: "team_recovery",
+        assignmentId: "asgn_0000000000000007",
+        workspaceId: "wks_recovery",
+      },
+    ]);
+    await expect(recoveredService.inspect(created.id)).resolves.toMatchObject({
+      status: "completed",
+      nextRunAt: null,
+      runs: [
+        {
+          id: occurrenceId,
+          trigger: "scheduled",
+          status: "succeeded",
+          teamRunId: "trun_recovered",
+          endedAt: "2026-01-01T00:10:00.000Z",
+          error: null,
+        },
+      ],
+    });
+  });
+
+  test("leaves an admitted Team occurrence recoverable when recording its identity fails", async () => {
+    const admittedTeamRunId = "trun_unrecorded";
+    const service = createScheduleService({
+      paseoHome: tempDir,
+      logger: createTestLogger(),
+      agentManager: new AgentManager({ logger: createTestLogger() }),
+      agentStorage,
+      providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
+      now: () => now,
+      admitAssignmentTeamRun: async () => ({ id: admittedTeamRunId }),
+    });
+    const created = await service.create({
+      prompt: "Ignored Team schedule text",
+      cadence: { type: "every", everyMs: 60_000 },
+      target: {
+        type: "assignment-team-run",
+        teamId: "team_persistence_failure",
+        assignmentId: "asgn_0000000000000008",
+        workspaceId: "wks_persistence_failure",
+      },
+      runOnCreate: false,
+    });
+    const internalStore = (service as unknown as { store: ScheduleStore }).store;
+    const update = internalStore.update.bind(internalStore);
+    let updateCount = 0;
+    internalStore.update = async (...args) => {
+      updateCount += 1;
+      if (updateCount === 2) {
+        throw new Error("simulated occurrence identity write failure");
+      }
+      return update(...args);
+    };
+
+    await expect(service.runOnce(created.id)).rejects.toThrow(
+      "simulated occurrence identity write failure",
+    );
+    const interrupted = await service.inspect(created.id);
+    expect(interrupted.runs).toMatchObject([{ status: "running", error: null }]);
+    expect(interrupted.runs[0]?.teamRunId).toBeUndefined();
+
+    const recoveredAdmissions: string[] = [];
+    const recoveredService = createScheduleService({
+      paseoHome: tempDir,
+      logger: createTestLogger(),
+      agentManager: new AgentManager({ logger: createTestLogger() }),
+      agentStorage,
+      providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
+      now: () => now,
+      admitAssignmentTeamRun: async (input) => {
+        recoveredAdmissions.push(input.occurrenceId);
+        return { id: admittedTeamRunId };
+      },
+    });
+
+    await recoveredService.start();
+    await recoveredService.stop();
+
+    expect(recoveredAdmissions).toEqual([interrupted.runs[0]!.id]);
+    await expect(recoveredService.inspect(created.id)).resolves.toMatchObject({
+      runs: [{ status: "succeeded", teamRunId: admittedTeamRunId, error: null }],
+    });
+  });
+
+  test("fences new Team occurrences and drains an in-flight admission during shutdown", async () => {
+    let signalAdmissionStarted: (() => void) | null = null;
+    const admissionStarted = new Promise<void>((resolve) => {
+      signalAdmissionStarted = resolve;
+    });
+    let releaseAdmission: (() => void) | null = null;
+    const admissionBlocked = new Promise<void>((resolve) => {
+      releaseAdmission = resolve;
+    });
+    let admissionCount = 0;
+    const service = createScheduleService({
+      paseoHome: tempDir,
+      logger: createTestLogger(),
+      agentManager: new AgentManager({ logger: createTestLogger() }),
+      agentStorage,
+      providerSnapshotManager: NO_UNATTENDED_SCHEDULE_POLICY,
+      now: () => now,
+      admitAssignmentTeamRun: async () => {
+        admissionCount += 1;
+        signalAdmissionStarted?.();
+        await admissionBlocked;
+        return { id: "trun_shutdown" };
+      },
+    });
+    const created = await service.create({
+      prompt: "Ignored Team schedule text",
+      cadence: { type: "every", everyMs: 60_000 },
+      target: {
+        type: "assignment-team-run",
+        teamId: "team_shutdown",
+        assignmentId: "asgn_0000000000000008",
+        workspaceId: "wks_shutdown",
+      },
+      runOnCreate: false,
+    });
+    now = new Date("2026-01-01T00:01:00.000Z");
+    const ticking = service.tick();
+    await admissionStarted;
+
+    let stopSettled = false;
+    const stopping = service.stop().then(() => {
+      stopSettled = true;
+      return undefined;
+    });
+    await Promise.resolve();
+
+    expect(stopSettled).toBe(false);
+    await expect(service.runOnce(created.id)).rejects.toThrow("Schedule service is stopping");
+    expect(admissionCount).toBe(1);
+
+    releaseAdmission?.();
+    await ticking;
+    await stopping;
+    await expect(service.inspect(created.id)).resolves.toMatchObject({
+      runs: [{ status: "succeeded", teamRunId: "trun_shutdown" }],
+    });
   });
 
   test("pause and resume update persisted schedule state", async () => {
@@ -2251,7 +2709,7 @@ describe("ScheduleService", () => {
     expect(created.nextRunAt).toBe(now.toISOString());
   });
 
-  test("runOnce records a run without changing nextRunAt or completing the schedule", async () => {
+  test("runOnce counts the manual occurrence toward maxRuns immediately", async () => {
     const service = createScheduleService({
       paseoHome: tempDir,
       logger: createTestLogger(),
@@ -2277,14 +2735,15 @@ describe("ScheduleService", () => {
     expect(created.nextRunAt).toBe("2026-01-01T09:30:00.000Z");
 
     const after = await service.runOnce(created.id);
-    expect(after.nextRunAt).toBe("2026-01-01T09:30:00.000Z");
-    expect(after.status).toBe("active");
+    expect(after.nextRunAt).toBeNull();
+    expect(after.status).toBe("completed");
     expect(after.runs).toHaveLength(1);
     expect(after.runs[0]).toMatchObject({
       status: "succeeded",
       agentId: "00000000-0000-0000-0000-000000000099",
       output: "manual:manual fire",
     });
+    await expect(service.runOnce(created.id)).rejects.toThrow("already completed");
   });
 
   test("update mutates cadence, prompt, name, and target fields in place", async () => {

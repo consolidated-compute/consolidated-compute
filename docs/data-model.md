@@ -375,7 +375,7 @@ One file per schedule. ID is 8 hex characters.
 | `lastRunAt` | `string?` (ISO 8601)                  | Last execution time                                                 |
 | `pausedAt`  | `string?` (ISO 8601)                  | When paused                                                         |
 | `expiresAt` | `string?` (ISO 8601)                  | Auto-expire time                                                    |
-| `maxRuns`   | `number?`                             | Max executions before completing                                    |
+| `maxRuns`   | `number?`                             | Max fired occurrences, including failures                           |
 | `runs`      | `ScheduleRun[]`                       | Execution history                                                   |
 
 ### Nested: ScheduleCadence (discriminated union on `type`)
@@ -396,6 +396,7 @@ The Assignment Team Run target is capability-projected from schedule responses. 
 | Field          | Type                                   | Description                          |
 | -------------- | -------------------------------------- | ------------------------------------ |
 | `id`           | `string`                               | Run ID                               |
+| `trigger`      | `"scheduled" \| "manual"?`             | How this occurrence was started      |
 | `scheduledFor` | `string` (ISO 8601)                    | Intended execution time              |
 | `startedAt`    | `string` (ISO 8601)                    |                                      |
 | `endedAt`      | `string?` (ISO 8601)                   |                                      |

@@ -16,6 +16,10 @@ import { resolveCreateAgentTitles } from "../agent/create-agent-title.js";
 import { type BoundCreateAgentCommand, formatProviderModel } from "../agent/create-agent/create.js";
 import type { PersistedWorkspaceRecord } from "../workspace-registry.js";
 import type { CreatePaseoWorktreeWorkflowResult } from "../worktree-session.js";
+import {
+  TeamScheduledRunPermanentTargetError,
+  type AdmitScheduledAssignmentTeamRunInput,
+} from "../team/service.js";
 import { ScheduleStore } from "./store.js";
 import { computeNextRunAt, validateScheduleCadence } from "./cron.js";
 import type {
@@ -39,6 +43,22 @@ export class ScheduleTargetGoneError extends Error {
     super(message);
     this.name = "ScheduleTargetGoneError";
   }
+}
+
+export class ScheduleServiceStoppingError extends Error {
+  readonly code = "schedule_service_stopping";
+
+  constructor() {
+    super("Schedule service is stopping");
+    this.name = "ScheduleServiceStoppingError";
+  }
+}
+
+function isPermanentScheduleTargetError(error: unknown): boolean {
+  return (
+    error instanceof ScheduleTargetGoneError ||
+    error instanceof TeamScheduledRunPermanentTargetError
+  );
 }
 
 function trimOptionalName(value: string | null | undefined): string | null {
@@ -237,6 +257,7 @@ export interface ScheduleServiceOptions {
     input: ScheduleWorkspaceCreateInput,
   ) => Promise<CreatePaseoWorktreeWorkflowResult>;
   archiveWorkspace: (workspaceId: string) => Promise<void>;
+  admitAssignmentTeamRun: (input: AdmitScheduledAssignmentTeamRunInput) => Promise<{ id: string }>;
   now?: () => Date;
   runner?: (schedule: StoredSchedule, runId: string) => Promise<ScheduleExecutionResult>;
 }
@@ -254,13 +275,16 @@ export class ScheduleService {
     input: ScheduleWorkspaceCreateInput,
   ) => Promise<CreatePaseoWorktreeWorkflowResult>;
   private readonly archiveWorkspace: (workspaceId: string) => Promise<void>;
+  private readonly admitAssignmentTeamRun: ScheduleServiceOptions["admitAssignmentTeamRun"];
   private readonly now: () => Date;
   private readonly runner: (
     schedule: StoredSchedule,
     runId: string,
   ) => Promise<ScheduleExecutionResult>;
   private readonly runningScheduleIds = new Set<string>();
+  private readonly inFlightTeamOccurrences = new Set<Promise<void>>();
   private tickTimer: ReturnType<typeof setInterval> | null = null;
+  private acceptingDispatches = true;
 
   constructor(options: ScheduleServiceOptions) {
     this.store = new ScheduleStore(join(options.paseoHome, "schedules"));
@@ -271,11 +295,13 @@ export class ScheduleService {
     this.createDirectoryWorkspace = options.createDirectoryWorkspace;
     this.createPaseoWorktreeWorkspace = options.createPaseoWorktreeWorkspace;
     this.archiveWorkspace = options.archiveWorkspace;
+    this.admitAssignmentTeamRun = options.admitAssignmentTeamRun;
     this.now = options.now ?? (() => new Date());
     this.runner = options.runner ?? ((schedule, runId) => this.executeSchedule(schedule, runId));
   }
 
   async start(): Promise<void> {
+    this.acceptingDispatches = true;
     await this.recoverInterruptedRuns();
     await this.sweepOrphanedSchedules();
     if (this.tickTimer) {
@@ -291,10 +317,12 @@ export class ScheduleService {
   }
 
   async stop(): Promise<void> {
+    this.acceptingDispatches = false;
     if (this.tickTimer) {
       clearInterval(this.tickTimer);
       this.tickTimer = null;
     }
+    await Promise.allSettled(this.inFlightTeamOccurrences);
   }
 
   async create(input: CreateScheduleInput): Promise<StoredSchedule> {
@@ -534,6 +562,7 @@ export class ScheduleService {
   }
 
   async runOnce(id: string): Promise<StoredSchedule> {
+    this.requireAcceptingDispatches();
     const schedule = await this.inspect(id);
     if (schedule.status === "completed") {
       throw new Error(`Schedule ${id} is already completed`);
@@ -541,14 +570,16 @@ export class ScheduleService {
     if (this.runningScheduleIds.has(id)) {
       throw new Error(`Schedule ${id} is already running`);
     }
-    await this.runSchedule(schedule, this.now(), { manual: true });
+    await this.runScheduleWithShutdownFence(schedule, this.now(), { manual: true });
     return this.inspect(id);
   }
 
   async tick(): Promise<void> {
+    if (!this.acceptingDispatches) return;
     const now = this.now();
     const schedules = await this.store.list();
     for (const schedule of schedules) {
+      if (!this.acceptingDispatches) return;
       if (schedule.status !== "active" || !schedule.nextRunAt) {
         continue;
       }
@@ -562,8 +593,29 @@ export class ScheduleService {
       if (new Date(schedule.nextRunAt).getTime() > now.getTime()) {
         continue;
       }
-      await this.runSchedule(schedule, now);
+      await this.runScheduleWithShutdownFence(schedule, now);
     }
+  }
+
+  private requireAcceptingDispatches(): void {
+    if (!this.acceptingDispatches) throw new ScheduleServiceStoppingError();
+  }
+
+  private runScheduleWithShutdownFence(
+    schedule: StoredSchedule,
+    now: Date,
+    options?: { manual?: boolean },
+  ): Promise<void> {
+    this.requireAcceptingDispatches();
+    const execution = this.runSchedule(schedule, now, options);
+    if (schedule.target.type === "assignment-team-run") {
+      this.inFlightTeamOccurrences.add(execution);
+      void execution.then(
+        () => this.inFlightTeamOccurrences.delete(execution),
+        () => this.inFlightTeamOccurrences.delete(execution),
+      );
+    }
+    return execution;
   }
 
   private async completeScheduleIfDue(scheduleId: string, now: Date): Promise<void> {
@@ -589,6 +641,18 @@ export class ScheduleService {
   }
 
   private async recoverInterruptedSchedule(scheduleId: string, now: Date): Promise<void> {
+    const persisted = await this.store.get(scheduleId);
+    const interruptedTeamOccurrence = persisted?.runs.find((run) => run.status === "running");
+    if (persisted?.target.type === "assignment-team-run" && interruptedTeamOccurrence) {
+      await this.recoverAssignmentTeamRunOccurrence(
+        persisted,
+        persisted.target,
+        interruptedTeamOccurrence,
+      );
+      await this.advanceSchedulePastDue(scheduleId, now);
+      return;
+    }
+
     const interruptedWorkspaces: Array<{
       workspaceId: string;
       agentId: string | null;
@@ -664,6 +728,74 @@ export class ScheduleService {
     }
   }
 
+  private async recoverAssignmentTeamRunOccurrence(
+    schedule: StoredSchedule,
+    target: Extract<ScheduleTarget, { type: "assignment-team-run" }>,
+    occurrence: ScheduleRun,
+  ): Promise<void> {
+    // COMPAT(scheduleRunTrigger): added in v0.8.0; remove the fallback once pre-v0.8
+    // persisted schedules are no longer supported.
+    const manual = occurrence.trigger === "manual";
+    let teamRunId: string;
+    try {
+      teamRunId =
+        occurrence.teamRunId ??
+        (
+          await this.admitAssignmentTeamRun({
+            scheduleId: schedule.id,
+            occurrenceId: occurrence.id,
+            teamId: target.teamId,
+            assignmentId: target.assignmentId,
+            workspaceId: target.workspaceId,
+          })
+        ).id;
+    } catch (error) {
+      await this.finishRun({
+        scheduleId: schedule.id,
+        runId: occurrence.id,
+        status: "failed",
+        agentId: null,
+        output: null,
+        error: error instanceof Error ? error.message : String(error),
+        targetGone: isPermanentScheduleTargetError(error),
+        manual,
+      });
+      return;
+    }
+    await this.finishRun({
+      scheduleId: schedule.id,
+      runId: occurrence.id,
+      status: "succeeded",
+      agentId: null,
+      teamRunId,
+      output: null,
+      error: null,
+      targetGone: false,
+      manual,
+    });
+  }
+
+  private async advanceSchedulePastDue(scheduleId: string, now: Date): Promise<void> {
+    await this.store.update(scheduleId, (schedule) => {
+      if (
+        schedule.status !== "active" ||
+        !schedule.nextRunAt ||
+        new Date(schedule.nextRunAt).getTime() > now.getTime()
+      ) {
+        return schedule;
+      }
+      let nextRunAt = computeNextRunAt(schedule.cadence, new Date(schedule.nextRunAt));
+      while (nextRunAt.getTime() <= now.getTime()) {
+        nextRunAt = computeNextRunAt(schedule.cadence, nextRunAt);
+      }
+      return {
+        ...schedule,
+        nextRunAt: nextRunAt.toISOString(),
+        updatedAt: now.toISOString(),
+      };
+    });
+  }
+
   // Orphaned agent-target schedules (agent deleted while the daemon was down, or
   // archived before completeForAgent existed) can never fire successfully. Complete
   // them on startup so they stop ticking and surface as ended in the UI.
@@ -696,6 +828,7 @@ export class ScheduleService {
     const runId = randomUUID();
     const runningRun: ScheduleRun = {
       id: runId,
+      trigger: manual ? "manual" : "scheduled",
       scheduledFor: manual ? now.toISOString() : (schedule.nextRunAt ?? now.toISOString()),
       startedAt: now.toISOString(),
       endedAt: null,
@@ -707,26 +840,31 @@ export class ScheduleService {
     const scheduleWithRun = await this.appendRunningRun(schedule.id, runningRun);
 
     try {
-      const result = await this.runner(scheduleWithRun, runId);
+      let result: ScheduleExecutionResult;
+      try {
+        result = await this.runner(scheduleWithRun, runId);
+      } catch (error) {
+        await this.finishRun({
+          scheduleId: schedule.id,
+          runId,
+          status: "failed",
+          agentId: null,
+          output: null,
+          error: error instanceof Error ? error.message : String(error),
+          targetGone: isPermanentScheduleTargetError(error),
+          manual,
+        });
+        return;
+      }
       await this.finishRun({
         scheduleId: schedule.id,
         runId,
         status: "succeeded",
         agentId: result.agentId,
         output: result.output,
+        ...(result.teamRunId !== undefined ? { teamRunId: result.teamRunId } : {}),
         error: null,
         targetGone: false,
-        manual,
-      });
-    } catch (error) {
-      await this.finishRun({
-        scheduleId: schedule.id,
-        runId,
-        status: "failed",
-        agentId: null,
-        output: null,
-        error: error instanceof Error ? error.message : String(error),
-        targetGone: error instanceof ScheduleTargetGoneError,
         manual,
       });
     } finally {
@@ -752,6 +890,7 @@ export class ScheduleService {
     status: "succeeded" | "failed";
     agentId: string | null;
     output: string | null;
+    teamRunId?: string | null;
     error: string | null;
     targetGone: boolean;
     manual: boolean;
@@ -765,6 +904,7 @@ export class ScheduleService {
               status: params.status,
               endedAt: now.toISOString(),
               agentId: params.agentId ?? run.agentId,
+              ...(params.teamRunId !== undefined ? { teamRunId: params.teamRunId } : {}),
               output: params.output,
               error: params.error,
             }
@@ -784,10 +924,10 @@ export class ScheduleService {
       } else if (updated.status === "completed") {
         // Completed concurrently (e.g. the target agent was archived mid-run);
         // record the run outcome but leave the schedule terminal — don't advance.
-      } else if (params.manual) {
-        // Manual one-shot runs do not advance the cadence or recompute completion.
       } else if (shouldCompleteSchedule(updated, now)) {
         updated = completeSchedule(updated, now);
+      } else if (params.manual) {
+        // Manual one-shot runs below maxRuns do not advance the cadence.
       } else if (updated.status === "paused") {
         updated = {
           ...updated,
@@ -836,45 +976,18 @@ export class ScheduleService {
     schedule: StoredSchedule,
     runId: string,
   ): Promise<ScheduleExecutionResult> {
+    if (schedule.target.type === "assignment-team-run") {
+      const teamRun = await this.admitAssignmentTeamRun({
+        scheduleId: schedule.id,
+        occurrenceId: runId,
+        teamId: schedule.target.teamId,
+        assignmentId: schedule.target.assignmentId,
+        workspaceId: schedule.target.workspaceId,
+      });
+      return { agentId: null, teamRunId: teamRun.id, output: null };
+    }
     if (schedule.target.type === "agent") {
-      const wrappedPrompt = formatSystemNotificationPrompt(buildScheduleFireBody(schedule, runId));
-      const record = await this.agentStorage.get(schedule.target.agentId);
-      if (!record) {
-        throw new ScheduleTargetGoneError(`Agent ${schedule.target.agentId} no longer exists`);
-      }
-      if (record.archivedAt) {
-        throw new ScheduleTargetGoneError(`Agent ${schedule.target.agentId} is archived`);
-      }
-
-      const agent = await ensureAgentLoaded(schedule.target.agentId, {
-        agentManager: this.agentManager,
-        agentStorage: this.agentStorage,
-        logger: this.logger,
-      });
-      if (this.agentManager.hasInFlightRun(agent.id)) {
-        throw new Error(`Agent ${agent.id} already has an active run`);
-      }
-      await startAgentRun(this.agentManager, agent.id, wrappedPrompt, this.logger, {
-        replaceRunning: true,
-        activeTurnBehavior: "steer",
-      });
-      const waitResult = await this.agentManager.waitForAgentEvent(agent.id, {
-        waitForActive: true,
-      });
-      if (waitResult.permission) {
-        throw new Error(`Scheduled agent ${agent.id} is waiting for permission`);
-      }
-      if (waitResult.status === "error") {
-        throw new Error(waitResult.lastMessage ?? `Scheduled agent ${agent.id} failed`);
-      }
-      return {
-        agentId: agent.id,
-        output: buildRunOutput({
-          output: null,
-          timelineText: "",
-          finalText: waitResult.lastMessage ?? "",
-        }),
-      };
+      return this.executeExistingAgentSchedule(schedule, schedule.target, runId);
     }
 
     const config = schedule.target.type === "new-agent" ? schedule.target.config : null;
@@ -966,6 +1079,51 @@ export class ScheduleService {
         }
       }
     }
+  }
+
+  private async executeExistingAgentSchedule(
+    schedule: StoredSchedule,
+    target: Extract<ScheduleTarget, { type: "agent" }>,
+    runId: string,
+  ): Promise<ScheduleExecutionResult> {
+    const wrappedPrompt = formatSystemNotificationPrompt(buildScheduleFireBody(schedule, runId));
+    const record = await this.agentStorage.get(target.agentId);
+    if (!record) {
+      throw new ScheduleTargetGoneError(`Agent ${target.agentId} no longer exists`);
+    }
+    if (record.archivedAt) {
+      throw new ScheduleTargetGoneError(`Agent ${target.agentId} is archived`);
+    }
+
+    const agent = await ensureAgentLoaded(target.agentId, {
+      agentManager: this.agentManager,
+      agentStorage: this.agentStorage,
+      logger: this.logger,
+    });
+    if (this.agentManager.hasInFlightRun(agent.id)) {
+      throw new Error(`Agent ${agent.id} already has an active run`);
+    }
+    await startAgentRun(this.agentManager, agent.id, wrappedPrompt, this.logger, {
+      replaceRunning: true,
+      activeTurnBehavior: "steer",
+    });
+    const waitResult = await this.agentManager.waitForAgentEvent(agent.id, {
+      waitForActive: true,
+    });
+    if (waitResult.permission) {
+      throw new Error(`Scheduled agent ${agent.id} is waiting for permission`);
+    }
+    if (waitResult.status === "error") {
+      throw new Error(waitResult.lastMessage ?? `Scheduled agent ${agent.id} failed`);
+    }
+    return {
+      agentId: agent.id,
+      output: buildRunOutput({
+        output: null,
+        timelineText: "",
+        finalText: waitResult.lastMessage ?? "",
+      }),
+    };
   }
 
   private async createScheduleRunWorkspace(

@@ -1345,6 +1345,7 @@ export async function createPaseoDaemon(
     createDirectoryWorkspace: createScheduleLocalWorkspaceExternal,
     createPaseoWorktreeWorkspace: createSchedulePaseoWorktreeExternal,
     archiveWorkspace: archiveScheduleWorkspaceExternal,
+    admitAssignmentTeamRun: (input) => teamRunService.admitScheduledAssignmentRun(input),
   });
   await scheduleService.start();
   agentManager.setAgentArchivedCallback(async (agentId) => {
@@ -1784,6 +1785,9 @@ export async function createPaseoDaemon(
     await hubRelationships.stop();
     workspaceReconciliation.dispose();
     scriptHealthMonitor.stop();
+    // Stop schedule dispatch and drain Team admissions before TeamRunService
+    // begins rejecting new work.
+    await scheduleService.stop();
     await teamRunService.shutdown();
     // Freeze both ingress and registration before taking the agent closure snapshot.
     wsServer?.prepareForShutdown();
@@ -1795,7 +1799,6 @@ export async function createPaseoDaemon(
     await agentProviderRuntime.shutdown();
     terminalManager.killAll();
     await speechService.stop();
-    await scheduleService.stop().catch(() => undefined);
     await relayRuntime?.stop().catch(() => undefined);
     if (wsServer) {
       await wsServer.close();

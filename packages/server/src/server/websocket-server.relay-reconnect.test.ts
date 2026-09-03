@@ -1047,6 +1047,7 @@ describe("relay external socket reconnect behavior", () => {
       clientId: "cid-assignments-unbound",
     });
     expect(unboundInfo.features?.assignments).toBeUndefined();
+    expect(unboundInfo.features?.assignmentTeamSchedules).toBeUndefined();
     expect(sessionMock.instances.at(-1)?.args.assignmentRepository).toBeUndefined();
     await unboundServer.close();
 
@@ -1060,6 +1061,7 @@ describe("relay external socket reconnect behavior", () => {
       clientId: "cid-assignments-bound",
     });
     expect(boundInfo.features?.assignments).toBe(true);
+    expect(boundInfo.features?.assignmentTeamSchedules).toBe(true);
     expect(sessionMock.instances.at(-1)?.args.assignmentRepository).toBe(assignmentRepository);
     await boundServer.close();
   });

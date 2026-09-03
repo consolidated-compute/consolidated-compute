@@ -947,7 +947,7 @@ export class Session {
       },
       scheduleService,
       logger: this.sessionLogger,
-      assignmentTeamSchedulesAvailable: false,
+      assignmentTeamSchedulesAvailable: this.assignmentSession !== null,
     });
     this.providerCatalogSession = new ProviderCatalogSession({
       host: {
