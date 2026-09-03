@@ -895,7 +895,13 @@ export class ProviderSnapshotManager {
     const existingLoad = this.getProviderLoad(options.snapshotCwd, options.provider);
     if (existingLoad) {
       if (options.force && !existingLoad.force) {
-        const startForcedLoad = () => this.loadProvider(options);
+        const startForcedLoad = () => {
+          this.resetSnapshotToLoading(options.snapshotCwd, [options.provider], {
+            preserveExisting: false,
+          });
+          this.emitChange(options.snapshotCwd);
+          return this.loadProvider(options);
+        };
         return existingLoad.promise.then(startForcedLoad, startForcedLoad);
       }
       return existingLoad.promise;

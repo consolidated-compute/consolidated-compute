@@ -549,13 +549,29 @@ describe("ProviderSnapshotManager public surface", () => {
         modes: [],
       });
       await vi.waitFor(() => expect(fetchCatalog).toHaveBeenCalledTimes(2));
+      expect(manager.getSnapshot(cwd).find((entry) => entry.provider === "codex")?.status).toBe(
+        "loading",
+      );
+
+      let providerReadSettled = false;
+      const providerRead = manager
+        .getProvider({ cwd, provider: "codex", wait: true })
+        .then((entry) => {
+          providerReadSettled = true;
+          return entry;
+        });
+      await Promise.resolve();
+      expect(providerReadSettled).toBe(false);
+
       resolveRefresh({
         models: [{ provider: "codex", id: "fresh", label: "Fresh" }],
         modes: [],
       });
-      await Promise.all([warmUp, refresh]);
+      const [, , entry] = await Promise.all([warmUp, refresh, providerRead]);
 
       expect(fetchCatalog.mock.calls.map(([options]) => options.force)).toEqual([false, true]);
+      expect(entry.status).toBe("ready");
+      expect(entry.models).toEqual([{ provider: "codex", id: "fresh", label: "Fresh" }]);
       await expect(manager.listModels({ cwd, provider: "codex", wait: false })).resolves.toEqual([
         { provider: "codex", id: "fresh", label: "Fresh" },
       ]);
