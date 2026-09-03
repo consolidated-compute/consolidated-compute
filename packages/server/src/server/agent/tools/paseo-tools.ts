@@ -49,6 +49,7 @@ import {
   ScheduleSummarySchema,
   StoredScheduleSchema,
   type ScheduleCadence,
+  type StoredSchedule,
   type UpdateScheduleInput,
 } from "@getpaseo/protocol/schedule/types";
 import type { ProviderSnapshotManager } from "../provider-snapshot-manager.js";
@@ -818,7 +819,10 @@ export async function createPaseoToolCatalog(
     };
   };
 
-  async function requireScheduleTarget(id: string, type: "agent" | "new-agent") {
+  async function requireScheduleTarget(
+    id: string,
+    type: "agent" | "new-agent" | "assignment-team-run",
+  ) {
     if (!scheduleService) {
       throw new Error("Schedule service is not configured");
     }
@@ -829,6 +833,28 @@ export async function createPaseoToolCatalog(
       );
     }
     return schedule;
+  }
+
+  async function requireManagedSchedule(id: string) {
+    if (!scheduleService) throw new Error("Schedule service is not configured");
+    const schedule = await scheduleService.inspect(id);
+    switch (schedule.target.type) {
+      case "agent":
+        throw new Error(`Schedule not found: ${id}`);
+      case "new-agent":
+      case "assignment-team-run":
+        return schedule;
+    }
+  }
+
+  function isManagedSchedule(schedule: StoredSchedule): boolean {
+    switch (schedule.target.type) {
+      case "agent":
+        return false;
+      case "new-agent":
+      case "assignment-team-run":
+        return true;
+    }
   }
 
   async function requireCallerHeartbeat(id: string) {
@@ -2776,7 +2802,7 @@ export async function createPaseoToolCatalog(
       }
 
       const schedules = (await scheduleService.list())
-        .filter((schedule) => schedule.target.type === "new-agent")
+        .filter(isManagedSchedule)
         .map((schedule) => toScheduleSummary(schedule));
       return {
         content: [],
@@ -2800,7 +2826,7 @@ export async function createPaseoToolCatalog(
         throw new Error("Schedule service is not configured");
       }
 
-      const schedule = await requireScheduleTarget(id, "new-agent");
+      const schedule = await requireManagedSchedule(id);
       return {
         content: [],
         structuredContent: ensureValidJson(schedule),
@@ -2825,7 +2851,7 @@ export async function createPaseoToolCatalog(
         throw new Error("Schedule service is not configured");
       }
 
-      await requireScheduleTarget(id, "new-agent");
+      await requireManagedSchedule(id);
       await scheduleService.pause(id);
       return {
         content: [],
@@ -2851,7 +2877,7 @@ export async function createPaseoToolCatalog(
         throw new Error("Schedule service is not configured");
       }
 
-      await requireScheduleTarget(id, "new-agent");
+      await requireManagedSchedule(id);
       await scheduleService.resume(id);
       return {
         content: [],
@@ -2877,7 +2903,7 @@ export async function createPaseoToolCatalog(
         throw new Error("Schedule service is not configured");
       }
 
-      await requireScheduleTarget(id, "new-agent");
+      await requireManagedSchedule(id);
       await scheduleService.delete(id);
       return {
         content: [],
@@ -2948,7 +2974,7 @@ export async function createPaseoToolCatalog(
         throw new Error("Schedule service is not configured");
       }
 
-      await requireScheduleTarget(input.id, "new-agent");
+      await requireManagedSchedule(input.id);
       const schedule = await scheduleService.update(buildScheduleUpdateInput(input));
 
       return {
@@ -2975,7 +3001,7 @@ export async function createPaseoToolCatalog(
         throw new Error("Schedule service is not configured");
       }
 
-      await requireScheduleTarget(id, "new-agent");
+      await requireManagedSchedule(id);
       const runs = await scheduleService.logs(id);
       return {
         content: [],
@@ -2996,7 +3022,7 @@ export async function createPaseoToolCatalog(
       if (!scheduleService) {
         throw new Error("Schedule service is not configured");
       }
-      await requireScheduleTarget(id, "new-agent");
+      await requireManagedSchedule(id);
       const schedule = await scheduleService.runOnce(id);
       return {
         content: [],

@@ -67,10 +67,10 @@ describe("schedule title helpers", () => {
     expect(isNewAgentSchedule(createSchedule({ targetType: "agent" }))).toBe(false);
   });
 
-  it("keeps Assignment Team Run schedules out of existing editors", () => {
+  it("allows Assignment Team Run schedules in the schedule editor", () => {
     expect(isScheduleEditable(createSchedule({ targetType: "agent" }))).toBe(true);
     expect(isScheduleEditable(createSchedule({ targetType: "new-agent" }))).toBe(true);
-    expect(isScheduleEditable(createSchedule({ targetType: "assignment-team-run" }))).toBe(false);
+    expect(isScheduleEditable(createSchedule({ targetType: "assignment-team-run" }))).toBe(true);
   });
 
   it("labels engine records by product meaning", () => {

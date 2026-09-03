@@ -14,6 +14,8 @@ import { Brain, Folder, GitBranch } from "lucide-react-native";
 import { StyleSheet } from "react-native-unistyles";
 import type { AgentProvider } from "@getpaseo/protocol/agent-types";
 import type { ScheduleCadence, ScheduleSummary } from "@getpaseo/protocol/schedule/types";
+import type { ScheduleRun } from "@getpaseo/protocol/schedule/types";
+import { useRouter, type Href } from "expo-router";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
 import { ComboboxItem } from "@/components/ui/combobox";
@@ -24,6 +26,7 @@ import { HostStatusDotSlot } from "@/components/hosts/host-picker";
 import { createControlGeometry, type FieldControlSize } from "@/components/ui/control-geometry";
 import { Field, FormTextInput } from "@/components/ui/form-field";
 import { Switch } from "@/components/ui/switch";
+import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
 import { getProviderIcon } from "@/components/provider-icons";
 import { CadenceEditor } from "@/components/schedules/cadence-editor";
 import {
@@ -47,6 +50,7 @@ import { useSessionStore } from "@/stores/session-store";
 import { buildScheduleProjectTargets } from "@/schedules/schedule-project-targets";
 import { useScheduleFormModel } from "@/schedules/use-schedule-form-model";
 import { useScheduleFormProviderSnapshot } from "@/schedules/use-schedule-form-provider-snapshot";
+import { ScheduleAssignmentTeamAdapters } from "@/schedules/schedule-assignment-team-adapters";
 import type {
   ScheduleFormDisplay,
   ScheduleFormHost,
@@ -57,6 +61,9 @@ import type {
 import { validateCron } from "@/utils/schedule-format";
 import { toErrorMessage } from "@/utils/error-messages";
 import { getDeviceTimeZone } from "@/utils/device-timezone";
+import { useScheduleInspection } from "@/schedules/use-schedule-inspection";
+import { buildAssignmentRoute, buildTeamRunRoute } from "@/utils/host-routes";
+import { formatTimeAgo } from "@/utils/time";
 
 export interface ScheduleFormSheetProps {
   serverId?: string;
@@ -121,6 +128,8 @@ function selectScheduleHosts(
       label: host.label,
       supportsWorkspaceMultiplicity:
         state.sessions[host.serverId]?.serverInfo?.features?.workspaceMultiplicity === true,
+      supportsAssignmentTeamSchedules:
+        state.sessions[host.serverId]?.serverInfo?.features?.assignmentTeamSchedules === true,
     }));
 }
 
@@ -240,6 +249,7 @@ function OpenScheduleFormSheet({
   schedule,
 }: ScheduleFormSheetProps & { onDismiss: () => void }): ReactElement {
   const controlSize: FieldControlSize = useIsCompactFormFactor() ? "md" : "sm";
+  const router = useRouter();
   const { projects } = useProjects();
   const hostProfiles = useHosts();
   const hosts = useStoreWithEqualityFn(
@@ -270,6 +280,9 @@ function OpenScheduleFormSheet({
   const mutationServerId = state.selectedServerId ?? serverId ?? "";
   const { createSchedule, updateSchedule, isCreating, isUpdating } = useScheduleMutations({
     serverId: mutationServerId,
+  });
+  const inspection = useScheduleInspection(serverId ?? "", schedule?.id ?? "", {
+    enabled: mode === "edit" && schedule?.target.type === "assignment-team-run",
   });
 
   const isSubmitting = isCreating || isUpdating;
@@ -380,21 +393,62 @@ function OpenScheduleFormSheet({
     return true;
   }, [createSchedule, mode, persistPreferences, schedule, state, updateSchedule]);
 
+  const submitAssignmentTeamRun = useCallback(async (): Promise<boolean> => {
+    const assignmentId = state.selectedAssignmentId;
+    const teamId = state.selectedTeamId;
+    const workspaceId = state.selectedWorkspaceId;
+    if (!assignmentId || !teamId || !workspaceId) return false;
+    const maxRuns = parseMaxRuns(state.maxRuns);
+    if (mode === "edit" && schedule) {
+      await updateSchedule({
+        id: schedule.id,
+        name: state.name.trim() || null,
+        ...(state.submitCadence ? { cadence: state.submitCadence } : {}),
+        maxRuns,
+      });
+      return true;
+    }
+    await createSchedule({
+      prompt: `Run Assignment ${assignmentId}`,
+      name: state.name.trim() || undefined,
+      cadence: requireCronCadence(state.submitCadence),
+      target: {
+        type: "assignment-team-run",
+        assignmentId,
+        teamId,
+        workspaceId,
+      },
+      ...(maxRuns != null ? { maxRuns } : {}),
+    });
+    return true;
+  }, [createSchedule, mode, schedule, state, updateSchedule]);
+
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) {
       return;
     }
     model.setSubmitError(null);
     try {
-      const submitted =
-        state.targetKind === "agent" ? await submitAgentTarget() : await submitNewAgent();
+      let submitted: boolean;
+      if (state.targetKind === "agent") submitted = await submitAgentTarget();
+      else if (state.targetKind === "assignment-team-run") {
+        submitted = await submitAssignmentTeamRun();
+      } else submitted = await submitNewAgent();
       if (submitted) {
         onClose();
       }
     } catch (error) {
       model.setSubmitError(toErrorMessage(error));
     }
-  }, [canSubmit, model, onClose, state.targetKind, submitAgentTarget, submitNewAgent]);
+  }, [
+    canSubmit,
+    model,
+    onClose,
+    state.targetKind,
+    submitAgentTarget,
+    submitAssignmentTeamRun,
+    submitNewAgent,
+  ]);
 
   const handleSubmitPress = useCallback(() => {
     void handleSubmit();
@@ -407,6 +461,23 @@ function OpenScheduleFormSheet({
     return { title: schedule?.target.type === "agent" ? "Edit heartbeat" : "Edit schedule" };
   }, [mode, schedule?.target.type]);
 
+  const openAssignment = useCallback(() => {
+    if (!serverId || state.targetKind !== "assignment-team-run" || !state.selectedAssignmentId) {
+      return;
+    }
+    onClose();
+    router.push(buildAssignmentRoute(serverId, state.selectedAssignmentId) as Href);
+  }, [onClose, router, serverId, state.selectedAssignmentId, state.targetKind]);
+
+  const openTeamRun = useCallback(
+    (runId: string) => {
+      if (!serverId || state.targetKind !== "assignment-team-run" || !state.selectedTeamId) return;
+      onClose();
+      router.push(buildTeamRunRoute(serverId, state.selectedTeamId, runId) as Href);
+    },
+    [onClose, router, serverId, state.selectedTeamId, state.targetKind],
+  );
+
   const footer = useMemo(
     () => (
       <View style={styles.footer}>
@@ -415,6 +486,7 @@ function OpenScheduleFormSheet({
           variant="secondary"
           onPress={onClose}
           disabled={isSubmitting}
+          testID="schedule-form-cancel"
         >
           Cancel
         </Button>
@@ -450,6 +522,9 @@ function OpenScheduleFormSheet({
         controlSize={controlSize}
         cadenceError={cadenceError}
         mutationServerId={mutationServerId}
+        inspection={inspection}
+        onOpenAssignment={openAssignment}
+        onOpenTeamRun={openTeamRun}
       />
     </AdaptiveModalSheet>
   );
@@ -463,6 +538,9 @@ interface ScheduleFormFieldsProps {
   controlSize: FieldControlSize;
   cadenceError: string | null;
   mutationServerId: string;
+  inspection: ReturnType<typeof useScheduleInspection>;
+  onOpenAssignment: () => void;
+  onOpenTeamRun: (runId: string) => void;
 }
 
 function ScheduleFormFields({
@@ -473,6 +551,9 @@ function ScheduleFormFields({
   controlSize,
   cadenceError,
   mutationServerId,
+  inspection,
+  onOpenAssignment,
+  onOpenTeamRun,
 }: ScheduleFormFieldsProps): ReactElement {
   if (state.targetKind === "agent") {
     return (
@@ -491,6 +572,9 @@ function ScheduleFormFields({
 
   return (
     <>
+      {state.mode === "create" ? (
+        <ScheduleTargetKindField model={model} state={state} size={controlSize} />
+      ) : null}
       <Field label="Name">
         <FormTextInput
           size={controlSize}
@@ -504,29 +588,44 @@ function ScheduleFormFields({
         />
       </Field>
 
-      <Field label="Prompt">
-        <FormTextInput
-          size={controlSize}
-          testID="schedule-prompt-input"
-          accessibilityLabel="Prompt"
-          initialValue={state.prompt}
-          onChangeText={model.setPrompt}
-          placeholder="What should the agent do each run?"
-          style={styles.multilineInput}
-          multiline
-          numberOfLines={4}
-          textAlignVertical="top"
-        />
-      </Field>
+      {state.targetKind === "new-agent" ? (
+        <>
+          <Field label="Prompt">
+            <FormTextInput
+              size={controlSize}
+              testID="schedule-prompt-input"
+              accessibilityLabel="Prompt"
+              initialValue={state.prompt}
+              onChangeText={model.setPrompt}
+              placeholder="What should the agent do each run?"
+              style={styles.multilineInput}
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+            />
+          </Field>
 
-      <ScheduleTargetFields
-        model={model}
-        state={state}
-        providerSnapshot={providerSnapshot}
-        agentTargetLabel={null}
-        controlSize={controlSize}
-        mutationServerId={mutationServerId}
-      />
+          <ScheduleTargetFields
+            model={model}
+            state={state}
+            providerSnapshot={providerSnapshot}
+            agentTargetLabel={null}
+            controlSize={controlSize}
+            mutationServerId={mutationServerId}
+          />
+        </>
+      ) : (
+        <>
+          <ScheduleAssignmentTeamTargetFields model={model} state={state} size={controlSize} />
+          {state.mode === "edit" ? (
+            <ScheduleTeamOccurrencePanel
+              inspection={inspection}
+              onOpenAssignment={onOpenAssignment}
+              onOpenTeamRun={onOpenTeamRun}
+            />
+          ) : null}
+        </>
+      )}
 
       <CadenceEditor
         value={state.cadence}
@@ -549,6 +648,242 @@ function ScheduleFormFields({
 
       {state.submitError ? <Text style={styles.submitError}>{state.submitError}</Text> : null}
     </>
+  );
+}
+
+function ScheduleTargetKindField({
+  model,
+  state,
+  size,
+}: {
+  model: ScheduleFormModel;
+  state: ScheduleFormState;
+  size: FieldControlSize;
+}): ReactElement {
+  const supportsTeamSchedules = state.hosts.some(
+    (host) => host.supportsAssignmentTeamSchedules === true,
+  );
+  const options = useMemo<SegmentedControlOption<"new-agent" | "assignment-team-run">[]>(() => {
+    const values: SegmentedControlOption<"new-agent" | "assignment-team-run">[] = [
+      { value: "new-agent", label: "Agent", testID: "schedule-target-new-agent" },
+    ];
+    if (supportsTeamSchedules) {
+      values.push({
+        value: "assignment-team-run",
+        label: "Team Run",
+        testID: "schedule-target-assignment-team-run",
+      });
+    }
+    return values;
+  }, [supportsTeamSchedules]);
+  return (
+    <Field label="Target">
+      <SegmentedControl
+        value={state.targetKind === "assignment-team-run" ? state.targetKind : "new-agent"}
+        options={options}
+        onValueChange={model.setTargetKind}
+        size={size}
+        testID="schedule-target-kind"
+      />
+    </Field>
+  );
+}
+
+function ScheduleAssignmentTeamTargetFields({
+  model,
+  state,
+  size,
+}: {
+  model: ScheduleFormModel;
+  state: ScheduleFormState;
+  size: FieldControlSize;
+}): ReactElement {
+  const hostOptions = useMemo<SelectFieldOption<string>[]>(
+    () =>
+      state.hosts
+        .filter((host) => state.mode === "edit" || host.supportsAssignmentTeamSchedules === true)
+        .map((host) => ({
+          id: host.serverId,
+          value: host.serverId,
+          label: host.label,
+          testID: buildScheduleHostOptionTestId(host.serverId),
+        })),
+    [state.hosts, state.mode],
+  );
+  const selectedHost = state.hosts.find((host) => host.serverId === state.selectedServerId);
+  const selectedHostDisplay = useMemo(
+    () => (selectedHost ? { label: selectedHost.label } : null),
+    [selectedHost],
+  );
+  const assignmentOptions = useMemo<SelectFieldOption<string>[]>(
+    () =>
+      state.assignmentOptions.map((option) => ({
+        id: option.id,
+        value: option.id,
+        label: option.display.label,
+        description: option.display.description,
+        testID: `schedule-assignment-option-${option.id}`,
+      })),
+    [state.assignmentOptions],
+  );
+  const teamOptions = useMemo<SelectFieldOption<string>[]>(
+    () =>
+      state.teamOptions.map((option) => ({
+        id: option.id,
+        value: option.id,
+        label: option.display.label,
+        description: option.display.description,
+        testID: `schedule-team-option-${option.id}`,
+      })),
+    [state.teamOptions],
+  );
+  const workspaceOptions = useMemo<SelectFieldOption<string>[]>(
+    () =>
+      state.workspaceOptions.map((option) => ({
+        id: option.id,
+        value: option.id,
+        label: option.display.label,
+        description: option.display.description,
+        testID: `schedule-workspace-option-${option.id}`,
+      })),
+    [state.workspaceOptions],
+  );
+  const isLoading = state.assignmentTeamCatalogStatus === "loading";
+  const unavailableHint =
+    state.assignmentTeamCatalogStatus === "unsupported"
+      ? "Update this host to schedule Assignment Team Runs."
+      : (state.assignmentTeamCatalogError ?? undefined);
+
+  return (
+    <>
+      {state.mode === "edit" || hostOptions.length > 1 ? (
+        <SelectField
+          label="Host"
+          value={state.selectedServerId}
+          selectedDisplay={selectedHostDisplay}
+          options={hostOptions}
+          onChange={model.setHost}
+          placeholder="Select host"
+          emptyText="No compatible hosts found"
+          disabled={state.mode === "edit"}
+          searchable={false}
+          title="Host"
+          size={size}
+          triggerTestID="schedule-host-trigger"
+        />
+      ) : null}
+      <SelectField
+        label="Assignment"
+        value={state.selectedAssignmentId}
+        selectedDisplay={state.selectedAssignmentDisplay}
+        options={assignmentOptions}
+        onChange={model.setAssignment}
+        placeholder={isLoading ? "Loading Assignments…" : "Select Assignment"}
+        emptyText="No open Assignments found"
+        disabled={state.mode === "edit" || isLoading || Boolean(unavailableHint)}
+        hint={unavailableHint}
+        searchable
+        title="Assignment"
+        size={size}
+        triggerTestID="schedule-assignment-trigger"
+      />
+      <SelectField
+        label="Team"
+        value={state.selectedTeamId}
+        selectedDisplay={state.selectedTeamDisplay}
+        options={teamOptions}
+        onChange={model.setTeam}
+        placeholder={isLoading ? "Loading Teams…" : "Select Team"}
+        emptyText="No Teams found"
+        disabled={state.mode === "edit" || isLoading || Boolean(unavailableHint)}
+        searchable
+        title="Team"
+        size={size}
+        triggerTestID="schedule-team-trigger"
+      />
+      <SelectField
+        label="Workspace"
+        value={state.selectedWorkspaceId}
+        selectedDisplay={state.selectedWorkspaceDisplay}
+        options={workspaceOptions}
+        onChange={model.setWorkspace}
+        placeholder={isLoading ? "Loading Workspaces…" : "Select Workspace"}
+        emptyText="No active Workspaces found"
+        disabled={state.mode === "edit" || isLoading || Boolean(unavailableHint)}
+        searchable
+        title="Workspace"
+        size={size}
+        triggerTestID="schedule-workspace-trigger"
+      />
+      <ScheduleAssignmentTeamAdapters model={model} state={state} />
+      {state.teamRunReadinessStatus === "blocked" && state.teamRunReadinessMessage ? (
+        <Text style={styles.submitError} testID="schedule-team-run-readiness-error">
+          {state.teamRunReadinessMessage}
+        </Text>
+      ) : null}
+    </>
+  );
+}
+
+function ScheduleTeamOccurrencePanel({
+  inspection,
+  onOpenAssignment,
+  onOpenTeamRun,
+}: {
+  inspection: ReturnType<typeof useScheduleInspection>;
+  onOpenAssignment: () => void;
+  onOpenTeamRun: (runId: string) => void;
+}): ReactElement {
+  const runs = inspection.data?.runs ?? [];
+  const latest: ScheduleRun | null = runs.length > 0 ? runs[runs.length - 1]! : null;
+  const openLatest = useCallback(() => {
+    if (latest?.teamRunId) onOpenTeamRun(latest.teamRunId);
+    else onOpenAssignment();
+  }, [latest?.teamRunId, onOpenAssignment, onOpenTeamRun]);
+  const retryInspection = useCallback(() => {
+    void inspection.refetch();
+  }, [inspection]);
+
+  if (inspection.isLoading) {
+    return <Text style={styles.occurrenceMeta}>Loading schedule history…</Text>;
+  }
+  if (inspection.isError) {
+    return (
+      <View style={styles.occurrenceCard} testID="schedule-inspection-error">
+        <Text style={styles.submitError}>{toErrorMessage(inspection.error)}</Text>
+        <Button variant="outline" size="sm" onPress={retryInspection}>
+          Retry
+        </Button>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.occurrenceCard} testID="schedule-latest-occurrence">
+      <Text style={styles.occurrenceTitle}>Latest occurrence</Text>
+      {latest ? (
+        <>
+          <Text style={styles.occurrenceMeta}>
+            {latest.status} · Started {formatTimeAgo(new Date(latest.startedAt))}
+          </Text>
+          {latest.error ? (
+            <Text style={styles.submitError} testID="schedule-latest-occurrence-error">
+              {latest.error}
+            </Text>
+          ) : null}
+          <Button variant="outline" size="sm" onPress={openLatest}>
+            {latest.teamRunId ? "Open Team Run" : "Open Assignment"}
+          </Button>
+        </>
+      ) : (
+        <>
+          <Text style={styles.occurrenceMeta}>This schedule has not run yet.</Text>
+          <Button variant="outline" size="sm" onPress={onOpenAssignment}>
+            Open Assignment
+          </Button>
+        </>
+      )}
+    </View>
   );
 }
 
@@ -1075,6 +1410,25 @@ const styles = StyleSheet.create((theme) => {
     submitError: {
       color: theme.colors.palette.red[300],
       fontSize: theme.fontSize.sm,
+    },
+    occurrenceCard: {
+      alignItems: "flex-start",
+      gap: theme.spacing[2],
+      padding: theme.spacing[3],
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+      borderRadius: theme.borderRadius.lg,
+      backgroundColor: theme.colors.surface1,
+    },
+    occurrenceTitle: {
+      color: theme.colors.foreground,
+      fontSize: theme.fontSize.base,
+      fontWeight: theme.fontWeight.medium,
+    },
+    occurrenceMeta: {
+      color: theme.colors.foregroundMuted,
+      fontSize: theme.fontSize.sm,
+      textTransform: "capitalize",
     },
     providerIcon: {
       color: theme.colors.foregroundMuted,

@@ -12,9 +12,21 @@ import { openScheduleForm, type ScheduleFormSnapshot } from "./schedule-form-mod
 type TestSchedule = ScheduleSummary & { serverId: string; serverName: string };
 
 const HOSTS = [
-  { serverId: "host-a", label: "Host A", supportsWorkspaceMultiplicity: true },
+  {
+    serverId: "host-a",
+    label: "Host A",
+    supportsWorkspaceMultiplicity: true,
+    supportsAssignmentTeamSchedules: true,
+  },
   { serverId: "host-b", label: "Host B", supportsWorkspaceMultiplicity: true },
 ] as const;
+
+const TEAM_CATALOG = {
+  status: "ready" as const,
+  assignments: [{ id: "assignment-1", revision: 2, display: { label: "Fix CI" } }],
+  teams: [{ id: "team-1", revision: 3, display: { label: "Delivery" } }],
+  workspaces: [{ id: "workspace-1", cwd: "/repo/a", display: { label: "main" } }],
+};
 
 const MOCK_MODES: AgentMode[] = [{ id: "load-test", label: "Load test" }];
 
@@ -186,6 +198,108 @@ function applyPreferences(form: ReturnType<typeof open>, preferences: FormPrefer
 }
 
 describe("schedule form model", () => {
+  it("keeps Assignment Team Run admission pending until a matching readiness result arrives", () => {
+    const form = open({
+      mode: "create",
+      defaults: { serverId: "host-a", projectTargets: PROJECT_TARGETS, preferences: {} },
+    });
+
+    form.setTargetKind("assignment-team-run");
+    expect(form.getState()).toMatchObject({
+      targetKind: "assignment-team-run",
+      assignmentTeamCatalogStatus: "loading",
+      canSubmit: false,
+    });
+
+    form.applyAssignmentTeamCatalog("host-a", TEAM_CATALOG);
+    const request = form.getState().teamRunReadinessRequest;
+    expect(request).toMatchObject({
+      serverId: "host-a",
+      assignmentId: "assignment-1",
+      teamId: "team-1",
+      workspaceId: "workspace-1",
+    });
+    expect(form.getState()).toMatchObject({
+      selectedAssignmentDisplay: { label: "Fix CI" },
+      selectedTeamDisplay: { label: "Delivery" },
+      selectedWorkspaceDisplay: { label: "main" },
+      teamRunReadinessStatus: "pending",
+      canSubmit: false,
+    });
+
+    form.applyTeamRunReadiness("stale-request", "ready");
+    expect(form.getState().canSubmit).toBe(false);
+    form.applyTeamRunReadiness(request!.requestKey, "ready");
+    expect(form.getState().canSubmit).toBe(true);
+  });
+
+  it("does not treat an empty or stale dependent catalog as ready", () => {
+    const form = open({
+      mode: "create",
+      defaults: { serverId: "host-a", projectTargets: PROJECT_TARGETS, preferences: {} },
+    });
+    form.setTargetKind("assignment-team-run");
+    form.applyAssignmentTeamCatalog("host-b", TEAM_CATALOG);
+    expect(form.getState().assignmentTeamCatalogStatus).toBe("loading");
+
+    form.applyAssignmentTeamCatalog("host-a", {
+      status: "ready",
+      assignments: [],
+      teams: TEAM_CATALOG.teams,
+      workspaces: TEAM_CATALOG.workspaces,
+    });
+    expect(form.getState().teamRunReadinessRequest).toBeNull();
+    expect(form.getState().canSubmit).toBe(false);
+  });
+
+  it("selects the only compatible host and clears the prior agent scope", () => {
+    const form = open({
+      mode: "create",
+      defaults: { serverId: "host-b", projectTargets: PROJECT_TARGETS, preferences: {} },
+    });
+    form.setProject(buildProjectOptionId("host-b", "project-b"), { label: "Project B" });
+    form.applyProviderSnapshot("host-b", providerSnapshot(HOST_B_MODELS));
+    form.setModel("mock", "model-b");
+
+    form.setTargetKind("assignment-team-run");
+
+    expect(form.getState()).toMatchObject({
+      targetKind: "assignment-team-run",
+      selectedServerId: "host-a",
+      workingDir: "",
+      projectDisplay: null,
+      selectedProjectOptionId: "",
+      selectedProvider: null,
+      selectedModel: "",
+      assignmentTeamCatalogStatus: "loading",
+    });
+
+    form.setTargetKind("new-agent");
+    expect(form.getState()).toMatchObject({
+      targetKind: "new-agent",
+      selectedServerId: "host-a",
+      workingDir: "",
+      selectedProjectOptionId: "",
+      canSubmit: false,
+    });
+  });
+
+  it("preserves captured target displays across catalog churn", () => {
+    const form = open({
+      mode: "create",
+      defaults: { serverId: "host-a", projectTargets: PROJECT_TARGETS, preferences: {} },
+    });
+    form.setTargetKind("assignment-team-run");
+    form.applyAssignmentTeamCatalog("host-a", TEAM_CATALOG);
+    form.setAssignment("assignment-1", { label: "Fix CI" });
+
+    form.applyAssignmentTeamCatalog("host-a", {
+      ...TEAM_CATALOG,
+      assignments: [{ id: "assignment-1", revision: 2, display: { label: "Renamed remotely" } }],
+    });
+
+    expect(form.getState().selectedAssignmentDisplay).toEqual({ label: "Fix CI" });
+  });
   it("opens edit from the schedule host snapshot and completes that host resolution", () => {
     const previous = open({
       mode: "edit",

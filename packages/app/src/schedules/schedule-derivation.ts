@@ -20,6 +20,12 @@ export interface ScheduleTargetResolution {
   provider: string | null;
 }
 
+export interface ScheduleAssignmentTeamTargetLabels {
+  assignment: string;
+  team: string;
+  workspace: string;
+}
+
 export interface ResolvedSchedule {
   state: ScheduleDerivedState;
   bucket: ScheduleBucket;
@@ -34,11 +40,22 @@ export interface ResolveScheduleInput {
   agentsByKey: ReadonlyMap<string, ScheduleTargetAgent>;
   /** Known project roots keyed by `${serverId}:${cwd}`. */
   projectNameByCwd: ReadonlyMap<string, string>;
+  /** Hydrated target labels keyed by host and all three frozen target IDs. */
+  assignmentTeamTargetsByKey?: ReadonlyMap<string, ScheduleAssignmentTeamTargetLabels>;
   /**
    * Whether the agent directory has finished its first load. While false we do
    * not claim an agent target is gone — absence would just be a cold cache.
    */
   agentDataLoaded: boolean;
+}
+
+export function assignmentTeamTargetKey(input: {
+  serverId: string;
+  assignmentId: string;
+  teamId: string;
+  workspaceId: string;
+}): string {
+  return JSON.stringify([input.serverId, input.assignmentId, input.teamId, input.workspaceId]);
 }
 
 function agentKey(serverId: string, agentId: string): string {
@@ -63,20 +80,35 @@ function isAgentTargetGone(input: ResolveScheduleInput): boolean {
 
 function resolveTarget(input: ResolveScheduleInput): ScheduleTargetResolution {
   const { schedule, serverId, agentsByKey, projectNameByCwd } = input;
-  if (schedule.target.type === "agent") {
-    const agent = agentsByKey.get(agentKey(serverId, schedule.target.agentId));
-    if (agent) {
-      return { label: agent.title?.trim() || "Untitled agent", provider: agent.provider };
+  switch (schedule.target.type) {
+    case "agent": {
+      const agent = agentsByKey.get(agentKey(serverId, schedule.target.agentId));
+      if (agent) {
+        return { label: agent.title?.trim() || "Untitled agent", provider: agent.provider };
+      }
+      return { label: "Agent unavailable", provider: null };
     }
-    return { label: "Agent unavailable", provider: null };
+    case "assignment-team-run": {
+      const labels = input.assignmentTeamTargetsByKey?.get(
+        assignmentTeamTargetKey({ serverId, ...schedule.target }),
+      );
+      return {
+        label: labels
+          ? `${labels.assignment} · ${labels.team} · ${labels.workspace}`
+          : "Assignment Team Run",
+        provider: null,
+      };
+    }
+    case "new-agent":
+      return {
+        label: describeScheduleCwd({
+          serverId,
+          cwd: schedule.target.config.cwd,
+          projectNameByCwd,
+        }),
+        provider: schedule.target.config.provider,
+      };
   }
-  if (schedule.target.type === "assignment-team-run") {
-    return { label: "Assignment Team Run", provider: null };
-  }
-  return {
-    label: describeScheduleCwd({ serverId, cwd: schedule.target.config.cwd, projectNameByCwd }),
-    provider: schedule.target.config.provider,
-  };
 }
 
 // One badge, one truth. Order matters: expiry and a missing target are more

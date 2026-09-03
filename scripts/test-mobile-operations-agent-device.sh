@@ -35,8 +35,13 @@ case "${MATRIX_SURFACE}" in
     DEFAULT_ARTIFACTS_DIR="${REPO_ROOT}/.dev/assignments-agent-device-artifacts"
     DEFAULT_METRO_PORT=8085
     ;;
+  schedules)
+    DEFAULT_STATE_DIR="${REPO_ROOT}/.dev/schedules-agent-device-e2e"
+    DEFAULT_ARTIFACTS_DIR="${REPO_ROOT}/.dev/schedules-agent-device-artifacts"
+    DEFAULT_METRO_PORT=8086
+    ;;
   *)
-    echo "PASEO_MOBILE_E2E_MATRIX_SURFACE must be operations, visual, teams, or assignments (received ${MATRIX_SURFACE})." >&2
+    echo "PASEO_MOBILE_E2E_MATRIX_SURFACE must be operations, visual, teams, assignments, or schedules (received ${MATRIX_SURFACE})." >&2
     exit 2
     ;;
 esac

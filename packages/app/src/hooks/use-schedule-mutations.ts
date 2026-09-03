@@ -191,16 +191,8 @@ export function useScheduleMutations({
         throw new Error(payload.error);
       }
     },
-    onMutate: async (id): Promise<ScheduleListSnapshot> => {
-      await queryClient.cancelQueries({ queryKey: schedulesQueryBaseKey });
-      const snapshot = snapshotSchedules(queryClient);
+    onSuccess: (_data, id) => {
       optimisticallyRemove(queryClient, serverId, id);
-      return snapshot;
-    },
-    onError: (_error, _id, context) => {
-      if (context) {
-        restoreSchedules(queryClient, context);
-      }
     },
     onSettled: invalidate,
   });

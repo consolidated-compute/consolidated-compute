@@ -237,4 +237,59 @@ test.describe("Schedules", () => {
     await expect(page.getByTestId("schedule-mode-trigger")).toHaveCount(0);
     await expect(page.getByTestId("cadence-interval-value")).toHaveCount(0);
   });
+
+  test("keeps row action failures visible until dismissed", async ({ page }) => {
+    const workspace = await seedWorkspace({ repoPrefix: "schedule-action-error-" });
+    cleanupTasks.push(() => workspace.cleanup());
+    const fakeHost = await buildFakeScheduleHostWorkspace(workspace);
+    const fakePort = String(59_000 + Math.floor(Math.random() * 900));
+    const scheduleId = "fake-action-error";
+
+    await installFakeScheduleHost({
+      page,
+      port: fakePort,
+      serverId: fakeHost.serverId,
+      workspace: fakeHost.workspace,
+      project: fakeHost,
+      schedules: [
+        buildFakeHostSchedule({
+          id: scheduleId,
+          name: "Action failure schedule",
+          cwd: String(fakeHost.workspace.workspaceDirectory),
+        }),
+      ],
+      actionError: "Synthetic schedule action failure",
+    });
+    await gotoAppShell(page);
+    await waitForSidebarHydration(page);
+    await page.goto(buildSchedulesRoute());
+    await addFakeScheduleHostAndReload({
+      page,
+      serverId: fakeHost.serverId,
+      label: "Fake host",
+      port: fakePort,
+    });
+
+    await page.getByTestId(`schedule-kebab-${scheduleId}`).click();
+    await page.getByTestId(`schedule-menu-pause-${scheduleId}`).click();
+    const error = page.getByTestId(`schedule-action-error-${scheduleId}`);
+    await expect(error).toContainText("Synthetic schedule action failure", { timeout: 30_000 });
+    await expect(error).toHaveAttribute("role", "alert");
+    await error.getByRole("button", { name: "Retry" }).click();
+    await expect(error).toContainText("Synthetic schedule action failure", { timeout: 30_000 });
+    await error.getByRole("button", { name: "Dismiss" }).click();
+    await expect(error).toHaveCount(0);
+
+    await page.getByTestId(`schedule-kebab-${scheduleId}`).click();
+    await Promise.all([
+      page.waitForEvent("dialog").then((dialog) => dialog.accept()),
+      page.getByTestId(`schedule-menu-delete-${scheduleId}`).click(),
+    ]);
+    await expect(error).toContainText("Synthetic schedule action failure", { timeout: 30_000 });
+    await expect(page.getByTestId(`schedule-row-${scheduleId}`)).toBeVisible();
+    await error.getByRole("button", { name: "Retry" }).click();
+    await expect(error).toContainText("Synthetic schedule action failure", { timeout: 30_000 });
+    await error.getByRole("button", { name: "Dismiss" }).click();
+    await expect(error).toHaveCount(0);
+  });
 });

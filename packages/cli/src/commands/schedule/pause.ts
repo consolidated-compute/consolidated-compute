@@ -3,7 +3,7 @@ import type { SingleResult } from "../../output/index.js";
 import { scheduleSchema } from "./schema.js";
 import {
   connectScheduleClient,
-  requireNewAgentSchedule,
+  requireStandaloneSchedule,
   toScheduleCommandError,
   toScheduleRow,
   type ScheduleCommandOptions,
@@ -17,7 +17,7 @@ export async function runPauseCommand(
 ): Promise<SingleResult<ScheduleRow>> {
   const { client } = await connectScheduleClient(options.host);
   try {
-    await requireNewAgentSchedule(client, id);
+    await requireStandaloneSchedule(client, id);
     const payload = await client.schedulePause({ id });
     if (payload.error || !payload.schedule) {
       throw new Error(payload.error ?? `Failed to pause schedule: ${id}`);

@@ -59,6 +59,9 @@ describe("canonical CLI surface", () => {
     expect(run?.helpInformation()).toContain("--thinking <id>");
     expect(update?.helpInformation()).toContain("--thinking <id>");
     expect(scheduleCreate?.helpInformation()).toContain("--thinking <id>");
+    expect(scheduleCreate?.helpInformation()).toContain("--assignment <id>");
+    expect(scheduleCreate?.helpInformation()).toContain("--team <id>");
+    expect(scheduleCreate?.helpInformation()).toContain("--workspace <id>");
   });
 
   it("offers opening an existing agent in the desktop app", () => {

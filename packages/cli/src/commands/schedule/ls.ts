@@ -3,6 +3,7 @@ import type { ListResult } from "../../output/index.js";
 import { scheduleSchema } from "./schema.js";
 import {
   connectScheduleClient,
+  isStandaloneSchedule,
   toScheduleCommandError,
   toScheduleRow,
   type ScheduleCommandOptions,
@@ -21,9 +22,7 @@ export async function runLsCommand(
     }
     return {
       type: "list",
-      data: payload.schedules
-        .filter((schedule) => schedule.target.type === "new-agent")
-        .map(toScheduleRow),
+      data: payload.schedules.filter(isStandaloneSchedule).map(toScheduleRow),
       schema: scheduleSchema,
     };
   } catch (error) {

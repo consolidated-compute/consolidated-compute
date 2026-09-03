@@ -1,4 +1,12 @@
-import { MoreVertical, Pause, Pencil, Play, RotateCw, Trash2 } from "lucide-react-native";
+import {
+  AlertCircle,
+  MoreVertical,
+  Pause,
+  Pencil,
+  Play,
+  RotateCw,
+  Trash2,
+} from "lucide-react-native";
 import { useCallback, useState, type ReactElement } from "react";
 import { Pressable, Text, View, type PressableStateCallbackType } from "react-native";
 import { StyleSheet, withUnistyles } from "react-native-unistyles";
@@ -10,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { Button } from "@/components/ui/button";
 import { getProviderIcon } from "@/components/provider-icons";
 import { isNative } from "@/constants/platform";
 import { useIsCompactFormFactor } from "@/constants/layout";
@@ -19,6 +28,7 @@ import type { ScheduleDerivedState } from "@/schedules/schedule-derivation";
 import {
   formatCadence,
   formatNextRun,
+  hasScheduleExecutionActions,
   isScheduleEditable,
   resolveScheduleTitle,
   scheduleProductName,
@@ -73,6 +83,11 @@ interface ScheduleRowProps extends ScheduleRowActions {
   singleHost?: boolean;
   pending?: ScheduleRowPending;
   isFirst: boolean;
+  actionError?: {
+    message: string;
+    onRetry: () => void;
+    onDismiss: () => void;
+  } | null;
 }
 
 function stateBadge(state: ScheduleDerivedState): {
@@ -153,6 +168,7 @@ export function ScheduleRow({
   onResume,
   onRunNow,
   onDelete,
+  actionError,
 }: ScheduleRowProps): ReactElement {
   const isCompact = useIsCompactFormFactor();
   const [isHovered, setIsHovered] = useState(false);
@@ -164,7 +180,8 @@ export function ScheduleRow({
   const canEdit = isScheduleEditable(schedule);
   const badge = stateBadge(state);
   const meta = buildMeta(schedule, state, serverName, singleHost ?? false);
-  const canRun = schedule.target.type === "new-agent" && (state === "active" || state === "paused");
+  const hasExecutionActions = hasScheduleExecutionActions(schedule);
+  const canRun = hasExecutionActions && (state === "active" || state === "paused");
 
   const rowStyle = useCallback(
     ({ pressed }: PressableStateCallbackType) => [
@@ -223,6 +240,22 @@ export function ScheduleRow({
           />
         </View>
       </Pressable>
+      {actionError ? (
+        <View
+          style={styles.actionError}
+          accessibilityRole="alert"
+          testID={`schedule-action-error-${schedule.id}`}
+        >
+          <AlertCircle size={16} color={styles.actionErrorText.color} />
+          <Text style={styles.actionErrorText}>{actionError.message}</Text>
+          <Button variant="ghost" size="sm" onPress={actionError.onRetry}>
+            Retry
+          </Button>
+          <Button variant="ghost" size="sm" onPress={actionError.onDismiss}>
+            Dismiss
+          </Button>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -243,7 +276,7 @@ function ScheduleExecutionMenuItems({
 }: Pick<ScheduleRowProps, "schedule" | "pending" | "onPause" | "onResume" | "onRunNow"> & {
   canRun: boolean;
 }): ReactElement | null {
-  if (schedule.target.type !== "new-agent") {
+  if (!hasScheduleExecutionActions(schedule)) {
     return null;
   }
 
@@ -320,7 +353,7 @@ function ScheduleKebabMenu({
   const productName = scheduleProductName(schedule);
   const productNameLower = productName.toLowerCase();
   const canEdit = isScheduleEditable(schedule);
-  const hasExecutionActions = schedule.target.type === "new-agent";
+  const hasExecutionActions = hasScheduleExecutionActions(schedule);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -422,5 +455,20 @@ const styles = StyleSheet.create((theme) => ({
   },
   kebabTriggerHovered: {
     backgroundColor: theme.colors.surface2,
+  },
+  actionError: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[4],
+    paddingVertical: theme.spacing[2],
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.destructive,
+    backgroundColor: theme.colors.surface1,
+  },
+  actionErrorText: {
+    flex: 1,
+    color: theme.colors.destructive,
+    fontSize: theme.fontSize.sm,
   },
 }));

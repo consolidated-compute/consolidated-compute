@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { type Page, type WebSocketRoute } from "@playwright/test";
 import { buildSeededHost } from "./daemon-registry";
 import { wsRoutePatternForPort } from "./daemon-port";
 import { type SeededWorkspace } from "./seed-client";
@@ -44,6 +44,16 @@ interface FakeScheduleSummary {
   pausedAt: string | null;
   expiresAt: string | null;
   maxRuns: number | null;
+}
+
+interface FakeScheduleHostInput {
+  page: Page;
+  port: string;
+  serverId: string;
+  workspace: Record<string, unknown>;
+  project: Pick<FakeScheduleHostWorkspace, "projectId" | "projectKey" | "projectDisplayName">;
+  schedules?: FakeScheduleSummary[];
+  actionError?: string;
 }
 
 function parseJson(message: WebSocketMessage): unknown {
@@ -136,124 +146,145 @@ export async function buildFakeScheduleHostWorkspace(
   };
 }
 
-export async function installFakeScheduleHost(input: {
-  page: Page;
-  port: string;
-  serverId: string;
-  workspace: Record<string, unknown>;
-  project: Pick<FakeScheduleHostWorkspace, "projectId" | "projectKey" | "projectDisplayName">;
-  schedules?: FakeScheduleSummary[];
-}): Promise<void> {
-  await input.page.routeWebSocket(wsRoutePatternForPort(input.port), (ws) => {
-    ws.onMessage((message) => {
-      const parsed = parseJson(message);
-      if (parsed && typeof parsed === "object" && (parsed as { type?: string }).type === "hello") {
-        ws.send(
-          buildSessionMessage("status", {
-            status: "server_info",
-            serverId: input.serverId,
-            hostname: "fake-schedule-host",
-            version: "0.0.0-e2e",
-            features: {
-              providersSnapshot: true,
-              workspaceMultiplicity: true,
-              projectList: true,
-              projectAdd: true,
-              projectRemove: true,
-              workspaceRecovery: true,
+function handleFakeScheduleRequest(
+  input: FakeScheduleHostInput,
+  ws: WebSocketRoute,
+  request: SessionRequest,
+): void {
+  const requestId = getRequestId(request);
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+  switch (request.type) {
+    case "ping":
+      ws.send(
+        buildSessionMessage("pong", {
+          requestId,
+          clientSentAt: typeof request.clientSentAt === "number" ? request.clientSentAt : now,
+          serverReceivedAt: now,
+          serverSentAt: now,
+        }),
+      );
+      return;
+    case "fetch_workspaces_request":
+      ws.send(
+        buildSessionMessage("fetch_workspaces_response", {
+          requestId,
+          entries: [input.workspace],
+          emptyProjects: [],
+          pageInfo: { nextCursor: null, prevCursor: null, hasMore: false },
+        }),
+      );
+      return;
+    case "project.list.request":
+      ws.send(
+        buildSessionMessage("project.list.response", {
+          requestId,
+          projects: [
+            {
+              projectId: input.project.projectId,
+              projectKey: input.project.projectKey,
+              projectDisplayName: input.project.projectDisplayName,
+              projectRootPath: String(input.workspace.projectRootPath),
+              projectKind: "git",
             },
-          }),
-        );
-        return;
-      }
+          ],
+        }),
+      );
+      return;
+    case "fetch_agents_request":
+      ws.send(
+        buildSessionMessage("fetch_agents_response", {
+          requestId,
+          entries: [],
+          pageInfo: { nextCursor: null, prevCursor: null, hasMore: false },
+        }),
+      );
+      return;
+    case "get_providers_snapshot_request":
+      ws.send(
+        buildSessionMessage("get_providers_snapshot_response", {
+          requestId,
+          entries: buildFakeProviderEntries(nowIso),
+          generatedAt: nowIso,
+        }),
+      );
+      return;
+    case "refresh_providers_snapshot_request":
+      ws.send(
+        buildSessionMessage("refresh_providers_snapshot_response", {
+          requestId,
+          acknowledged: true,
+        }),
+      );
+      return;
+    case "schedule/list":
+      ws.send(
+        buildSessionMessage("schedule/list/response", {
+          requestId,
+          schedules: input.schedules ?? [],
+          error: null,
+        }),
+      );
+      return;
+    case "schedule/pause":
+    case "schedule/resume":
+    case "schedule/run-once":
+      ws.send(
+        buildSessionMessage(`${request.type}/response`, {
+          requestId,
+          schedule: null,
+          error: input.actionError ?? "Synthetic schedule action failure",
+        }),
+      );
+      return;
+    case "schedule/delete":
+      ws.send(
+        buildSessionMessage("schedule/delete/response", {
+          requestId,
+          scheduleId: String(request.scheduleId ?? "unknown"),
+          error: input.actionError ?? "Synthetic schedule action failure",
+        }),
+      );
+      return;
+  }
+}
 
-      if (parsed && typeof parsed === "object" && (parsed as { type?: string }).type === "ping") {
-        ws.send(JSON.stringify({ type: "pong" }));
-        return;
-      }
+function handleFakeScheduleMessage(
+  input: FakeScheduleHostInput,
+  ws: WebSocketRoute,
+  message: WebSocketMessage,
+): void {
+  const parsed = parseJson(message);
+  if (parsed && typeof parsed === "object" && (parsed as { type?: string }).type === "hello") {
+    ws.send(
+      buildSessionMessage("status", {
+        status: "server_info",
+        serverId: input.serverId,
+        hostname: "fake-schedule-host",
+        version: "0.0.0-e2e",
+        features: {
+          providersSnapshot: true,
+          workspaceMultiplicity: true,
+          projectList: true,
+          projectAdd: true,
+          projectRemove: true,
+          workspaceRecovery: true,
+        },
+      }),
+    );
+    return;
+  }
+  if (parsed && typeof parsed === "object" && (parsed as { type?: string }).type === "ping") {
+    ws.send(JSON.stringify({ type: "pong" }));
+    return;
+  }
+  const request = readSessionRequest(message);
+  if (request) handleFakeScheduleRequest(input, ws, request);
+}
 
-      const request = readSessionRequest(message);
-      if (!request) {
-        return;
-      }
-
-      const requestId = getRequestId(request);
-      const now = Date.now();
-      const nowIso = new Date(now).toISOString();
-      switch (request.type) {
-        case "ping":
-          ws.send(
-            buildSessionMessage("pong", {
-              requestId,
-              clientSentAt: typeof request.clientSentAt === "number" ? request.clientSentAt : now,
-              serverReceivedAt: now,
-              serverSentAt: now,
-            }),
-          );
-          return;
-        case "fetch_workspaces_request":
-          ws.send(
-            buildSessionMessage("fetch_workspaces_response", {
-              requestId,
-              entries: [input.workspace],
-              emptyProjects: [],
-              pageInfo: { nextCursor: null, prevCursor: null, hasMore: false },
-            }),
-          );
-          return;
-        case "project.list.request":
-          ws.send(
-            buildSessionMessage("project.list.response", {
-              requestId,
-              projects: [
-                {
-                  projectId: input.project.projectId,
-                  projectKey: input.project.projectKey,
-                  projectDisplayName: input.project.projectDisplayName,
-                  projectRootPath: String(input.workspace.projectRootPath),
-                  projectKind: "git",
-                },
-              ],
-            }),
-          );
-          return;
-        case "fetch_agents_request":
-          ws.send(
-            buildSessionMessage("fetch_agents_response", {
-              requestId,
-              entries: [],
-              pageInfo: { nextCursor: null, prevCursor: null, hasMore: false },
-            }),
-          );
-          return;
-        case "get_providers_snapshot_request":
-          ws.send(
-            buildSessionMessage("get_providers_snapshot_response", {
-              requestId,
-              entries: buildFakeProviderEntries(nowIso),
-              generatedAt: nowIso,
-            }),
-          );
-          return;
-        case "refresh_providers_snapshot_request":
-          ws.send(
-            buildSessionMessage("refresh_providers_snapshot_response", {
-              requestId,
-              acknowledged: true,
-            }),
-          );
-          return;
-        case "schedule/list":
-          ws.send(
-            buildSessionMessage("schedule/list/response", {
-              requestId,
-              schedules: input.schedules ?? [],
-              error: null,
-            }),
-          );
-          return;
-      }
-    });
+export async function installFakeScheduleHost(input: FakeScheduleHostInput): Promise<void> {
+  await input.page.routeWebSocket(wsRoutePatternForPort(input.port), (ws) => {
+    ws.onMessage((message) => handleFakeScheduleMessage(input, ws, message));
   });
 }
 

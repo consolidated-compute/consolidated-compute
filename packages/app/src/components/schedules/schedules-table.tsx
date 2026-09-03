@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactElement } from "react";
+import { useCallback, useMemo, useState, type ReactElement } from "react";
 import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { ScheduleRow, type ScheduleRowPending } from "@/components/schedules/schedule-row";
@@ -7,6 +7,7 @@ import type { AggregatedSchedule } from "@/hooks/use-schedules";
 import type { ScheduleDerivedState } from "@/schedules/schedule-derivation";
 import { settingsStyles } from "@/styles/settings";
 import { confirmDialog } from "@/utils/confirm-dialog";
+import { toErrorMessage } from "@/utils/error-messages";
 import {
   isScheduleEditable,
   resolveScheduleTitle,
@@ -79,15 +80,19 @@ function SchedulesTableRow({
   const { id, serverId } = schedule;
   const mutations = useScheduleMutations({ serverId });
   const [pending, setPending] = useState<ScheduleRowPending>(NO_PENDING);
+  const [actionError, setActionError] = useState<{
+    key: keyof ScheduleRowPending;
+    message: string;
+  } | null>(null);
 
   const runAction = useCallback(
     async (key: keyof ScheduleRowPending, action: () => Promise<void>): Promise<void> => {
       setPending((current) => ({ ...current, [key]: true }));
+      setActionError(null);
       try {
         await action();
-      } catch {
-        // Mutations roll back their own optimistic cache writes on error and
-        // re-fetch on settle; surfacing per-row toasts here is out of scope.
+      } catch (error) {
+        setActionError({ key, message: toErrorMessage(error) });
       } finally {
         setPending((current) => {
           const next = { ...current };
@@ -134,6 +139,31 @@ function SchedulesTableRow({
     })();
   }, [runAction, mutations, id, schedule]);
 
+  const retryAction = useCallback(() => {
+    const key = actionError?.key;
+    if (!key) return;
+    const action = {
+      pause: () => mutations.pauseSchedule(id),
+      resume: () => mutations.resumeSchedule(id),
+      runNow: () => mutations.runScheduleNow(id),
+      delete: () => mutations.deleteSchedule(id),
+    }[key];
+    void runAction(key, action);
+  }, [actionError?.key, id, mutations, runAction]);
+
+  const dismissActionError = useCallback(() => setActionError(null), []);
+  const rowActionError = useMemo(
+    () =>
+      actionError
+        ? {
+            message: actionError.message,
+            onRetry: retryAction,
+            onDismiss: dismissActionError,
+          }
+        : null,
+    [actionError, dismissActionError, retryAction],
+  );
+
   return (
     <ScheduleRow
       schedule={schedule}
@@ -144,6 +174,7 @@ function SchedulesTableRow({
       singleHost={row.singleHost}
       isFirst={isFirst}
       pending={pending}
+      actionError={rowActionError}
       onEdit={handleEdit}
       onPause={handlePause}
       onResume={handleResume}

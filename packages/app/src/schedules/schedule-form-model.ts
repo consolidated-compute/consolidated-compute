@@ -1,3 +1,4 @@
+import equal from "fast-deep-equal";
 import type {
   AgentMode,
   AgentModelDefinition,
@@ -38,6 +39,7 @@ export interface ScheduleFormHost {
   serverId: string;
   label: string;
   supportsWorkspaceMultiplicity?: boolean;
+  supportsAssignmentTeamSchedules?: boolean;
 }
 
 export interface ScheduleFormSnapshot {
@@ -77,7 +79,44 @@ export interface ScheduleFormProjectOption {
   testID: string;
 }
 
-export type ScheduleFormTargetKind = "agent" | "new-agent";
+export type ScheduleFormTargetKind = "agent" | "new-agent" | "assignment-team-run";
+export type ScheduleFormCatalogStatus = "loading" | "ready" | "unsupported" | "error";
+
+export interface ScheduleAssignmentOption {
+  id: string;
+  revision: number;
+  display: ScheduleFormDisplay;
+}
+
+export interface ScheduleTeamOption {
+  id: string;
+  revision: number;
+  display: ScheduleFormDisplay;
+}
+
+export interface ScheduleWorkspaceOption {
+  id: string;
+  cwd: string;
+  display: ScheduleFormDisplay;
+}
+
+export interface ScheduleAssignmentTeamCatalog {
+  status: ScheduleFormCatalogStatus;
+  assignments: readonly ScheduleAssignmentOption[];
+  teams: readonly ScheduleTeamOption[];
+  workspaces: readonly ScheduleWorkspaceOption[];
+  error?: string | null;
+}
+
+export interface ScheduleTeamRunReadinessRequest {
+  requestKey: string;
+  serverId: string;
+  assignmentId: string;
+  teamId: string;
+  workspaceId: string;
+}
+
+export type ScheduleTeamRunReadinessStatus = "idle" | "pending" | "ready" | "blocked";
 type CronCadence = Extract<ScheduleCadence, { type: "cron" }>;
 type ProviderResolutionStatus = "idle" | "pending" | "complete";
 
@@ -116,6 +155,20 @@ export interface ScheduleFormState {
   disclosure: ScheduleDisclosureState;
   canSubmit: boolean;
   submitError: string | null;
+  assignmentTeamCatalogStatus: ScheduleFormCatalogStatus;
+  assignmentTeamCatalogError: string | null;
+  assignmentOptions: ScheduleAssignmentOption[];
+  teamOptions: ScheduleTeamOption[];
+  workspaceOptions: ScheduleWorkspaceOption[];
+  selectedAssignmentId: string | null;
+  selectedAssignmentDisplay: ScheduleFormDisplay | null;
+  selectedTeamId: string | null;
+  selectedTeamDisplay: ScheduleFormDisplay | null;
+  selectedWorkspaceId: string | null;
+  selectedWorkspaceDisplay: ScheduleFormDisplay | null;
+  teamRunReadinessRequest: ScheduleTeamRunReadinessRequest | null;
+  teamRunReadinessStatus: ScheduleTeamRunReadinessStatus;
+  teamRunReadinessMessage: string | null;
 }
 
 export interface ScheduleFormModel {
@@ -126,7 +179,17 @@ export interface ScheduleFormModel {
   applyProjectTargets: (targets: readonly ScheduleProjectTarget[]) => void;
   applyPreferences: (preferences: FormPreferences | undefined) => void;
   applyProviderSnapshot: (serverId: string, snapshot: ScheduleFormProviderSnapshot) => void;
+  applyAssignmentTeamCatalog: (serverId: string, catalog: ScheduleAssignmentTeamCatalog) => void;
+  applyTeamRunReadiness: (
+    requestKey: string,
+    status: Exclude<ScheduleTeamRunReadinessStatus, "idle">,
+    message?: string | null,
+  ) => void;
+  setTargetKind: (kind: Exclude<ScheduleFormTargetKind, "agent">) => void;
   setHost: (serverId: string | null) => void;
+  setAssignment: (assignmentId: string, display: ScheduleFormDisplay) => void;
+  setTeam: (teamId: string, display: ScheduleFormDisplay) => void;
+  setWorkspace: (workspaceId: string, display: ScheduleFormDisplay) => void;
   setProject: (optionId: string, display: ScheduleFormDisplay) => void;
   setModel: (provider: AgentProvider, modelId: string) => void;
   setThinking: (thinkingOptionId: string) => void;
@@ -150,6 +213,82 @@ function newAgentConfig(schedule: ScheduleFormSnapshot["schedule"]) {
     return schedule.target.config;
   }
   return null;
+}
+
+function assignmentTeamTarget(schedule: ScheduleFormSnapshot["schedule"]) {
+  return schedule?.target.type === "assignment-team-run" ? schedule.target : null;
+}
+
+function selectedOption<T extends { id: string }>(
+  options: readonly T[],
+  id: string | null,
+): T | null {
+  if (!id) return null;
+  return options.find((option) => option.id === id) ?? null;
+}
+
+function chooseSingleOption<T extends { id: string; display: ScheduleFormDisplay }>(
+  options: readonly T[],
+  currentId: string | null,
+  currentDisplay: ScheduleFormDisplay | null,
+): { id: string | null; display: ScheduleFormDisplay | null } {
+  if (currentId) {
+    const available = selectedOption(options, currentId);
+    return {
+      id: currentId,
+      display:
+        currentDisplay?.label === currentId && available ? available.display : currentDisplay,
+    };
+  }
+  if (options.length === 1) {
+    return { id: options[0]!.id, display: options[0]!.display };
+  }
+  return { id: null, display: null };
+}
+
+function buildTeamRunReadinessRequest(
+  state: Pick<
+    ScheduleFormState,
+    | "targetKind"
+    | "selectedServerId"
+    | "selectedAssignmentId"
+    | "selectedTeamId"
+    | "selectedWorkspaceId"
+    | "assignmentOptions"
+    | "teamOptions"
+    | "workspaceOptions"
+    | "assignmentTeamCatalogStatus"
+  >,
+): ScheduleTeamRunReadinessRequest | null {
+  if (
+    state.targetKind !== "assignment-team-run" ||
+    state.assignmentTeamCatalogStatus !== "ready" ||
+    !state.selectedServerId ||
+    !state.selectedAssignmentId ||
+    !state.selectedTeamId ||
+    !state.selectedWorkspaceId
+  ) {
+    return null;
+  }
+  const assignment = selectedOption(state.assignmentOptions, state.selectedAssignmentId);
+  const team = selectedOption(state.teamOptions, state.selectedTeamId);
+  const workspace = selectedOption(state.workspaceOptions, state.selectedWorkspaceId);
+  if (!assignment || !team || !workspace) return null;
+  return {
+    requestKey: JSON.stringify([
+      state.selectedServerId,
+      assignment.id,
+      assignment.revision,
+      team.id,
+      team.revision,
+      workspace.id,
+      workspace.cwd,
+    ]),
+    serverId: state.selectedServerId,
+    assignmentId: assignment.id,
+    teamId: team.id,
+    workspaceId: workspace.id,
+  };
 }
 
 function buildProjectOptionTestId(optionId: string): string {
@@ -377,8 +516,8 @@ function makeProviderResolutionRecord(
 }
 
 function resolveTargetKind(snapshot: ScheduleFormSnapshot): ScheduleFormTargetKind {
-  if (snapshot.mode === "edit" && snapshot.schedule?.target.type === "agent") {
-    return "agent";
+  if (snapshot.mode === "edit" && snapshot.schedule) {
+    return snapshot.schedule.target.type;
   }
   return "new-agent";
 }
@@ -513,7 +652,7 @@ function resolveEffectiveIsolation(input: {
 }
 
 function resolveDisclosure(state: ScheduleFormState): ScheduleDisclosureState {
-  if (state.targetKind === "agent") {
+  if (state.targetKind !== "new-agent") {
     return {
       showProjectField: false,
       showModelField: false,
@@ -548,6 +687,17 @@ function resolveDisclosure(state: ScheduleFormState): ScheduleDisclosureState {
 function resolveCanSubmit(state: ScheduleFormState): boolean {
   if (state.targetKind === "agent") {
     return state.submitCadence !== undefined;
+  }
+  if (state.targetKind === "assignment-team-run") {
+    const hostSupportsTarget = state.hosts.some(
+      (host) =>
+        host.serverId === state.selectedServerId && host.supportsAssignmentTeamSchedules === true,
+    );
+    return (
+      hostSupportsTarget &&
+      (state.mode === "edit" || state.submitCadence !== undefined) &&
+      state.teamRunReadinessStatus === "ready"
+    );
   }
   if (state.prompt.trim().length === 0) {
     return false;
@@ -599,6 +749,19 @@ function updateDerivedState(input: {
     serverId: input.state.selectedServerId,
     cwd: input.state.workingDir,
   });
+  const readinessDraft = {
+    ...input.state,
+    hosts: [...input.hosts],
+  };
+  const teamRunReadinessRequest = buildTeamRunReadinessRequest(readinessDraft);
+  const readinessContextChanged =
+    teamRunReadinessRequest?.requestKey !== input.state.teamRunReadinessRequest?.requestKey;
+  let teamRunReadinessStatus = input.state.teamRunReadinessStatus;
+  if (!teamRunReadinessRequest) {
+    teamRunReadinessStatus = "idle";
+  } else if (readinessContextChanged) {
+    teamRunReadinessStatus = "pending";
+  }
   const nextState: ScheduleFormState = {
     ...input.state,
     hosts: [...input.hosts],
@@ -627,15 +790,96 @@ function updateDerivedState(input: {
       ? input.state.archiveOnFinish
       : undefined,
     submitIsolation: canSubmitWorkspaceLifecycleOptions ? effectiveIsolation : undefined,
+    teamRunReadinessRequest,
+    teamRunReadinessStatus,
+    teamRunReadinessMessage: readinessContextChanged ? null : input.state.teamRunReadinessMessage,
   };
   const disclosure = resolveDisclosure(nextState);
   return { ...nextState, disclosure, canSubmit: resolveCanSubmit({ ...nextState, disclosure }) };
+}
+
+function buildScheduleInitialFields(
+  snapshot: ScheduleFormSnapshot,
+  cadence: CronCadence,
+): Pick<ScheduleFormState, "mode" | "name" | "prompt" | "maxRuns" | "cadence" | "submitCadence"> {
+  const schedule = snapshot.schedule;
+  return {
+    mode: snapshot.mode,
+    name: schedule?.name ?? "",
+    prompt: schedule?.prompt ?? "",
+    maxRuns: formatInitialMaxRuns(schedule),
+    cadence,
+    submitCadence: resolveInitialSubmitCadence(schedule, cadence),
+  };
+}
+
+function buildAgentInitialFields(
+  config: ReturnType<typeof newAgentConfig>,
+  initialModel: string,
+  initialMode: string,
+  initialThinking: string,
+  preferences: FormPreferences | undefined,
+): Pick<
+  ScheduleFormState,
+  | "selectedProvider"
+  | "selectedModel"
+  | "selectedMode"
+  | "selectedThinkingOptionId"
+  | "selectedModelDisplay"
+  | "selectedModeDisplay"
+  | "selectedThinkingDisplay"
+  | "archiveOnFinish"
+  | "isolation"
+> {
+  return {
+    selectedProvider: config?.provider ?? null,
+    selectedModel: initialModel,
+    selectedMode: initialMode,
+    selectedThinkingOptionId: initialThinking,
+    selectedModelDisplay: buildInitialModelDisplay(initialModel),
+    selectedModeDisplay: buildInitialModeDisplay(initialMode),
+    selectedThinkingDisplay: buildInitialThinkingDisplay(initialThinking),
+    archiveOnFinish: config?.archiveOnFinish ?? true,
+    isolation: resolveInitialIsolation({ config, preferences }),
+  };
+}
+
+function buildAssignmentTeamInitialFields(
+  target: ReturnType<typeof assignmentTeamTarget>,
+): Pick<
+  ScheduleFormState,
+  | "selectedAssignmentId"
+  | "selectedAssignmentDisplay"
+  | "selectedTeamId"
+  | "selectedTeamDisplay"
+  | "selectedWorkspaceId"
+  | "selectedWorkspaceDisplay"
+> {
+  if (!target) {
+    return {
+      selectedAssignmentId: null,
+      selectedAssignmentDisplay: null,
+      selectedTeamId: null,
+      selectedTeamDisplay: null,
+      selectedWorkspaceId: null,
+      selectedWorkspaceDisplay: null,
+    };
+  }
+  return {
+    selectedAssignmentId: target.assignmentId,
+    selectedAssignmentDisplay: { label: target.assignmentId },
+    selectedTeamId: target.teamId,
+    selectedTeamDisplay: { label: target.teamId },
+    selectedWorkspaceId: target.workspaceId,
+    selectedWorkspaceDisplay: { label: target.workspaceId },
+  };
 }
 
 function buildInitialState(snapshot: ScheduleFormSnapshot): ScheduleFormState {
   const selectedServerId = resolveInitialServerId(snapshot);
   const config = newAgentConfig(snapshot.schedule);
   const targetKind = resolveTargetKind(snapshot);
+  const teamTarget = assignmentTeamTarget(snapshot.schedule);
   const workingDir = config?.cwd ?? "";
   const selectedProjectTarget = resolveProjectTarget({
     targets: snapshot.defaults.projectTargets,
@@ -655,20 +899,19 @@ function buildInitialState(snapshot: ScheduleFormSnapshot): ScheduleFormState {
   const initialMode = config?.modeId ?? "";
   const initialThinking = config?.thinkingOptionId ?? "";
   const state: ScheduleFormState = {
-    mode: snapshot.mode,
+    ...buildScheduleInitialFields(snapshot, initialCadence),
+    ...buildAgentInitialFields(
+      config,
+      initialModel,
+      initialMode,
+      initialThinking,
+      snapshot.defaults.preferences,
+    ),
+    ...buildAssignmentTeamInitialFields(teamTarget),
     targetKind,
-    name: snapshot.schedule?.name ?? "",
-    prompt: snapshot.schedule?.prompt ?? "",
-    maxRuns: formatInitialMaxRuns(snapshot.schedule),
-    cadence: initialCadence,
-    submitCadence: resolveInitialSubmitCadence(snapshot.schedule, initialCadence),
     hosts: [...snapshot.hosts],
     projectOptions: buildProjectOptions(snapshot.defaults.projectTargets, selectedServerId),
     selectedServerId,
-    selectedProvider: config?.provider ?? null,
-    selectedModel: initialModel,
-    selectedMode: initialMode,
-    selectedThinkingOptionId: initialThinking,
     workingDir,
     projectDisplay: buildInitialProjectDisplay({
       config,
@@ -676,14 +919,9 @@ function buildInitialState(snapshot: ScheduleFormSnapshot): ScheduleFormState {
       selectedServerId,
     }),
     selectedProjectOptionId: resolveSelectedProjectOptionId(selectedProjectTarget),
-    selectedModelDisplay: buildInitialModelDisplay(initialModel),
-    selectedModeDisplay: buildInitialModeDisplay(initialMode),
-    selectedThinkingDisplay: buildInitialThinkingDisplay(initialThinking),
     modelSelectorProviders: [],
     modeOptions: [],
     availableThinkingOptions: [],
-    archiveOnFinish: config?.archiveOnFinish ?? true,
-    isolation: resolveInitialIsolation({ config, preferences: snapshot.defaults.preferences }),
     effectiveIsolation: "local",
     submitArchiveOnFinish: undefined,
     submitIsolation: undefined,
@@ -700,6 +938,14 @@ function buildInitialState(snapshot: ScheduleFormSnapshot): ScheduleFormState {
     },
     canSubmit: false,
     submitError: null,
+    assignmentTeamCatalogStatus: "loading",
+    assignmentTeamCatalogError: null,
+    assignmentOptions: [],
+    teamOptions: [],
+    workspaceOptions: [],
+    teamRunReadinessRequest: null,
+    teamRunReadinessStatus: "idle",
+    teamRunReadinessMessage: null,
   };
   return updateDerivedState({
     state,
@@ -945,6 +1191,26 @@ export function openScheduleForm(snapshot: ScheduleFormSnapshot): ScheduleFormMo
     });
   }
 
+  function resetAssignmentTeamSelection(nextState: ScheduleFormState): ScheduleFormState {
+    return {
+      ...nextState,
+      assignmentTeamCatalogStatus: "loading",
+      assignmentTeamCatalogError: null,
+      assignmentOptions: [],
+      teamOptions: [],
+      workspaceOptions: [],
+      selectedAssignmentId: null,
+      selectedAssignmentDisplay: null,
+      selectedTeamId: null,
+      selectedTeamDisplay: null,
+      selectedWorkspaceId: null,
+      selectedWorkspaceDisplay: null,
+      teamRunReadinessRequest: null,
+      teamRunReadinessStatus: "idle",
+      teamRunReadinessMessage: null,
+    };
+  }
+
   return {
     getState: () => state,
     subscribe(listener) {
@@ -1014,6 +1280,105 @@ export function openScheduleForm(snapshot: ScheduleFormSnapshot): ScheduleFormMo
         providerSnapshotRequest: isPendingResolution ? null : state.providerSnapshotRequest,
       });
     },
+    applyAssignmentTeamCatalog(serverId, catalog) {
+      if (closed || state.selectedServerId !== serverId) return;
+      const assignments = [...catalog.assignments];
+      const teams = [...catalog.teams];
+      const workspaces = [...catalog.workspaces];
+      const assignmentSelection = chooseSingleOption(
+        assignments,
+        state.selectedAssignmentId,
+        state.selectedAssignmentDisplay,
+      );
+      const teamSelection = chooseSingleOption(
+        teams,
+        state.selectedTeamId,
+        state.selectedTeamDisplay,
+      );
+      const workspaceSelection = chooseSingleOption(
+        workspaces,
+        state.selectedWorkspaceId,
+        state.selectedWorkspaceDisplay,
+      );
+      if (
+        state.assignmentTeamCatalogStatus === catalog.status &&
+        state.assignmentTeamCatalogError === (catalog.error ?? null) &&
+        equal(state.assignmentOptions, assignments) &&
+        equal(state.teamOptions, teams) &&
+        equal(state.workspaceOptions, workspaces) &&
+        state.selectedAssignmentId === assignmentSelection.id &&
+        equal(state.selectedAssignmentDisplay, assignmentSelection.display) &&
+        state.selectedTeamId === teamSelection.id &&
+        equal(state.selectedTeamDisplay, teamSelection.display) &&
+        state.selectedWorkspaceId === workspaceSelection.id &&
+        equal(state.selectedWorkspaceDisplay, workspaceSelection.display)
+      ) {
+        return;
+      }
+      publish({
+        ...state,
+        assignmentTeamCatalogStatus: catalog.status,
+        assignmentTeamCatalogError: catalog.error ?? null,
+        assignmentOptions: assignments,
+        teamOptions: teams,
+        workspaceOptions: workspaces,
+        selectedAssignmentId: assignmentSelection.id,
+        selectedAssignmentDisplay: assignmentSelection.display,
+        selectedTeamId: teamSelection.id,
+        selectedTeamDisplay: teamSelection.display,
+        selectedWorkspaceId: workspaceSelection.id,
+        selectedWorkspaceDisplay: workspaceSelection.display,
+      });
+    },
+    applyTeamRunReadiness(requestKey, status, message) {
+      if (closed || requestKey !== state.teamRunReadinessRequest?.requestKey) return;
+      if (
+        state.teamRunReadinessStatus === status &&
+        state.teamRunReadinessMessage === (message ?? null)
+      ) {
+        return;
+      }
+      publish({
+        ...state,
+        teamRunReadinessStatus: status,
+        teamRunReadinessMessage: message ?? null,
+      });
+    },
+    setTargetKind(kind) {
+      if (closed || snapshot.mode !== "create" || state.targetKind === kind) return;
+      let selectedServerId = state.selectedServerId;
+      let hostChanged = false;
+      if (kind === "assignment-team-run") {
+        const compatibleHosts = hosts.filter(
+          (host) => host.supportsAssignmentTeamSchedules === true,
+        );
+        if (compatibleHosts.length === 0) return;
+        const selectedHostSupportsTarget = compatibleHosts.some(
+          (host) => host.serverId === selectedServerId,
+        );
+        if (!selectedHostSupportsTarget && compatibleHosts.length === 1) {
+          selectedServerId = compatibleHosts[0]!.serverId;
+          hostChanged = true;
+        }
+      }
+      let nextState: ScheduleFormState = {
+        ...state,
+        targetKind: kind,
+        selectedServerId,
+        submitError: null,
+      };
+      if (hostChanged) {
+        userModified = { ...userModified, serverId: true, workingDir: true };
+        nextState = clearProviderSelection({
+          ...nextState,
+          workingDir: "",
+          projectDisplay: null,
+          selectedProjectOptionId: "",
+          providerResolutionByServerId: {},
+        });
+      }
+      publish(kind === "assignment-team-run" ? resetAssignmentTeamSelection(nextState) : nextState);
+    },
     setHost(serverId) {
       if (closed || state.selectedServerId === serverId) {
         return;
@@ -1023,16 +1388,46 @@ export function openScheduleForm(snapshot: ScheduleFormSnapshot): ScheduleFormMo
         serverId: true,
         workingDir: true,
       };
+      const cleared = clearProviderSelection({
+        ...state,
+        selectedServerId: serverId,
+        workingDir: "",
+        projectDisplay: null,
+        selectedProjectOptionId: "",
+        providerResolutionByServerId: {},
+      });
       publish(
-        clearProviderSelection({
-          ...state,
-          selectedServerId: serverId,
-          workingDir: "",
-          projectDisplay: null,
-          selectedProjectOptionId: "",
-          providerResolutionByServerId: {},
-        }),
+        state.targetKind === "assignment-team-run"
+          ? resetAssignmentTeamSelection(cleared)
+          : cleared,
       );
+    },
+    setAssignment(assignmentId, display) {
+      if (closed || !selectedOption(state.assignmentOptions, assignmentId)) return;
+      publish({
+        ...state,
+        selectedAssignmentId: assignmentId,
+        selectedAssignmentDisplay: display,
+        submitError: null,
+      });
+    },
+    setTeam(teamId, display) {
+      if (closed || !selectedOption(state.teamOptions, teamId)) return;
+      publish({
+        ...state,
+        selectedTeamId: teamId,
+        selectedTeamDisplay: display,
+        submitError: null,
+      });
+    },
+    setWorkspace(workspaceId, display) {
+      if (closed || !selectedOption(state.workspaceOptions, workspaceId)) return;
+      publish({
+        ...state,
+        selectedWorkspaceId: workspaceId,
+        selectedWorkspaceDisplay: display,
+        submitError: null,
+      });
     },
     setProject(optionId, display) {
       if (closed) {

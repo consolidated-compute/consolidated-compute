@@ -34,6 +34,9 @@ export function createScheduleCommand(): Command {
       )
       .option("--thinking <id>", "Thinking option ID for new-agent runs")
       .option("--cwd <path>", "Working directory (default: current; required with --host)")
+      .option("--assignment <id>", "Open Assignment ID for a Team Run schedule")
+      .option("--team <id>", "Team ID for an Assignment Team Run schedule")
+      .option("--workspace <id>", "Workspace ID for an Assignment Team Run schedule")
       .option("--run-now", "Fire one immediate run on creation")
       .option("--max-runs <n>", "Maximum number of runs")
       .option("--expires-in <duration>", "Time to live for the schedule"),
