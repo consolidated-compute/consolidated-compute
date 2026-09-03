@@ -110,6 +110,7 @@ export function TeamRunScreen({
     );
   } else {
     const runIsActive = !isTerminalTeamRunStatus(run.state.status);
+    const displayedSteps = getDisplayedTeamRunSteps(run);
     content = (
       <ScrollView
         style={styles.scroll}
@@ -190,7 +191,7 @@ export function TeamRunScreen({
         </DetailSection>
         <DetailSection title={t("teams.runs.detail.steps")}>
           <View style={styles.cards}>
-            {run.steps.map((step, index) => (
+            {displayedSteps.map((step, index) => (
               <RunStepCard
                 key={step.snapshot.stepId}
                 serverId={serverId}
@@ -240,6 +241,19 @@ export function TeamRunScreen({
       <BackHeader title={run?.teamSnapshot.name ?? t("teams.runs.detail.title")} onBack={back} />
       {content}
     </View>
+  );
+}
+
+function getDisplayedTeamRunSteps(run: TeamRunDto): TeamRunStepDto[] {
+  if (!run.supervision) return run.steps;
+  const { supervisorRoleId } = run.supervision;
+
+  const latestSupervisorStepIndex = run.steps.findLastIndex(
+    (step) => step.snapshot.roleId === supervisorRoleId,
+  );
+  return run.steps.filter(
+    (step, index) =>
+      step.snapshot.roleId !== supervisorRoleId || index === latestSupervisorStepIndex,
   );
 }
 
