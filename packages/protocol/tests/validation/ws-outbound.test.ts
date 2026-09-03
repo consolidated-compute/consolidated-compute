@@ -216,6 +216,89 @@ const SourceSchema = z.object({
     });
   });
 
+  it.each(["reported", "partial", "unavailable"] as const)(
+    "accepts %s Team Run step usage",
+    (status) => {
+      const timestamp = "2026-09-03T00:00:00.000Z";
+      const usage =
+        status === "unavailable" ? { status } : { status, inputTokens: 12, outputTokens: 4 };
+      const envelope = {
+        type: "session",
+        message: {
+          type: "team.run.get.response",
+          payload: {
+            requestId: "team-run-usage",
+            run: {
+              id: "run_1",
+              teamId: "team_1",
+              teamRevision: 1,
+              idempotencyKey: "idempotency_1",
+              teamSnapshot: {
+                id: "team_1",
+                revision: 1,
+                name: "Team",
+                instructions: "Run the task.",
+                roles: [
+                  {
+                    id: "builder",
+                    name: "Builder",
+                    instructions: "Build it.",
+                    profileId: "builder-profile",
+                  },
+                ],
+                workflow: [{ id: "build", roleId: "builder", instructions: null }],
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              },
+              objective: "Build the feature.",
+              workspace: {
+                workspaceId: "workspace_1",
+                projectId: "project_1",
+                cwd: "/repo",
+                displayName: "main",
+              },
+              steps: [
+                {
+                  snapshot: {
+                    stepId: "build",
+                    roleId: "builder",
+                    roleName: "Builder",
+                    roleInstructions: "Build it.",
+                    stepInstructions: null,
+                    resolvedLaunch: {
+                      profileId: "builder-profile",
+                      provider: "codex",
+                      model: "gpt-5.6-sol",
+                      modeId: null,
+                      thinkingOptionId: null,
+                      featureValues: {},
+                    },
+                  },
+                  state: {
+                    status: "succeeded",
+                    plannedAgentId: "agent_1",
+                    agentId: "agent_1",
+                    startedAt: timestamp,
+                    endedAt: timestamp,
+                    usage,
+                  },
+                },
+              ],
+              state: { status: "succeeded", startedAt: timestamp, endedAt: timestamp },
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            },
+          },
+        },
+      };
+
+      expect(GeneratedWSOutboundMessageSchema.safeParse(envelope)).toEqual({
+        success: true,
+        data: envelope,
+      });
+    },
+  );
+
   it.each([
     {
       name: "dedicated attention message",

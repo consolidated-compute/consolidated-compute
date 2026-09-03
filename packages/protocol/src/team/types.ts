@@ -209,16 +209,18 @@ export const TeamRunStepSnapshotDtoSchema = z.object({
     .optional(),
 });
 
+const TeamRunStepUsageValuesDtoSchema = z.object({
+  inputTokens: z.number().nonnegative().optional(),
+  cachedInputTokens: z.number().nonnegative().optional(),
+  outputTokens: z.number().nonnegative().optional(),
+  totalCostUsd: z.number().nonnegative().optional(),
+  contextWindowMaxTokens: z.number().nonnegative().optional(),
+  contextWindowUsedTokens: z.number().nonnegative().optional(),
+});
+
 export const TeamRunStepUsageDtoSchema = z.discriminatedUnion("status", [
-  z.object({
-    status: z.enum(["reported", "partial"]),
-    inputTokens: z.number().nonnegative().optional(),
-    cachedInputTokens: z.number().nonnegative().optional(),
-    outputTokens: z.number().nonnegative().optional(),
-    totalCostUsd: z.number().nonnegative().optional(),
-    contextWindowMaxTokens: z.number().nonnegative().optional(),
-    contextWindowUsedTokens: z.number().nonnegative().optional(),
-  }),
+  TeamRunStepUsageValuesDtoSchema.extend({ status: z.literal("reported") }),
+  TeamRunStepUsageValuesDtoSchema.extend({ status: z.literal("partial") }),
   z.object({ status: z.literal("unavailable") }),
 ]);
 
