@@ -20,6 +20,7 @@ import type {
 } from "./relationship-remote.js";
 import { HubEnrollmentRejectedError } from "./relationship-remote.js";
 import { BoundedExponentialHubRetryPolicy } from "./relationship-retry.js";
+import { normalizeHubUrl } from "./hub-origin.js";
 
 const FILE_NAME = "hub-relationship.json";
 const HubOriginSchema = z
@@ -195,21 +196,6 @@ const systemClock: HubRelationshipClock = {
     return { cancel: () => clearTimeout(timer) };
   },
 };
-
-function normalizeHubUrl(value: string): string {
-  const url = new URL(value);
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("Hub URL must use HTTP or HTTPS");
-  }
-  if (url.username || url.password) {
-    throw new Error("Hub URL cannot include credentials");
-  }
-  if (url.search || url.hash) {
-    throw new Error("Hub URL cannot include a query or fragment");
-  }
-  url.pathname = url.pathname.replace(/\/$/, "");
-  return url.toString().replace(/\/$/, "");
-}
 
 export class HubRelationshipController implements HubRelationshipManagement {
   private readonly filePath: string;

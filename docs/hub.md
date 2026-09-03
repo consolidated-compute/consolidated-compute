@@ -25,6 +25,25 @@ during interactive login or later with `paseo hub permissions grant hub.execute`
 created before this split migrate their legacy execution scope to `hub.execute`. Hub sessions cannot
 manage their own relationship or permissions.
 
+`hub.execute` is transport authority. It does not authorize a Hub workflow to select an existing
+Workspace or start a Team Run. An `access.manage` principal must approve a separate local Team Run
+binding for the current relationship and Hub origin. The binding freezes the configuration and
+trigger digest, exact Team and Assignment revisions, Workspace, supervisor, security-preview
+fingerprint, sanitized provider/model postures, event window, runtime and concurrency bounds,
+expiry, and use cap. Change those facts by revoking the binding and approving another one; bindings
+are otherwise immutable.
+
+The daemon reserves each accepted source by authenticated relationship plus stable Hub
+`triggerRunId`. That atomic reservation records the provider receipt, consumes one use, and derives
+the Team admission idempotency key. An exact retry returns the existing reservation even after
+target changes or revocation. Reusing the identity with different trigger, receipt, deadline, or
+authorization facts conflicts. Revocation and reservation share the host persistence boundary, so
+their commit order decides whether the source was already authorized. New reservations fail after
+revocation, expiry, use-cap exhaustion, or outside the frozen event window.
+
+The authority store contains no prompt, raw event body, Workspace path, provider options,
+credentials, or secrets. External event text cannot become Assignment intent through this path.
+
 ## Session grants and execution ownership
 
 Trusted clients and the Hub use the same `Session` implementation. The connection boundary supplies

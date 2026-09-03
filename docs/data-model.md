@@ -47,6 +47,7 @@ $PASEO_HOME/
 ├── config.json                          # Daemon configuration
 ├── server-id                            # Stable daemon identifier (plain text, "srv_<base64url>")
 ├── daemon-keypair.json                  # E2EE keypair for relay (mode 0600)
+├── hub-relationship.json                # Current Hub relationship and private credential
 ├── paseo.pid                            # Daemon PID lock file
 ├── daemon.log                           # Default log file (path configurable)
 ├── agents/
@@ -59,6 +60,8 @@ $PASEO_HOME/
 │   │   └── {teamId}.json                # One file per Team definition
 │   └── runs/
 │       └── {teamRunId}.json             # One file per Team Run
+├── hub/
+│   └── team-run-authority.json           # Local Team trigger approvals and immutable source reservations
 ├── projects/
 │   ├── projects.json                    # Project registry
 │   ├── workspaces.json                  # Workspace registry
