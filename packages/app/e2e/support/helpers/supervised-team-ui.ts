@@ -37,6 +37,13 @@ export async function exerciseSupervisedTeamSurface(
 
   await expect(page.getByTestId("team-run-supervision-review")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("team-run-supervision-summary")).toContainText("Needs review");
+  await expect(page.getByTestId("team-run-step-supervisor_turn_1")).toHaveCount(0);
+  const supervisorSteps = page.locator('[data-testid^="team-run-step-supervisor_turn_"]');
+  await expect(supervisorSteps).toHaveCount(1);
+  await expect(supervisorSteps).toBeVisible();
+  const workerSteps = page.locator('[data-testid^="team-run-step-worker_"]');
+  await expect(workerSteps).toHaveCount(1);
+  await expect(workerSteps).toBeVisible();
   await capture?.("supervised-human-checkpoint");
   await page.getByTestId("team-run-supervision-review").click();
 
