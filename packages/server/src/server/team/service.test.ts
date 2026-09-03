@@ -2947,7 +2947,7 @@ describe("TeamRunService", () => {
     expect(harness.runtime.cancellations).toEqual([firstAgentId]);
   });
 
-  test("fails expired unattended records during startup reconciliation", async () => {
+  test("cancels and retries expired active agents during startup reconciliation", async () => {
     let currentTime = timestamp;
     const deadlineScheduler = new MemoryDeadlineScheduler();
     const harness = await createHarness({
@@ -2978,21 +2978,48 @@ describe("TeamRunService", () => {
       },
       harness.assignments,
     );
+    await harness.repository.updateRun(run.id, (current) => {
+      const steps = current.steps.slice();
+      steps[0] = {
+        ...steps[0]!,
+        state: {
+          status: "running",
+          plannedAgentId: firstAgentId,
+          agentId: firstAgentId,
+          startedAt: timestamp,
+        },
+      };
+      return { steps, state: { status: "running", startedAt: timestamp } };
+    });
+    harness.runtime.cancellation = { status: "refused" };
 
     currentTime = "2026-08-25T12:02:00.000Z";
     await harness.service.initialize();
 
     await expect(harness.repository.getRun(run.id)).resolves.toMatchObject({
-      state: {
-        status: "failed",
-        error: "Unattended Team Run deadline elapsed before daemon recovery",
-      },
+      state: { status: "stop_failed" },
+      termination: { reason: "deadline" },
+    });
+    expect(deadlineScheduler.scheduled).toMatchObject([{ delayMs: 1_000, canceled: false }]);
+
+    harness.runtime.cancellation = { status: "settled" };
+    const terminal = waitForRunState(
+      harness.repository,
+      run.id,
+      (candidate) => candidate.state.status === "failed",
+    );
+    deadlineScheduler.fire();
+    const failed = await terminal;
+
+    expect(failed).toMatchObject({
+      state: { status: "failed" },
       termination: {
         reason: "deadline",
         requestedAt: "2026-08-25T12:02:00.000Z",
       },
     });
-    expect(deadlineScheduler.scheduled).toEqual([]);
+    expect(harness.runtime.loadedAgents).toEqual([firstAgentId, firstAgentId]);
+    expect(harness.runtime.cancellations).toEqual([firstAgentId, firstAgentId]);
     expect(harness.runtime.creations).toEqual([]);
   });
 

@@ -117,6 +117,7 @@ export interface StartAssignmentTeamRunInput {
   expectedAssignmentRevision: number;
   workspaceId: string;
   expectedPreviewFingerprint?: string;
+  /** Daemon-owned admission input. Never populate it from a client-authored Team Run request. */
   unattendedPolicy?: TeamRunUnattendedPolicyInput;
 }
 
@@ -256,6 +257,7 @@ export class TeamRunService {
   private unsubscribeWorkspaceTerminationBoundaries: (() => void) | null = null;
   private acceptingStarts = false;
   private initialized = false;
+  private shuttingDown = false;
 
   constructor(options: TeamRunServiceOptions) {
     this.repository = options.repository;
@@ -302,9 +304,8 @@ export class TeamRunService {
       for (const run of activeRuns) {
         if (this.isUnattendedDeadlineExpired(run)) {
           this.requestTermination(run.id, "deadline");
-          await this.finishTermination(
+          await this.expireUnattendedRun(
             run.id,
-            "deadline",
             "Unattended Team Run deadline elapsed before daemon recovery",
           );
           continue;
@@ -339,6 +340,7 @@ export class TeamRunService {
       if (this.unsubscribeWorkspaceTerminationBoundaries === unsubscribeTerminationBoundaries) {
         this.unsubscribeWorkspaceTerminationBoundaries = null;
       }
+      this.clearAllDeadlineTimers();
       this.releaseWorkspaceTerminationFences();
       throw error;
     }
@@ -558,6 +560,7 @@ export class TeamRunService {
   }
 
   async shutdown(): Promise<void> {
+    this.shuttingDown = true;
     await this.serializeAdmission(async () => {
       this.acceptingStarts = false;
     });
@@ -1709,7 +1712,7 @@ export class TeamRunService {
     this.deadlineTimers.set(run.id, cancel);
   }
 
-  private async expireUnattendedRun(runId: string): Promise<void> {
+  private async expireUnattendedRun(runId: string, detail?: string): Promise<void> {
     try {
       const run = await this.repository.getRun(runId);
       if (!run || isTerminalTeamRunStatus(run.state.status)) {
@@ -1721,11 +1724,19 @@ export class TeamRunService {
         return;
       }
       this.requestTermination(runId, "deadline");
+      const active = findActiveStep(run);
+      const activeAgentId =
+        active && "agentId" in active.step.state ? active.step.state.agentId : null;
+      if (activeAgentId) await this.ensureAgentLoaded(activeAgentId);
       const stopped = await this.stopActiveRun(runId);
       if (stopped.state.status === "stop_failed") {
         this.scheduleUnattendedDeadlineRetry(runId);
       } else if (!isTerminalTeamRunStatus(stopped.state.status)) {
-        await this.finishTermination(runId, "deadline", "Unattended Team Run deadline elapsed");
+        await this.finishTermination(
+          runId,
+          "deadline",
+          detail ?? "Unattended Team Run deadline elapsed",
+        );
       }
     } catch (error) {
       this.logger.error({ err: error, runId }, "Failed to enforce unattended Team Run deadline");
@@ -1734,7 +1745,7 @@ export class TeamRunService {
   }
 
   private scheduleUnattendedDeadlineRetry(runId: string): void {
-    if (!this.acceptingStarts) return;
+    if (this.shuttingDown) return;
     this.clearDeadlineTimer(runId);
     const cancel = this.scheduleDeadline(() => {
       this.deadlineTimers.delete(runId);
