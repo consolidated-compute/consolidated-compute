@@ -330,6 +330,9 @@ export const ru: TranslationResources = {
         supervisor: "Руководитель",
         selectSupervisor: "Выберите роль руководителя",
         noSupervisors: "Добавьте роль команды вне рабочего процесса исполнителей",
+        approvalFingerprint: "Отпечаток подтверждения",
+        approvalFingerprintDescription:
+          "Идентифицирует точные рабочую область и конфигурацию запуска, которые демон повторно проверит при запуске.",
         validation: {
           ...en.teams.runs.form.validation,
           supervisor_required: "Выберите роль руководителя.",

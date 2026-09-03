@@ -262,6 +262,19 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
               </Button>
             </View>
           ) : null}
+          {state.securityPreviewFingerprint ? (
+            <View style={styles.fingerprint} testID="team-run-security-preview-fingerprint">
+              <Text style={styles.fingerprintLabel}>
+                {t("teams.runs.form.approvalFingerprint")}
+              </Text>
+              <Text selectable style={styles.fingerprintValue}>
+                {state.securityPreviewFingerprint}
+              </Text>
+              <Text style={styles.fingerprintDescription}>
+                {t("teams.runs.form.approvalFingerprintDescription")}
+              </Text>
+            </View>
+          ) : null}
           {state.roleResolutions.map((resolution) => (
             <View
               key={resolution.roleId}
@@ -347,6 +360,29 @@ const styles = StyleSheet.create((theme) => ({
   assignmentMeta: { color: theme.colors.foregroundExtraMuted, fontSize: theme.fontSize.sm },
   section: { gap: theme.spacing[3] },
   securityPreviewError: { alignItems: "flex-start", gap: theme.spacing[2] },
+  fingerprint: {
+    gap: theme.spacing[2],
+    padding: theme.spacing[3],
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface1,
+  },
+  fingerprintLabel: {
+    color: theme.colors.foreground,
+    fontSize: theme.fontSize.sm,
+    fontWeight: theme.fontWeight.medium,
+  },
+  fingerprintValue: {
+    color: theme.colors.foregroundMuted,
+    fontFamily: theme.fontFamily.mono,
+    fontSize: theme.fontSize.sm,
+  },
+  fingerprintDescription: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm,
+    lineHeight: 20,
+  },
   sectionTitle: {
     color: theme.colors.foreground,
     fontSize: theme.fontSize.base,

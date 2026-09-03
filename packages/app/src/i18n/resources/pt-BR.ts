@@ -330,6 +330,9 @@ export const ptBR: TranslationResources = {
         supervisor: "Supervisor",
         selectSupervisor: "Selecione uma função de supervisor",
         noSupervisors: "Adicione uma função da equipe fora do fluxo de trabalho",
+        approvalFingerprint: "Impressão digital da aprovação",
+        approvalFingerprintDescription:
+          "Identifica o Espaço de trabalho e a configuração de inicialização exatos que o daemon verificará novamente ao iniciar.",
         validation: {
           ...en.teams.runs.form.validation,
           supervisor_required: "Selecione uma função de supervisor.",

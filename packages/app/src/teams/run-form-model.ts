@@ -118,6 +118,7 @@ export interface TeamRunFormState {
   roleResolutions: TeamRunRoleResolution[];
   securityPreviewStatus: "idle" | "pending" | "ready" | "error" | "unsupported";
   securityPreviewRequest: TeamRunSecurityPreviewRequest | null;
+  securityPreviewFingerprint: string | null;
   securityPreviewError: string | null;
   validationIssue: TeamRunFormValidationIssue | null;
   canSubmit: boolean;
@@ -651,6 +652,7 @@ export function openTeamRunForm(
     roleResolutions: [],
     securityPreviewStatus: "idle",
     securityPreviewRequest: null,
+    securityPreviewFingerprint: null,
     securityPreviewError: null,
     validationIssue: null,
     canSubmit: false,
@@ -687,6 +689,7 @@ export function openTeamRunForm(
       roleResolutions,
       securityPreviewStatus: securityPreview.status,
       securityPreviewRequest: securityPreviewCapability === true ? previewRequest : null,
+      securityPreviewFingerprint: securityPreview.preview?.fingerprint ?? null,
       securityPreviewError: securityPreview.error,
     };
     const issue =

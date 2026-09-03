@@ -734,6 +734,7 @@ describe("Team Run form model", () => {
     expect(model.getState().securityPreviewRequest?.requestKey).not.toBe(request.requestKey);
     expect(model.getState()).toMatchObject({
       securityPreviewStatus: "pending",
+      securityPreviewFingerprint: null,
       validationIssue: "security_preview_loading",
       canSubmit: false,
     });
@@ -918,6 +919,7 @@ describe("Team Run form model", () => {
 
     expect(model.getState()).toMatchObject({
       securityPreviewStatus: "ready",
+      securityPreviewFingerprint: preview.fingerprint,
       validationIssue: null,
       canSubmit: true,
       submission: { expectedPreviewFingerprint: preview.fingerprint },
@@ -948,6 +950,7 @@ describe("Team Run form model", () => {
     expect(secondRequest.requestKey).not.toBe(firstRequest.requestKey);
     expect(model.getState()).toMatchObject({
       securityPreviewStatus: "pending",
+      securityPreviewFingerprint: null,
       canSubmit: false,
       submission: null,
     });

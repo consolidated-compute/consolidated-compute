@@ -37,6 +37,7 @@ const { formModel, previewState, sheetState, submissionState } = vi.hoisted(() =
     roleResolutions: [],
     securityPreviewStatus: "ready",
     securityPreviewRequest: null,
+    securityPreviewFingerprint: "a".repeat(64) as string | null,
     securityPreviewError: null as string | null,
     validationIssue: null,
     canSubmit: true,
@@ -97,6 +98,7 @@ vi.mock("react-native-unistyles", () => ({
         borderRadius: { lg: 8 },
         fontSize: { sm: 13, base: 15 },
         fontWeight: { medium: "500" },
+        fontFamily: { mono: "monospace" },
         colors: {
           foreground: "#fff",
           foregroundMuted: "#aaa",
@@ -209,6 +211,7 @@ describe("TeamRunFormSheet", () => {
     submissionState.startPress.mockReset();
     previewState.retry.mockReset();
     formModel.getState().securityPreviewStatus = "ready";
+    formModel.getState().securityPreviewFingerprint = "a".repeat(64);
     sheetState.dismissible = true;
     sheetState.onClose = null;
   });
@@ -273,12 +276,23 @@ describe("TeamRunFormSheet", () => {
 
   it("keeps the security posture notice visible while preview capability resolves", () => {
     formModel.getState().securityPreviewStatus = "pending";
+    formModel.getState().securityPreviewFingerprint = null;
 
     render(
       <TeamRunFormSheet serverId="host-a" team={team} onClose={vi.fn()} onStarted={vi.fn()} />,
     );
 
     expect(screen.getByTestId("team-run-security-preview-pending")).toBeTruthy();
+  });
+
+  it("shows the exact fingerprint the daemon will recheck at admission", () => {
+    render(
+      <TeamRunFormSheet serverId="host-a" team={team} onClose={vi.fn()} onStarted={vi.fn()} />,
+    );
+
+    expect(screen.getByTestId("team-run-security-preview-fingerprint").textContent).toContain(
+      "a".repeat(64),
+    );
   });
 
   it("retries a failed security preview from the sheet", () => {

@@ -486,6 +486,9 @@ export const en = {
         supervisor: "Supervisor",
         selectSupervisor: "Select a supervisor role",
         noSupervisors: "Add a Team role that is not part of the worker workflow",
+        approvalFingerprint: "Approval fingerprint",
+        approvalFingerprintDescription:
+          "Identifies the exact Workspace and launch configuration the daemon will recheck when you start.",
         launchPlan: "Resolved Agent Profiles",
         validation: {
           workspace_required: "Select a Workspace.",
