@@ -241,7 +241,11 @@ export function ScheduleRow({
         </View>
       </Pressable>
       {actionError ? (
-        <View style={styles.actionError} testID={`schedule-action-error-${schedule.id}`}>
+        <View
+          style={styles.actionError}
+          accessibilityRole="alert"
+          testID={`schedule-action-error-${schedule.id}`}
+        >
           <AlertCircle size={16} color={styles.actionErrorText.color} />
           <Text style={styles.actionErrorText}>{actionError.message}</Text>
           <Button variant="ghost" size="sm" onPress={actionError.onRetry}>

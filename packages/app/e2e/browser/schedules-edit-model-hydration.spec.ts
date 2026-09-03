@@ -274,6 +274,7 @@ test.describe("Schedules", () => {
     await page.getByTestId(`schedule-menu-pause-${scheduleId}`).click();
     const error = page.getByTestId(`schedule-action-error-${scheduleId}`);
     await expect(error).toContainText("Synthetic schedule action failure", { timeout: 30_000 });
+    await expect(error).toHaveAttribute("role", "alert");
     await error.getByRole("button", { name: "Retry" }).click();
     await expect(error).toContainText("Synthetic schedule action failure", { timeout: 30_000 });
     await error.getByRole("button", { name: "Dismiss" }).click();
