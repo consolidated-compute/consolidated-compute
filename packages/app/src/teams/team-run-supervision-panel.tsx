@@ -371,7 +371,6 @@ function SupervisionEventCard({ event }: { event: TeamRunSupervisionEventDto }):
         <Text style={styles.meta}>{formatTimeAgo(new Date(event.createdAt))}</Text>
       </View>
       {event.detail ? <Text style={styles.bodyText}>{event.detail}</Text> : null}
-      <Text style={styles.eventKind}>{event.kind}</Text>
       {references.map(([label, value]) => (
         <Text key={`${label}:${value}`} style={styles.reference} selectable>
           {label}: {value}
@@ -456,7 +455,6 @@ const styles = StyleSheet.create((theme) => ({
     justifyContent: "space-between",
     gap: theme.spacing[3],
   },
-  eventKind: { color: theme.colors.foregroundExtraMuted, fontSize: theme.fontSize.sm },
   reference: {
     color: theme.colors.foregroundMuted,
     fontSize: theme.fontSize.sm,

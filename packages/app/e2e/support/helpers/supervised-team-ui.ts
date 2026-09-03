@@ -56,5 +56,6 @@ export async function exerciseSupervisedTeamSurface(
   const activity = page.getByTestId("team-run-supervision-activity");
   await expect(activity).toContainText("Human response: Continue");
   await expect(activity).toContainText("Approved through the supervised Team Run.");
+  await expect(activity).not.toContainText("human_request.resolved");
   await capture?.("supervised-completed");
 }
