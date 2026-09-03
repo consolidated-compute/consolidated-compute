@@ -61,6 +61,16 @@ window; Hub events supply explicit open and close timestamps. The repository che
 launch and both active-run limits inside the serialized run write. Team, Agent Profile, schedule,
 and authorization edits affect later admissions only.
 
+A schedule occurrence passes its persisted schedule ID, occurrence ID, and target IDs to the Team
+service. It never passes schedule text, revisions, policy, or an idempotency key. The Team service
+derives the admission key and checks for an existing run before resolving current targets, so a
+lost acknowledgement returns the original frozen run even after later edits. A fresh occurrence
+resolves the current Team and open Assignment, runs Workspace and launch preflight, and admits a
+sequential run with a one-hour deadline, four host-wide active slots, one active slot for that
+schedule, and the exact accepted provider/model pairs. Durable admission completes the occurrence;
+execution outcome remains in Team Run history. Missing or terminal targets are permanent schedule
+failures. Lock, quota, and launch failures remain visible occurrence failures and are never queued.
+
 Supervised execution uses the same Team Run record rather than a second coordinator store. Its
 admission snapshot is Assignment-only and freezes an unused Team role as supervisor, the existing
 workflow as worker templates, every resolved launch, the planned supervisor agent ID, and bounded

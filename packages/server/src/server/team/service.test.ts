@@ -711,6 +711,268 @@ describe("TeamRunService", () => {
     };
   }
 
+  test("admits a scheduled occurrence from current Assignment and Team state", async () => {
+    const harness = await createHarness();
+    const assignment = await harness.assignments.createAssignment({
+      title: "Scheduled Assignment",
+      objective: "Use the latest durable Assignment objective.",
+      workItem: null,
+    });
+    const definition = await harness.repository.updateDefinition({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      patch: { name: "Current scheduled Team" },
+    });
+    const currentAssignment = await harness.assignments.patchAssignment({
+      assignmentId: assignment.id,
+      expectedRevision: assignment.revision,
+      patch: { title: "Current scheduled Assignment" },
+    });
+
+    const run = await harness.service.admitScheduledAssignmentRun({
+      scheduleId: "schedule-1",
+      occurrenceId: "occurrence-1",
+      teamId: definition.id,
+      assignmentId: currentAssignment.id,
+      workspaceId: "wks_team_service",
+    });
+    await harness.runtime.waitForStream(firstAgentId);
+
+    expect(run).toMatchObject({
+      teamRevision: definition.revision,
+      teamSnapshot: definition,
+      assignmentRevision: currentAssignment.revision,
+      assignmentSnapshot: currentAssignment,
+      objective: currentAssignment.objective,
+      unattendedPolicy: {
+        source: { type: "schedule", scopeId: "schedule-1" },
+        executionWindow: { type: "schedule" },
+        maxRuntimeMs: 3_600_000,
+        maxActiveRunsOnHost: 4,
+        maxActiveRunsForSource: 1,
+        launchAllowlist: [{ provider: "codex", models: ["gpt-5.6"] }],
+        deadlineAt: "2026-08-25T13:00:00.000Z",
+      },
+    });
+    expect(run.supervision).toBeUndefined();
+    expect(run.idempotencyKey).toMatch(/^schedule:[a-f0-9]{64}$/u);
+    expect(run.steps).toHaveLength(definition.workflow.length);
+    await expect(harness.service.cancelRun(run.id)).resolves.toMatchObject({
+      state: { status: "canceled" },
+    });
+  });
+
+  test("returns the scheduled run after a lost acknowledgement without consulting changed inputs", async () => {
+    const harness = await createHarness();
+    const assignment = await harness.assignments.createAssignment({
+      title: "Retryable scheduled Assignment",
+      objective: "Freeze this objective once.",
+      workItem: null,
+    });
+    const input = {
+      scheduleId: "schedule-retry",
+      occurrenceId: "occurrence-retry",
+      teamId: harness.definition.id,
+      assignmentId: assignment.id,
+      workspaceId: "wks_team_service",
+    };
+
+    const admitted = await harness.service.admitScheduledAssignmentRun(input);
+    await harness.runtime.waitForStream(firstAgentId);
+    await harness.repository.updateDefinition({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+      patch: { name: "Edited after admission" },
+    });
+    await harness.assignments.patchAssignment({
+      assignmentId: assignment.id,
+      expectedRevision: assignment.revision,
+      patch: { objective: "This applies only to a later occurrence." },
+    });
+    harness.daemonConfigStore.agentProfiles = [];
+
+    await expect(harness.service.admitScheduledAssignmentRun(input)).resolves.toMatchObject({
+      id: admitted.id,
+      teamRevision: admitted.teamRevision,
+      assignmentRevision: admitted.assignmentRevision,
+      objective: admitted.objective,
+      idempotencyKey: admitted.idempotencyKey,
+    });
+    await expect(harness.repository.listRuns()).resolves.toMatchObject({
+      runs: [{ id: admitted.id }],
+    });
+    expect(harness.runtime.creations).toHaveLength(1);
+
+    await harness.service.cancelRun(admitted.id);
+  });
+
+  test("rejects reuse of a scheduled occurrence for different admission inputs", async () => {
+    const harness = await createHarness();
+    const first = await harness.assignments.createAssignment({
+      title: "First scheduled Assignment",
+      objective: "Admit this target.",
+      workItem: null,
+    });
+    const second = await harness.assignments.createAssignment({
+      title: "Second scheduled Assignment",
+      objective: "Do not substitute this target.",
+      workItem: null,
+    });
+    const admitted = await harness.service.admitScheduledAssignmentRun({
+      scheduleId: "schedule-bound-target",
+      occurrenceId: "occurrence-bound-target",
+      teamId: harness.definition.id,
+      assignmentId: first.id,
+      workspaceId: "wks_team_service",
+    });
+    await harness.runtime.waitForStream(firstAgentId);
+
+    await expect(
+      harness.service.admitScheduledAssignmentRun({
+        scheduleId: "schedule-bound-target",
+        occurrenceId: "occurrence-bound-target",
+        teamId: harness.definition.id,
+        assignmentId: second.id,
+        workspaceId: "wks_team_service",
+      }),
+    ).rejects.toMatchObject({ code: "team_run_idempotency_conflict", runId: admitted.id });
+
+    await harness.service.cancelRun(admitted.id);
+  });
+
+  test("classifies stale scheduled targets as permanent failures", async () => {
+    const harness = await createHarness();
+    const assignment = await harness.assignments.createAssignment({
+      title: "Scheduled target lifecycle",
+      objective: "Run only while every target remains available.",
+      workItem: null,
+    });
+    const baseInput = {
+      scheduleId: "schedule-stale-targets",
+      teamId: harness.definition.id,
+      workspaceId: "wks_team_service",
+    };
+
+    await expect(
+      harness.service.admitScheduledAssignmentRun({
+        ...baseInput,
+        occurrenceId: "occurrence-missing-assignment",
+        assignmentId: "asgn_0000000000000000",
+      }),
+    ).rejects.toMatchObject({
+      code: "team_scheduled_run_permanent_target_failure",
+      issue: "assignment_not_found",
+    });
+    await expect(
+      harness.service.admitScheduledAssignmentRun({
+        ...baseInput,
+        occurrenceId: "occurrence-missing-workspace",
+        assignmentId: assignment.id,
+        workspaceId: "wks_missing",
+      }),
+    ).rejects.toMatchObject({
+      code: "team_scheduled_run_permanent_target_failure",
+      issue: "workspace_not_found",
+    });
+    await harness.workspaceRegistry.archive("wks_team_service");
+    await expect(
+      harness.service.admitScheduledAssignmentRun({
+        ...baseInput,
+        occurrenceId: "occurrence-archived-workspace",
+        assignmentId: assignment.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "team_scheduled_run_permanent_target_failure",
+      issue: "workspace_archived",
+    });
+
+    const completed = await harness.assignments.completeAssignment({
+      assignmentId: assignment.id,
+      expectedRevision: assignment.revision,
+    });
+    await expect(
+      harness.service.admitScheduledAssignmentRun({
+        ...baseInput,
+        occurrenceId: "occurrence-terminal-assignment",
+        assignmentId: completed.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "team_scheduled_run_permanent_target_failure",
+      issue: "assignment_not_open",
+    });
+
+    await harness.repository.deleteDefinition({
+      teamId: harness.definition.id,
+      expectedRevision: harness.definition.revision,
+    });
+    await expect(
+      harness.service.admitScheduledAssignmentRun({
+        ...baseInput,
+        occurrenceId: "occurrence-missing-team",
+        assignmentId: completed.id,
+      }),
+    ).rejects.toMatchObject({
+      code: "team_scheduled_run_permanent_target_failure",
+      issue: "team_not_found",
+    });
+    await expect(harness.repository.listRuns()).resolves.toMatchObject({ runs: [] });
+  });
+
+  test("surfaces launch preflight failures without classifying the target as stale", async () => {
+    const harness = await createHarness();
+    const assignment = await harness.assignments.createAssignment({
+      title: "Scheduled launch preflight",
+      objective: "Fail visibly when a profile cannot resolve.",
+      workItem: null,
+    });
+    harness.daemonConfigStore.agentProfiles = harness.daemonConfigStore.agentProfiles.filter(
+      (profile) => profile.id !== "profile_reviewer",
+    );
+
+    await expect(
+      harness.service.admitScheduledAssignmentRun({
+        scheduleId: "schedule-preflight",
+        occurrenceId: "occurrence-preflight",
+        teamId: harness.definition.id,
+        assignmentId: assignment.id,
+        workspaceId: "wks_team_service",
+      }),
+    ).rejects.toBeInstanceOf(TeamExecutionPreflightError);
+    await expect(harness.repository.listRuns()).resolves.toMatchObject({ runs: [] });
+  });
+
+  test("rejects a later scheduled occurrence while the Assignment Workspace is active", async () => {
+    const harness = await createHarness();
+    const assignment = await harness.assignments.createAssignment({
+      title: "Scheduled lock owner",
+      objective: "Do not queue another occurrence behind this run.",
+      workItem: null,
+    });
+    const admitted = await harness.service.admitScheduledAssignmentRun({
+      scheduleId: "schedule-lock-owner",
+      occurrenceId: "occurrence-lock-owner",
+      teamId: harness.definition.id,
+      assignmentId: assignment.id,
+      workspaceId: "wks_team_service",
+    });
+    await harness.runtime.waitForStream(firstAgentId);
+
+    await expect(
+      harness.service.admitScheduledAssignmentRun({
+        scheduleId: "schedule-lock-contender",
+        occurrenceId: "occurrence-lock-contender",
+        teamId: harness.definition.id,
+        assignmentId: assignment.id,
+        workspaceId: "wks_team_service",
+      }),
+    ).rejects.toBeInstanceOf(TeamWorkspaceHasActiveRunError);
+    await expect(harness.repository.listRuns()).resolves.toMatchObject({
+      runs: [{ id: admitted.id }],
+    });
+
+    await harness.service.cancelRun(admitted.id);
+  });
+
   async function startSupervisedRun(harness: Harness, idempotencyKey: string) {
     harness.daemonConfigStore.agentProfiles.push({
       id: "profile_supervisor",

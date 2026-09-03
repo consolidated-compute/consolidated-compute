@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { Logger } from "pino";
 import type { TeamSupervisionAdmissionStatus } from "@getpaseo/protocol/messages";
@@ -11,7 +11,12 @@ import {
   getStructuredAgentResponse,
 } from "../agent/agent-response-loop.js";
 import type { CreateAgentFromMcpInput } from "../agent/create-agent/create.js";
-import type { AssignmentRepository } from "../assignment/repository.js";
+import {
+  AssignmentNotFoundError,
+  AssignmentRepositoryIdError,
+  AssignmentStateConflictError,
+  type AssignmentRepository,
+} from "../assignment/repository.js";
 import type { PersistedAssignmentArtifactRecord } from "../assignment/model.js";
 import type { WorkspaceMutation, WorkspaceTerminationBoundary } from "../workspace-registry.js";
 import {
@@ -46,7 +51,9 @@ import {
 import {
   TeamNotFoundError,
   TeamRepository,
+  TeamRepositoryIdError,
   TeamRevisionConflictError,
+  TeamRunIdempotencyConflictError,
   TeamRunNotFoundError,
   TeamRunNotSupervisedError,
   type ResolveTeamRunSupervisionHumanRequestInput,
@@ -78,6 +85,9 @@ type TeamRunTerminationReason = "cancel" | "workspace" | "shutdown" | "deadline"
 
 export type TeamRunDeadlineScheduler = (callback: () => void, delayMs: number) => () => void;
 const TEAM_RUN_DEADLINE_RETRY_MS = 1_000;
+const SCHEDULED_TEAM_RUN_MAX_RUNTIME_MS = 60 * 60 * 1_000;
+const SCHEDULED_TEAM_RUN_MAX_ACTIVE_RUNS_ON_HOST = 4;
+const SCHEDULED_TEAM_RUN_MAX_ACTIVE_RUNS_FOR_SOURCE = 1;
 
 const ACTIVE_STEP_STATUSES: ReadonlySet<TeamRunStepStatus> = new Set([
   "creating",
@@ -125,6 +135,14 @@ export interface AdmitSupervisedAssignmentTeamRunInput extends StartAssignmentTe
   supervisorRoleId: string;
 }
 
+export interface AdmitScheduledAssignmentTeamRunInput {
+  scheduleId: string;
+  occurrenceId: string;
+  teamId: string;
+  assignmentId: string;
+  workspaceId: string;
+}
+
 export type RespondToTeamRunSupervisionHumanRequestInput =
   ResolveTeamRunSupervisionHumanRequestInput;
 
@@ -165,6 +183,25 @@ export class TeamAssignmentRepositoryUnavailableError extends Error {
   constructor() {
     super("Assignment-backed Team Runs require an Assignment repository");
     this.name = "TeamAssignmentRepositoryUnavailableError";
+  }
+}
+
+export type TeamScheduledRunPermanentTargetIssue =
+  | "team_not_found"
+  | "assignment_not_found"
+  | "assignment_not_open"
+  | "workspace_not_found"
+  | "workspace_archived";
+
+export class TeamScheduledRunPermanentTargetError extends Error {
+  readonly code = "team_scheduled_run_permanent_target_failure";
+
+  constructor(
+    readonly issue: TeamScheduledRunPermanentTargetIssue,
+    message: string,
+  ) {
+    super(message);
+    this.name = "TeamScheduledRunPermanentTargetError";
   }
 }
 
@@ -437,6 +474,64 @@ export class TeamRunService {
         return run;
       }),
     );
+  }
+
+  async admitScheduledAssignmentRun(
+    input: AdmitScheduledAssignmentTeamRunInput,
+  ): Promise<PersistedTeamRunRecord> {
+    const assignments = this.assignmentRepository;
+    if (!assignments) throw new TeamAssignmentRepositoryUnavailableError();
+    const idempotencyKey = createScheduledTeamRunIdempotencyKey(input);
+
+    try {
+      const existing = await this.repository.getRunByIdempotency(input.teamId, idempotencyKey);
+      if (existing) {
+        requireMatchingScheduledTeamRun(existing, input, idempotencyKey);
+        return existing;
+      }
+      this.requireAcceptingStarts();
+
+      const definition = await this.repository.getDefinition(input.teamId);
+      if (!definition) {
+        throw new TeamScheduledRunPermanentTargetError(
+          "team_not_found",
+          `Scheduled Team not found: ${input.teamId}`,
+        );
+      }
+      const assignment = await assignments.getAssignment(input.assignmentId);
+      if (!assignment) {
+        throw new TeamScheduledRunPermanentTargetError(
+          "assignment_not_found",
+          `Scheduled Assignment not found: ${input.assignmentId}`,
+        );
+      }
+      if (assignment.state.status !== "open") {
+        throw new TeamScheduledRunPermanentTargetError(
+          "assignment_not_open",
+          `Scheduled Assignment ${assignment.id} is ${assignment.state.status}`,
+        );
+      }
+
+      const accepted = await this.preflight(definition, input.workspaceId);
+      return await this.startAssignmentRun({
+        teamId: definition.id,
+        expectedRevision: definition.revision,
+        idempotencyKey,
+        assignmentId: assignment.id,
+        expectedAssignmentRevision: assignment.revision,
+        workspaceId: input.workspaceId,
+        unattendedPolicy: createScheduledTeamRunUnattendedPolicy(input.scheduleId, accepted),
+      });
+    } catch (error) {
+      if (!(error instanceof TeamRepositoryIdError)) {
+        const existing = await this.repository.getRunByIdempotency(input.teamId, idempotencyKey);
+        if (existing) {
+          requireMatchingScheduledTeamRun(existing, input, idempotencyKey);
+          return existing;
+        }
+      }
+      throw translateScheduledTeamRunTargetError(error, input);
+    }
   }
 
   async admitSupervisedAssignmentRun(
@@ -1769,6 +1864,95 @@ function scheduleNodeDeadline(callback: () => void, delayMs: number): () => void
   const timer = setTimeout(callback, delayMs);
   timer.unref();
   return () => clearTimeout(timer);
+}
+
+function createScheduledTeamRunIdempotencyKey(
+  input: Pick<AdmitScheduledAssignmentTeamRunInput, "scheduleId" | "occurrenceId">,
+): string {
+  const digest = createHash("sha256")
+    .update("paseo:scheduled-assignment-team-run:v1\0")
+    .update(JSON.stringify([input.scheduleId, input.occurrenceId]))
+    .digest("hex");
+  return `schedule:${digest}`;
+}
+
+function createScheduledTeamRunUnattendedPolicy(
+  scheduleId: string,
+  accepted: AcceptedTeamRunFacts,
+): TeamRunUnattendedPolicyInput {
+  const modelsByProvider = new Map<string, Array<string | null>>();
+  for (const step of accepted.steps) {
+    const { provider, model } = step.snapshot.resolvedLaunch;
+    const models = modelsByProvider.get(provider) ?? [];
+    if (!models.includes(model)) models.push(model);
+    modelsByProvider.set(provider, models);
+  }
+  return {
+    source: { type: "schedule", scopeId: scheduleId },
+    executionWindow: { type: "schedule" },
+    maxRuntimeMs: SCHEDULED_TEAM_RUN_MAX_RUNTIME_MS,
+    maxActiveRunsOnHost: SCHEDULED_TEAM_RUN_MAX_ACTIVE_RUNS_ON_HOST,
+    maxActiveRunsForSource: SCHEDULED_TEAM_RUN_MAX_ACTIVE_RUNS_FOR_SOURCE,
+    launchAllowlist: Array.from(modelsByProvider, ([provider, models]) => ({ provider, models })),
+  };
+}
+
+function requireMatchingScheduledTeamRun(
+  run: PersistedTeamRunRecord,
+  input: AdmitScheduledAssignmentTeamRunInput,
+  idempotencyKey: string,
+): void {
+  const source = run.unattendedPolicy?.source;
+  if (
+    run.assignmentId === input.assignmentId &&
+    run.workspace.workspaceId === input.workspaceId &&
+    run.supervision === undefined &&
+    source?.type === "schedule" &&
+    source.scopeId === input.scheduleId &&
+    run.unattendedPolicy?.executionWindow.type === "schedule"
+  ) {
+    return;
+  }
+  throw new TeamRunIdempotencyConflictError(input.teamId, idempotencyKey, run.id);
+}
+
+function translateScheduledTeamRunTargetError(
+  error: unknown,
+  input: AdmitScheduledAssignmentTeamRunInput,
+): unknown {
+  if (error instanceof TeamScheduledRunPermanentTargetError) return error;
+  if (error instanceof TeamNotFoundError || error instanceof TeamRepositoryIdError) {
+    return new TeamScheduledRunPermanentTargetError(
+      "team_not_found",
+      `Scheduled Team not found: ${input.teamId}`,
+    );
+  }
+  if (error instanceof AssignmentNotFoundError || error instanceof AssignmentRepositoryIdError) {
+    return new TeamScheduledRunPermanentTargetError(
+      "assignment_not_found",
+      `Scheduled Assignment not found: ${input.assignmentId}`,
+    );
+  }
+  if (error instanceof AssignmentStateConflictError) {
+    return new TeamScheduledRunPermanentTargetError(
+      "assignment_not_open",
+      `Scheduled Assignment ${input.assignmentId} is ${error.status}`,
+    );
+  }
+  if (error instanceof TeamExecutionPreflightError) {
+    const workspaceIssue = error.issues.find(
+      (issue) => issue.kind === "workspace_not_found" || issue.kind === "workspace_archived",
+    );
+    if (workspaceIssue) {
+      return new TeamScheduledRunPermanentTargetError(
+        workspaceIssue.kind,
+        workspaceIssue.kind === "workspace_archived"
+          ? `Scheduled Workspace is archived: ${input.workspaceId}`
+          : `Scheduled Workspace not found: ${input.workspaceId}`,
+      );
+    }
+  }
+  return error;
 }
 
 function findActiveStep(run: PersistedTeamRunRecord): ActiveStep | null {
