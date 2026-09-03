@@ -17,8 +17,7 @@ export function useScheduleInspection(
     queryKey: scheduleInspectionQueryKey(serverId, scheduleId),
     dataShape: "value",
     staleTimeMs: 5_000,
-    refetchInterval: (query) =>
-      query.state.data?.runs.some((run) => run.status === "running") ? 5_000 : false,
+    refetchInterval: 5_000,
     enabled: Boolean(options.enabled && client && connected && scheduleId),
     queryFn: async () => {
       if (!client) throw new Error("Host is offline");
