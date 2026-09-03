@@ -274,7 +274,7 @@ describe("TeamRunFormSheet", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it("keeps the security posture notice visible while preview capability resolves", () => {
+  it("reserves the fingerprint card while preview capability resolves", () => {
     formModel.getState().securityPreviewStatus = "pending";
     formModel.getState().securityPreviewFingerprint = null;
 
@@ -283,6 +283,9 @@ describe("TeamRunFormSheet", () => {
     );
 
     expect(screen.getByTestId("team-run-security-preview-pending")).toBeTruthy();
+    expect(screen.getByTestId("team-run-security-preview-fingerprint").textContent).toContain(
+      "teams.runs.form.approvalFingerprintDescription",
+    );
   });
 
   it("shows the exact fingerprint the daemon will recheck at admission", () => {

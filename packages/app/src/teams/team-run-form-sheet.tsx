@@ -241,9 +241,6 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
               testID="team-run-security-preview-update-required"
             />
           ) : null}
-          {state.securityPreviewStatus === "pending" ? (
-            <TeamSecurityPostureNotice kind="pending" testID="team-run-security-preview-pending" />
-          ) : null}
           {state.securityPreviewStatus === "error" ? (
             <View style={styles.securityPreviewError}>
               <TeamSecurityPostureNotice
@@ -262,14 +259,23 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
               </Button>
             </View>
           ) : null}
-          {state.securityPreviewFingerprint ? (
+          {state.securityPreviewStatus === "pending" || state.securityPreviewFingerprint ? (
             <View style={styles.fingerprint} testID="team-run-security-preview-fingerprint">
               <Text style={styles.fingerprintLabel}>
                 {t("teams.runs.form.approvalFingerprint")}
               </Text>
-              <Text selectable style={styles.fingerprintValue}>
-                {state.securityPreviewFingerprint}
-              </Text>
+              <View style={styles.fingerprintValueSlot}>
+                {state.securityPreviewStatus === "pending" ? (
+                  <TeamSecurityPostureNotice
+                    kind="pending"
+                    testID="team-run-security-preview-pending"
+                  />
+                ) : (
+                  <Text selectable style={styles.fingerprintValue}>
+                    {state.securityPreviewFingerprint}
+                  </Text>
+                )}
+              </View>
               <Text style={styles.fingerprintDescription}>
                 {t("teams.runs.form.approvalFingerprintDescription")}
               </Text>
@@ -373,6 +379,7 @@ const styles = StyleSheet.create((theme) => ({
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.medium,
   },
+  fingerprintValueSlot: { minHeight: 40, justifyContent: "center" },
   fingerprintValue: {
     color: theme.colors.foregroundMuted,
     fontFamily: theme.fontFamily.mono,
