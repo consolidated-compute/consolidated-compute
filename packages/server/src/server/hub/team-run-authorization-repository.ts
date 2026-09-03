@@ -70,6 +70,10 @@ export interface HubTeamRunSourceReservation {
   replayed: boolean;
 }
 
+export type ValidateHubTeamRunSourceReservation = (
+  authorization: PersistedHubTeamRunAuthorization,
+) => Promise<void>;
+
 export interface BindHubTeamRunSourceInput {
   relationshipId: string;
   triggerRunId: string;
@@ -310,7 +314,10 @@ export class HubTeamRunAuthorizationRepository {
     return { authorization, existingSource: null };
   }
 
-  async reserveSource(input: ReserveHubTeamRunSourceInput): Promise<HubTeamRunSourceReservation> {
+  async reserveSource(
+    input: ReserveHubTeamRunSourceInput,
+    validateNewReservation?: ValidateHubTeamRunSourceReservation,
+  ): Promise<HubTeamRunSourceReservation> {
     return this.serializeMutation(async () => {
       const store = await this.readStore();
       const relationship = PersistedHubRelationshipIdentitySchema.parse(input.relationship);
@@ -329,7 +336,13 @@ export class HubTeamRunAuthorizationRepository {
         return { authorization, source: existing, replayed: true };
       }
 
-      const authorization = this.requireReservableAuthorization(store, {
+      let authorization = this.requireReservableAuthorization(store, {
+        ...input,
+        relationship,
+        trigger,
+      });
+      await validateNewReservation?.(authorization);
+      authorization = this.requireReservableAuthorization(store, {
         ...input,
         relationship,
         trigger,

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import type { PersistedAssignmentRecord } from "../assignment/model.js";
 import { AssignmentStateConflictError } from "../assignment/repository.js";
+import { serializeHostPersistenceMutation } from "../persistence-mutation.js";
 import type { PersistedTeamDefinition } from "../team/model.js";
 import { TeamRevisionConflictError } from "../team/repository.js";
 import {
@@ -325,5 +326,46 @@ describe("HubTeamRunAuthorizationService", () => {
     expect(replay.source).toEqual(reserved.source);
     expect(replay.replayed).toBe(true);
     expect(previewRun).toHaveBeenCalledTimes(3);
+  });
+
+  test("serializes target validation and source reservation against host mutations", async () => {
+    const approved = await service.approve(approvalInput());
+    let releaseValidation!: () => void;
+    let observeValidation!: () => void;
+    const validationBlocked = new Promise<void>((resolve) => {
+      releaseValidation = resolve;
+    });
+    const validationObserved = new Promise<void>((resolve) => {
+      observeValidation = resolve;
+    });
+    previewRun.mockImplementationOnce(async () => {
+      observeValidation();
+      await validationBlocked;
+      return currentPreview;
+    });
+
+    const reservation = service.reserve({
+      relationship: approved.relationship,
+      authorizationId: approved.id,
+      trigger: approved.trigger,
+      triggerRunId: "trigger-run-atomic",
+      providerEventReceiptId: "receipt-atomic",
+      deadlineAt: windowClose,
+    });
+    await validationObserved;
+    let sourcesVisibleBeforeMutation = -1;
+    const mutation = serializeHostPersistenceMutation(
+      repository.persistenceBoundaryKey,
+      async () => {
+        sourcesVisibleBeforeMutation = (await repository.listSourcesForAuthorization(approved.id))
+          .length;
+        currentDefinition = { ...currentDefinition, revision: 4 };
+      },
+    );
+    releaseValidation();
+
+    await reservation;
+    await mutation;
+    expect(sourcesVisibleBeforeMutation).toBe(1);
   });
 });

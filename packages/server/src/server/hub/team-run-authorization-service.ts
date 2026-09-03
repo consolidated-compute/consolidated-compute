@@ -150,13 +150,17 @@ export class HubTeamRunAuthorizationService {
     const inspection = await this.options.repository.inspectSourceReservation(input);
     if (!inspection.existingSource) {
       this.requireSupervisedAdmissionAvailable();
-      await this.requireCurrentTarget(inspection.authorization);
     }
-    const reservation = await this.options.repository.reserveSource({
-      ...input,
-      expectedAuthorizationRevision:
-        inspection.existingSource?.authorizationRevision ?? inspection.authorization.revision,
-    });
+    const reservation = await this.options.repository.reserveSource(
+      {
+        ...input,
+        expectedAuthorizationRevision:
+          inspection.existingSource?.authorizationRevision ?? inspection.authorization.revision,
+      },
+      inspection.existingSource
+        ? undefined
+        : (authorization) => this.requireCurrentTarget(authorization),
+    );
     return {
       ...reservation,
       teamRunInput: toTeamRunInput(reservation.authorization, reservation.source),
