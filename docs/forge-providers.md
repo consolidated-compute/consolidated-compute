@@ -117,6 +117,37 @@ host that is either a known cloud host or one the CLI is already authenticated
 to. Adapter probes must not make anonymous HTTP requests to remote-derived
 hosts, and adapters must not route credentials to an unauthenticated host.
 
+### Repository discovery without a checkout
+
+Keep repository identity separate from Workspace identity. The optional
+`createRepositoryDiscovery` adapter uses a forge ID, hostname, and immutable
+provider repository ID; names and clone URLs are display/checkout metadata.
+Resolve the ID before searching work so a repository rename cannot redirect a
+saved selection to a different repository.
+
+Gate these reads on `server_info.features.forgeRepositoryDiscovery` for the
+selected forge. The repository and work search RPCs return cursor pages; the
+existing checkout-scoped `forge.search` contract stays unchanged. Emit responses
+only to the requesting socket so older clients sharing its session do not
+receive unknown message types.
+
+Authentication belongs to the daemon host. Two hosts may expose different
+catalogs for the same forge hostname. GitHub discovery uses the active account
+in that host's stored `gh` authentication, including authenticated Enterprise
+hosts. Inherited token variables are excluded from both the trust check and API
+reads: an environment token cannot establish trust in a client-selected hostname.
+Sign in with `gh auth login --hostname <host>`; environment-only authentication
+does not enable discovery. Discovery does not require
+Hub, an installation token, or a local checkout. An empty search lists affiliated
+repositories, while text search also includes accessible public repositories
+and forks. GitHub search has a 1,000-result ceiling; refine the query rather than
+treating search as a complete account inventory.
+
+Pages contain at most 50 items. Work bodies are display previews, capped at
+32 KiB with an explicit truncation flag; labels are limited to the first 20.
+Selecting work must not implicitly promote its body into trusted instructions.
+An Assignment's reference metadata and its execution objective remain separate.
+
 ## App
 
 Each app forge splits into two modules so pure logic never imports the client

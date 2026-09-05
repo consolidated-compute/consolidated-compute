@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  ForgeRepositoriesSearchRequestSchema,
+  ForgeRepositoriesSearchResponseSchema,
+  ForgeRepositoryWorkSearchRequestSchema,
+  ForgeRepositoryWorkSearchResponseSchema,
+} from "./forge-repositories.js";
 import { TerminalActivitySchema } from "./terminal-activity.js";
 import { CLIENT_CAPS } from "./client-capabilities.js";
 import { AGENT_LIFECYCLE_STATUSES } from "./agent-lifecycle.js";
@@ -3220,6 +3226,8 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ValidateBranchRequestSchema,
   BranchSuggestionsRequestSchema,
   ForgeSearchRequestSchema,
+  ForgeRepositoriesSearchRequestSchema,
+  ForgeRepositoryWorkSearchRequestSchema,
   GitHubSearchRequestSchema,
   DirectorySuggestionsRequestSchema,
   PaseoWorktreeListRequestSchema,
@@ -3490,6 +3498,7 @@ export const ServerInfoStatusPayloadSchema = z
         // and github_search fallback after 2027-01-17 once the supported daemon
         // floor is >= v0.2.0.
         forgeSearch: z.boolean().optional(),
+        forgeRepositoryDiscovery: z.array(z.string()).optional(),
         // COMPAT(daemonStatusRpc): added in v0.1.76, remove gate after 2026-11-18.
         daemonStatusRpc: z.boolean().optional(),
         // COMPAT(daemonConfigReload): added in v0.4.0, remove gate after 2027-02-14.
@@ -6607,6 +6616,8 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ValidateBranchResponseSchema,
   BranchSuggestionsResponseSchema,
   ForgeSearchResponseSchema,
+  ForgeRepositoriesSearchResponseSchema,
+  ForgeRepositoryWorkSearchResponseSchema,
   GitHubSearchResponseSchema,
   DirectorySuggestionsResponseSchema,
   PaseoWorktreeListResponseSchema,

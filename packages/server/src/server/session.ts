@@ -162,6 +162,9 @@ import {
 } from "../utils/project-custom-icon.js";
 import { VoiceSession } from "./session/voice/voice-session.js";
 import { CheckoutSession } from "./session/checkout/checkout-session.js";
+import { ForgeRepositorySession } from "./session/forge/forge-repository-session.js";
+import { defaultForgeRegistry } from "../services/forge-registry.js";
+import type { ForgeRepositoryDiscovery } from "../services/forge-repository-discovery.js";
 import {
   createWorkspaceGitObserverService,
   type WorkspaceGitObserverService,
@@ -469,6 +472,7 @@ export interface SessionOptions {
   scheduleService: ScheduleService;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
+  resolveForgeRepositoryDiscovery?: (forge: string) => ForgeRepositoryDiscovery | null;
   createAgentMcpTransport?: AgentMcpTransportFactory;
   // Injected so tests can substitute the git branch rename without module mocks;
   // defaults to the real checkout-git implementation.
@@ -618,6 +622,12 @@ function resolveDirectorySync(service: DirectorySyncService | undefined): Direct
   return service ?? new DirectorySyncService();
 }
 
+function resolveForgeRepositoryDiscovery(
+  resolver: SessionOptions["resolveForgeRepositoryDiscovery"],
+): NonNullable<SessionOptions["resolveForgeRepositoryDiscovery"]> {
+  return resolver ?? ((forge) => defaultForgeRegistry.repositoryDiscovery(forge));
+}
+
 function describeRegistryTransition(record: ArchivedRecordSnapshot | null): RegistryTransition {
   if (!record) {
     return "created";
@@ -757,6 +767,7 @@ export class Session {
   private readonly workspaceDirectory: WorkspaceDirectory;
   private readonly voiceSession: VoiceSession;
   private readonly checkoutSession: CheckoutSession;
+  private readonly forgeRepositorySession: ForgeRepositorySession;
   private readonly scheduleSession: ScheduleSession;
   private readonly providerCatalogSession: ProviderCatalogSession;
   private readonly workspaceFilesSession: WorkspaceFilesSession;
@@ -925,6 +936,10 @@ export class Session {
       paseoHome: this.paseoHome,
       worktreesRoot: this.worktreesRoot,
       logger: this.sessionLogger,
+    });
+    this.forgeRepositorySession = new ForgeRepositorySession({
+      resolve: resolveForgeRepositoryDiscovery(options.resolveForgeRepositoryDiscovery),
+      emit: (message, source) => this.emitForSource(message, source),
     });
     this.workspaceGitObserver = createWorkspaceGitObserverService({
       workspaceGitService: this.workspaceGitService,
@@ -1993,7 +2008,7 @@ export class Session {
       this.dispatchHubExecutionMessage(msg) ??
       this.dispatchAgentLifecycleMessage(msg) ??
       this.dispatchAgentConfigMessage(msg) ??
-      this.dispatchCheckoutMessage(msg) ??
+      this.dispatchCheckoutMessage(msg, source) ??
       this.dispatchWorkspaceSupportMessage(msg) ??
       this.dispatchWorkspaceAndProjectMessage(msg) ??
       this.dispatchWorkspaceFileMessage(msg, source) ??
@@ -2488,8 +2503,14 @@ export class Session {
   }
 
   // eslint-disable-next-line complexity
-  private dispatchCheckoutMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+  private dispatchCheckoutMessage(
+    msg: SessionInboundMessage,
+    source?: object,
+  ): Promise<void> | undefined {
     switch (msg.type) {
+      case "forge.repositories.search.request":
+      case "forge.repositories.search_work.request":
+        return this.forgeRepositorySession.handle(msg, source);
       case "checkout_status_request":
         return this.checkoutSession.handleStatusRequest(msg);
       case "checkout.commits.list.request":
@@ -7695,6 +7716,9 @@ export class Session {
   }
 
   private emitForSource(msg: SessionOutboundMessage, source?: object): void {
+    if (!this.authorization.allowsOutbound(msg)) {
+      return;
+    }
     if (source && this.onMessageToSource) {
       this.onMessageToSource(source, msg);
       return;

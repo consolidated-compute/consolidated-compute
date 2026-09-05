@@ -52,6 +52,11 @@ import {
 } from "../services/github-service.js";
 import type { CheckDetails, ForgeService } from "../services/forge-service.js";
 import type { GitHubPullRequestStatusFacts } from "../services/github-facts.js";
+import type { ForgeRepositoryDiscovery } from "../services/forge-repository-discovery.js";
+import type {
+  ForgeRepositoryPage,
+  ForgeRepositoryWorkPage,
+} from "@getpaseo/protocol/forge-repositories";
 
 interface SessionHandlerInternals {
   interruptAgentIfRunning(agentId: string): Promise<void>;
@@ -283,6 +288,7 @@ vi.mock("./worktree-bootstrap.js", async (importOriginal) => {
 
 interface SessionForTestOptions {
   permissions?: readonly DaemonPermission[];
+  resolveForgeRepositoryDiscovery?: SessionOptions["resolveForgeRepositoryDiscovery"];
   agentManager?: { [K in keyof SessionOptions["agentManager"]]?: unknown };
   agentStorage?: { [K in keyof SessionOptions["agentStorage"]]?: unknown };
   github?: Partial<ForgeService & GitHubService>;
@@ -361,6 +367,7 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
 
   const sessionOptions: SessionOptions = {
     clientId: "test-client",
+    resolveForgeRepositoryDiscovery: options.resolveForgeRepositoryDiscovery,
     onMessage: (message) => messages.push(message),
     ...(options.targetedMessages
       ? {
@@ -766,6 +773,115 @@ describe("workspace label editing", () => {
 });
 
 describe("session authorization permissions", () => {
+  const repository = {
+    forge: "github",
+    host: "github.com",
+    id: "R_private",
+    fullName: "acme/private",
+    url: "https://github.com/acme/private",
+    cloneUrl: "https://github.com/acme/private.git",
+    visibility: "private",
+    archived: false,
+    updatedAt: "2026-09-05T10:00:00Z",
+  };
+  const repositoryPage: ForgeRepositoryPage = { items: [repository], nextCursor: null };
+  const workPage: ForgeRepositoryWorkPage = {
+    items: [
+      {
+        repository,
+        id: "I_private",
+        kind: "issue",
+        number: 1,
+        title: "Private work",
+        url: `${repository.url}/issues/1`,
+        state: "open",
+        body: "Private issue body",
+        bodyTruncated: false,
+        labels: [],
+        updatedAt: repository.updatedAt,
+      },
+    ],
+    nextCursor: null,
+  };
+
+  test.each([
+    {
+      request: {
+        type: "forge.repositories.search.request",
+        forge: "github",
+        host: "github.com",
+        requestId: "repositories",
+      },
+      response: {
+        type: "forge.repositories.search.response",
+        payload: { ...repositoryPage, requestId: "repositories" },
+      },
+    },
+    {
+      request: {
+        type: "forge.repositories.search_work.request",
+        repository,
+        kind: "issue",
+        requestId: "work",
+      },
+      response: {
+        type: "forge.repositories.search_work.response",
+        payload: { ...workPage, requestId: "work" },
+      },
+    },
+  ] satisfies Array<{ request: SessionInboundMessage; response: SessionOutboundMessage }>)(
+    "rechecks permissions before sending an in-flight $request.type reply to its source",
+    async ({ request, response }) => {
+      const started = deferred<void>();
+      const release = deferred<void>();
+      const discovery: ForgeRepositoryDiscovery = {
+        searchRepositories: async () => {
+          started.resolve();
+          await release.promise;
+          return repositoryPage;
+        },
+        searchWork: async () => {
+          started.resolve();
+          await release.promise;
+          return workPage;
+        },
+      };
+      const messages: SessionOutboundMessage[] = [];
+      const targetedMessages: Array<{ source: object; message: SessionOutboundMessage }> = [];
+      const resolvedForges: string[] = [];
+      const source = {};
+      const session = createSessionForTest({
+        permissions: ["workspace.read"],
+        resolveForgeRepositoryDiscovery: (forge) => {
+          resolvedForges.push(forge);
+          return discovery;
+        },
+        messages,
+        targetedMessages,
+      });
+      const pending = session.handleMessage(request, source);
+      try {
+        await started.promise;
+        session.setPermissions([]);
+        release.resolve();
+        await pending;
+        expect(targetedMessages).toEqual([]);
+        expect(messages).toEqual([]);
+
+        session.setPermissions(["workspace.read"]);
+        await session.handleMessage(request, source);
+        expect(targetedMessages).toEqual([{ source, message: response }]);
+        expect(targetedMessages[0].source).toBe(source);
+        expect(messages).toEqual([]);
+        expect(resolvedForges).toEqual(["github", "github"]);
+      } finally {
+        release.resolve();
+        await pending;
+        await session.cleanup();
+      }
+    },
+  );
+
   test("routes named-agent validation through the session source", async () => {
     const messages: SessionOutboundMessage[] = [];
     const providers = createProviderSnapshotManagerStub();
