@@ -7708,6 +7708,9 @@ export class Session {
   }
 
   private emitForSource(msg: SessionOutboundMessage, source?: object): void {
+    if (!this.authorization.allowsOutbound(msg)) {
+      return;
+    }
     if (source && this.onMessageToSource) {
       this.onMessageToSource(source, msg);
       return;
