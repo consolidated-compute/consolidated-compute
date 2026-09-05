@@ -164,6 +164,7 @@ import { VoiceSession } from "./session/voice/voice-session.js";
 import { CheckoutSession } from "./session/checkout/checkout-session.js";
 import { ForgeRepositorySession } from "./session/forge/forge-repository-session.js";
 import { defaultForgeRegistry } from "../services/forge-registry.js";
+import type { ForgeRepositoryDiscovery } from "../services/forge-repository-discovery.js";
 import {
   createWorkspaceGitObserverService,
   type WorkspaceGitObserverService,
@@ -471,6 +472,7 @@ export interface SessionOptions {
   scheduleService: ScheduleService;
   checkoutDiffManager: CheckoutDiffManager;
   github?: ForgeService;
+  resolveForgeRepositoryDiscovery?: (forge: string) => ForgeRepositoryDiscovery | null;
   createAgentMcpTransport?: AgentMcpTransportFactory;
   // Injected so tests can substitute the git branch rename without module mocks;
   // defaults to the real checkout-git implementation.
@@ -618,6 +620,12 @@ interface WorkspaceUpdateOptions {
 
 function resolveDirectorySync(service: DirectorySyncService | undefined): DirectorySyncService {
   return service ?? new DirectorySyncService();
+}
+
+function resolveForgeRepositoryDiscovery(
+  resolver: SessionOptions["resolveForgeRepositoryDiscovery"],
+): NonNullable<SessionOptions["resolveForgeRepositoryDiscovery"]> {
+  return resolver ?? ((forge) => defaultForgeRegistry.repositoryDiscovery(forge));
 }
 
 function describeRegistryTransition(record: ArchivedRecordSnapshot | null): RegistryTransition {
@@ -930,7 +938,7 @@ export class Session {
       logger: this.sessionLogger,
     });
     this.forgeRepositorySession = new ForgeRepositorySession({
-      resolve: (forge) => defaultForgeRegistry.repositoryDiscovery(forge),
+      resolve: resolveForgeRepositoryDiscovery(options.resolveForgeRepositoryDiscovery),
       emit: (message, source) => this.emitForSource(message, source),
     });
     this.workspaceGitObserver = createWorkspaceGitObserverService({

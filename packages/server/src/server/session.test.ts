@@ -52,7 +52,7 @@ import {
 } from "../services/github-service.js";
 import type { CheckDetails, ForgeService } from "../services/forge-service.js";
 import type { GitHubPullRequestStatusFacts } from "../services/github-facts.js";
-import { defaultForgeRegistry } from "../services/forge-registry.js";
+import type { ForgeRepositoryDiscovery } from "../services/forge-repository-discovery.js";
 import type {
   ForgeRepositoryPage,
   ForgeRepositoryWorkPage,
@@ -288,6 +288,7 @@ vi.mock("./worktree-bootstrap.js", async (importOriginal) => {
 
 interface SessionForTestOptions {
   permissions?: readonly DaemonPermission[];
+  resolveForgeRepositoryDiscovery?: SessionOptions["resolveForgeRepositoryDiscovery"];
   agentManager?: { [K in keyof SessionOptions["agentManager"]]?: unknown };
   agentStorage?: { [K in keyof SessionOptions["agentStorage"]]?: unknown };
   github?: Partial<ForgeService & GitHubService>;
@@ -366,6 +367,7 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
 
   const sessionOptions: SessionOptions = {
     clientId: "test-client",
+    resolveForgeRepositoryDiscovery: options.resolveForgeRepositoryDiscovery,
     onMessage: (message) => messages.push(message),
     ...(options.targetedMessages
       ? {
@@ -832,7 +834,7 @@ describe("session authorization permissions", () => {
     async ({ request, response }) => {
       const started = deferred<void>();
       const release = deferred<void>();
-      const discovery = vi.spyOn(defaultForgeRegistry, "repositoryDiscovery").mockReturnValue({
+      const discovery: ForgeRepositoryDiscovery = {
         searchRepositories: async () => {
           started.resolve();
           await release.promise;
@@ -843,12 +845,17 @@ describe("session authorization permissions", () => {
           await release.promise;
           return workPage;
         },
-      });
+      };
       const messages: SessionOutboundMessage[] = [];
       const targetedMessages: Array<{ source: object; message: SessionOutboundMessage }> = [];
+      const resolvedForges: string[] = [];
       const source = {};
       const session = createSessionForTest({
         permissions: ["workspace.read"],
+        resolveForgeRepositoryDiscovery: (forge) => {
+          resolvedForges.push(forge);
+          return discovery;
+        },
         messages,
         targetedMessages,
       });
@@ -866,10 +873,10 @@ describe("session authorization permissions", () => {
         expect(targetedMessages).toEqual([{ source, message: response }]);
         expect(targetedMessages[0].source).toBe(source);
         expect(messages).toEqual([]);
+        expect(resolvedForges).toEqual(["github", "github"]);
       } finally {
         release.resolve();
         await pending;
-        discovery.mockRestore();
         await session.cleanup();
       }
     },
