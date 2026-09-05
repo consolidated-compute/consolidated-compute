@@ -76,8 +76,16 @@ export function createGitHubRepositoryDiscovery(
 
   async function command(args: string[], host: string): Promise<string> {
     try {
-      return (await run(args, { cwd, envOverlay: { GH_HOST: host, GH_PROMPT_DISABLED: "1" } }))
-        .stdout;
+      return (
+        await run(args, {
+          cwd,
+          envOverlay: { GH_HOST: host, GH_PROMPT_DISABLED: "1" },
+          // Environment tokens are not bound to a stored hostname and cannot establish
+          // trust in a client-selected host. Use host-specific CLI credentials for
+          // the probe AND subsequent reads, even if inherited tokens override them.
+          envUnset: ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"],
+        })
+      ).stdout;
     } catch (error) {
       const normalized = cli.normalizeError(error, { args, cwd });
       if (normalized instanceof ForgeCliMissingError) {
@@ -113,9 +121,9 @@ export function createGitHubRepositoryDiscovery(
         "This adapter supports GitHub repository discovery.",
       );
     const host = rawHost.toLowerCase();
-    // A client-selected Enterprise host must already be trusted by the local CLI.
-    // Do not probe remote HTTP endpoints or send credentials before this succeeds.
-    await command(["auth", "status", "--hostname", host], host);
+    // With environment tokens removed, gh only authenticates stored hosts.
+    // Inactive accounts are irrelevant to the credentials used by gh api.
+    await command(["auth", "status", "--active", "--hostname", host], host);
     return host;
   }
 

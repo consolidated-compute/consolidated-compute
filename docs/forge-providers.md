@@ -132,8 +132,12 @@ only to the requesting socket so older clients sharing its session do not
 receive unknown message types.
 
 Authentication belongs to the daemon host. Two hosts may expose different
-catalogs for the same forge hostname. GitHub discovery uses that host's `gh`
-authentication, including authenticated Enterprise hosts; it does not require
+catalogs for the same forge hostname. GitHub discovery uses the active account
+in that host's stored `gh` authentication, including authenticated Enterprise
+hosts. Inherited token variables are excluded from both the trust check and API
+reads: an environment token cannot establish trust in a client-selected hostname.
+Sign in with `gh auth login --hostname <host>`; environment-only authentication
+does not enable discovery. Discovery does not require
 Hub, an installation token, or a local checkout. An empty search lists affiliated
 repositories, while text search also includes accessible public repositories
 and forks. GitHub search has a 1,000-result ceiling; refine the query rather than

@@ -59,6 +59,7 @@ interface ProbeHostViaCliAuthStatusOptions {
 export interface ForgeCliRunnerOptions {
   cwd: string;
   envOverlay?: Record<string, string>;
+  envUnset?: readonly string[];
 }
 
 export interface ForgeCliRunnerResult {
@@ -102,13 +103,24 @@ export interface ForgeCliRunnerFactory {
  * trio. The three adapters differ only in the params passed here.
  */
 export function createForgeCliRunner(options: CreateForgeCliRunnerOptions): ForgeCliRunnerFactory {
-  const run: ForgeCliRunner = (args, runOptions) =>
-    execCommand(options.binary, args, {
+  const run: ForgeCliRunner = (args, runOptions) => {
+    const envOverlay: Record<string, string | undefined> = {
+      ...options.envOverlay,
+      ...runOptions.envOverlay,
+    };
+    const unsetKeys = new Set(runOptions.envUnset?.map((key) => key.toUpperCase()));
+    // Windows environment lookup is case-insensitive. Remove inherited spelling
+    // variants too, not only the exact overlay key, before spawning the child.
+    for (const key of [...Object.keys(process.env), ...Object.keys(envOverlay)]) {
+      if (unsetKeys.has(key.toUpperCase())) envOverlay[key] = undefined;
+    }
+    return execCommand(options.binary, args, {
       cwd: runOptions.cwd,
-      envOverlay: { ...options.envOverlay, ...runOptions.envOverlay },
+      envOverlay,
       maxBuffer: 10 * 1024 * 1024,
       timeout: options.timeoutMs,
     });
+  };
 
   function normalizeError(
     error: unknown,

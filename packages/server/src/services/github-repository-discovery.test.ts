@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createGitHubRepositoryDiscovery } from "./github-repository-discovery.js";
-import type { ForgeCliRunner } from "./forge-cli-command.js";
+import {
+  createForgeCliRunner,
+  ForgeCommandError,
+  type ForgeCliRunner,
+} from "./forge-cli-command.js";
 
 const repository = {
   id: "R_selected",
@@ -48,6 +52,61 @@ function fixture(responses: unknown[]) {
 }
 
 describe("GitHub repository discovery", () => {
+  it("excludes inherited tokens from the actual CLI child for both authentication and work reads", async () => {
+    const inheritedTokens = {
+      GH_TOKEN: "fixture-public-primary",
+      GITHUB_TOKEN: "fixture-public-fallback",
+      GH_ENTERPRISE_TOKEN: "fixture-enterprise-primary",
+      GITHUB_ENTERPRISE_TOKEN: "fixture-enterprise-fallback",
+      github_enterprise_token: "fixture-windows-case-variant",
+    };
+    const child = createForgeCliRunner({
+      binary: process.execPath,
+      envOverlay: { ...inheritedTokens, FORGE_TEST_VISIBLE: "keep" },
+      timeoutMs: 5_000,
+      isAuthFailureText: () => false,
+      errorClasses: {
+        isAlreadyClassified: () => false,
+        isCommandError: (error): error is ForgeCommandError => error instanceof ForgeCommandError,
+        createAuthError: () => new Error("unexpected authentication failure"),
+        createMissingError: () => new Error("missing node"),
+        createCommandError: (params) =>
+          new ForgeCommandError({ brand: "test", binary: "node" }, params),
+      },
+    });
+    const childEnvironments: unknown[] = [];
+    const responses = workResponses();
+    const discovery = createGitHubRepositoryDiscovery({
+      run: async (_args, options) => {
+        const result = await child.run(
+          [
+            "-e",
+            `
+          const tokens = ${JSON.stringify(Object.keys(inheritedTokens))};
+          process.stdout.write(JSON.stringify({
+            presentTokenKeys: tokens.filter((key) => Object.hasOwn(process.env, key)),
+            host: process.env.GH_HOST,
+            kept: process.env.FORGE_TEST_VISIBLE,
+          }));
+        `,
+          ],
+          options,
+        );
+        childEnvironments.push(JSON.parse(result.stdout));
+        return { stdout: JSON.stringify(responses.shift()), stderr: "" };
+      },
+    });
+    await discovery.searchWork({
+      repository: { ...identity, host: "ghe.acme.test" },
+      kind: "issue",
+    });
+    expect(childEnvironments).toEqual([
+      { presentTokenKeys: [], host: "ghe.acme.test", kept: "keep" },
+      { presentTokenKeys: [], host: "ghe.acme.test", kept: "keep" },
+      { presentTokenKeys: [], host: "ghe.acme.test", kept: "keep" },
+    ]);
+  });
+
   it("lists the host user's repositories with a bounded next page and no checkout", async () => {
     const { discovery, calls } = fixture([
       {},
@@ -81,7 +140,7 @@ describe("GitHub repository discovery", () => {
       ],
       nextCursor: "page-2",
     });
-    expect(calls[0].args).toEqual(["auth", "status", "--hostname", "github.com"]);
+    expect(calls[0].args).toEqual(["auth", "status", "--active", "--hostname", "github.com"]);
     expect(calls[1].args).toContain("limit=2");
     expect(calls[1].args.join(" ")).toContain("ORGANIZATION_MEMBER");
     expect(calls.map(({ cwd }) => cwd)).toEqual(["/no-checkout", "/no-checkout"]);
