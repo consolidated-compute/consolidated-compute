@@ -2,6 +2,8 @@ import { getForgeDefinition } from "@getpaseo/protocol/forge-manifest";
 import { normalizeHost } from "@getpaseo/protocol/git-remote";
 import { createGitHubService, probeGitHubHost } from "./github-service.js";
 import type { ForgeService } from "./forge-service.js";
+import type { ForgeRepositoryDiscovery } from "./forge-repository-discovery.js";
+import { createGitHubRepositoryDiscovery } from "./github-repository-discovery.js";
 import { createGiteaService, resolveGiteaFamilyForge } from "./gitea-service.js";
 import { createGitLabService, probeGitLabHost } from "./gitlab-service.js";
 
@@ -9,6 +11,7 @@ export type ForgeServiceFactory = () => ForgeService;
 
 export interface ForgeAdapterRegistration {
   createService: ForgeServiceFactory;
+  createRepositoryDiscovery?: () => ForgeRepositoryDiscovery;
   matchesHost?: (host: string) => boolean;
   probeHost?: (host: string) => Promise<boolean>;
 }
@@ -75,6 +78,19 @@ export class ForgeRegistry {
     return matches[0] ?? null;
   }
 
+  repositoryDiscovery(forge: string): ForgeRepositoryDiscovery | null {
+    const normalized = parseForgeId(forge);
+    return normalized
+      ? (this.#adapters.get(normalized)?.createRepositoryDiscovery?.() ?? null)
+      : null;
+  }
+
+  repositoryDiscoveryIds(): string[] {
+    return [...this.#adapters]
+      .filter(([, adapter]) => adapter.createRepositoryDiscovery)
+      .map(([forge]) => forge);
+  }
+
   async probeHost(host: string): Promise<string | null> {
     const entries = [...this.#adapters];
     // allSettled, not all: a third-party probe that throws means "not this
@@ -139,6 +155,7 @@ export const defaultForgeRegistry = new ForgeRegistry([
     "github",
     {
       createService: createGitHubService,
+      createRepositoryDiscovery: createGitHubRepositoryDiscovery,
       matchesHost: matchesCloudHost("github"),
       probeHost: probeGitHubHost,
     },

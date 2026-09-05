@@ -162,6 +162,8 @@ import {
 } from "../utils/project-custom-icon.js";
 import { VoiceSession } from "./session/voice/voice-session.js";
 import { CheckoutSession } from "./session/checkout/checkout-session.js";
+import { ForgeRepositorySession } from "./session/forge/forge-repository-session.js";
+import { defaultForgeRegistry } from "../services/forge-registry.js";
 import {
   createWorkspaceGitObserverService,
   type WorkspaceGitObserverService,
@@ -757,6 +759,7 @@ export class Session {
   private readonly workspaceDirectory: WorkspaceDirectory;
   private readonly voiceSession: VoiceSession;
   private readonly checkoutSession: CheckoutSession;
+  private readonly forgeRepositorySession: ForgeRepositorySession;
   private readonly scheduleSession: ScheduleSession;
   private readonly providerCatalogSession: ProviderCatalogSession;
   private readonly workspaceFilesSession: WorkspaceFilesSession;
@@ -925,6 +928,10 @@ export class Session {
       paseoHome: this.paseoHome,
       worktreesRoot: this.worktreesRoot,
       logger: this.sessionLogger,
+    });
+    this.forgeRepositorySession = new ForgeRepositorySession({
+      resolve: (forge) => defaultForgeRegistry.repositoryDiscovery(forge),
+      emit: (message, source) => this.emitForSource(message, source),
     });
     this.workspaceGitObserver = createWorkspaceGitObserverService({
       workspaceGitService: this.workspaceGitService,
@@ -1993,7 +2000,7 @@ export class Session {
       this.dispatchHubExecutionMessage(msg) ??
       this.dispatchAgentLifecycleMessage(msg) ??
       this.dispatchAgentConfigMessage(msg) ??
-      this.dispatchCheckoutMessage(msg) ??
+      this.dispatchCheckoutMessage(msg, source) ??
       this.dispatchWorkspaceSupportMessage(msg) ??
       this.dispatchWorkspaceAndProjectMessage(msg) ??
       this.dispatchWorkspaceFileMessage(msg, source) ??
@@ -2488,8 +2495,14 @@ export class Session {
   }
 
   // eslint-disable-next-line complexity
-  private dispatchCheckoutMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+  private dispatchCheckoutMessage(
+    msg: SessionInboundMessage,
+    source?: object,
+  ): Promise<void> | undefined {
     switch (msg.type) {
+      case "forge.repositories.search.request":
+      case "forge.repositories.search_work.request":
+        return this.forgeRepositorySession.handle(msg, source);
       case "checkout_status_request":
         return this.checkoutSession.handleStatusRequest(msg);
       case "checkout.commits.list.request":

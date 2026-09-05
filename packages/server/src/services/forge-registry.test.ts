@@ -22,6 +22,29 @@ describe("forge registry", () => {
     expect(createForgeService("bitbucket")).toBeNull();
   });
 
+  it("advertises only adapters with checkout-independent repository discovery", () => {
+    expect(defaultForgeRegistry.repositoryDiscoveryIds()).toEqual(["github"]);
+    expect(defaultForgeRegistry.repositoryDiscovery("github")?.searchRepositories).toBeTypeOf(
+      "function",
+    );
+    expect(defaultForgeRegistry.repositoryDiscovery("github")?.searchWork).toBeTypeOf("function");
+    expect(defaultForgeRegistry.repositoryDiscovery("gitlab")).toBeNull();
+    expect(defaultForgeRegistry.repositoryDiscovery("unknown")).toBeNull();
+    const registry = new ForgeRegistry();
+    const discovery = {
+      searchRepositories: async () => ({ items: [], nextCursor: null }),
+      searchWork: async () => ({ items: [], nextCursor: null }),
+    };
+    const unregister = registry.register("acme", {
+      createService: createGitHubService,
+      createRepositoryDiscovery: () => discovery,
+    });
+    expect(registry.repositoryDiscoveryIds()).toEqual(["acme"]);
+    expect(registry.repositoryDiscovery("acme")).toBe(discovery);
+    unregister();
+    expect(registry.repositoryDiscoveryIds()).toEqual([]);
+  });
+
   it("keeps the built-in registry in sync with the forge manifest", () => {
     expect([...defaultForgeRegistry.ids()].sort()).toEqual([...FORGE_IDS].sort());
   });

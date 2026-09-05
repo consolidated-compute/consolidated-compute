@@ -168,6 +168,11 @@ Browser Playwright specs live in `packages/app/e2e/browser/`. Desktop Playwright
 
 Live provider smoke tests belong in `*.real.e2e.test.ts`, not `*.test.ts`, even when guarded by environment variables. Default unit suites must use deterministic provider adapters/fakes so missing credits, auth outages, and upstream model drift do not block normal CI.
 
+CC dogfood and manual QA use deterministic adapters unless the behavior requires a real provider.
+For a real-provider proof, select the cheapest available model that supports the capability being
+tested, keep prompts and turn counts small, and record the model and usage with the evidence.
+Use test-specific Profiles; do not change the operator's saved Profiles or default model.
+
 Codex MultiAgentV2 real tests use local Codex authentication rather than the OpenRouter-compatible test provider. OpenRouter does not accept Codex collaboration-history items on the parent follow-up request, so it cannot verify a complete native sub-agent turn.
 
 ### Test setup

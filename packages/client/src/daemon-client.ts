@@ -1,4 +1,8 @@
 import type { z } from "zod";
+import type {
+  ForgeRepositorySearchInput,
+  ForgeRepositoryWorkSearchInput,
+} from "@getpaseo/protocol/forge-repositories";
 import { CLIENT_CAPS, type ClientCapability } from "@getpaseo/protocol/client-capabilities";
 import type { AgentAttentionNotificationPayload } from "@getpaseo/protocol/agent-attention-notification";
 import { parsePluginSourceReference } from "@getpaseo/protocol/plugin-source-reference";
@@ -4387,6 +4391,32 @@ export class DaemonClient {
       responseType: "forge.search.response",
       timeout: 15000,
     });
+  }
+
+  async searchForgeRepositories(input: ForgeRepositorySearchInput, requestId?: string) {
+    this.requireForgeRepositoryDiscovery(input.forge);
+    return this.sendNamespacedCorrelatedSessionRequest<"forge.repositories.search.response">({
+      requestId,
+      message: { ...input, type: "forge.repositories.search.request" },
+      timeout: 60_000,
+    });
+  }
+
+  async searchForgeRepositoryWork(input: ForgeRepositoryWorkSearchInput, requestId?: string) {
+    this.requireForgeRepositoryDiscovery(input.repository.forge);
+    return this.sendNamespacedCorrelatedSessionRequest<"forge.repositories.search_work.response">({
+      requestId,
+      message: { ...input, type: "forge.repositories.search_work.request" },
+      timeout: 60_000,
+    });
+  }
+
+  private requireForgeRepositoryDiscovery(forge: string): void {
+    // COMPAT(forgeRepositoryDiscovery): added in v0.7.2, remove after 2027-03-05
+    // once the supported daemon floor implements repository discovery.
+    if (!this.lastServerInfoMessage?.features?.forgeRepositoryDiscovery?.includes(forge)) {
+      throw new Error("Update the host to use repository discovery for this forge.");
+    }
   }
 
   async searchGitHub(
