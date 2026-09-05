@@ -298,6 +298,92 @@ test("advertises consumer-provided browser automation capabilities", async () =>
   });
 });
 
+test("repository discovery gates both reads on the selected forge capability", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "forge_discovery_gate",
+    transportFactory: () => mock.transport,
+    reconnect: { enabled: false },
+  });
+  clients.push(client);
+  const connecting = client.connect();
+  mock.triggerOpen({ features: { forgeSearch: true } });
+  await connecting;
+
+  await expect(
+    client.searchForgeRepositories({ forge: "github", host: "github.com" }),
+  ).rejects.toThrow("Update the host");
+  await expect(
+    client.searchForgeRepositoryWork({
+      repository: { forge: "github", host: "github.com", id: "R_selected" },
+      kind: "issue",
+    }),
+  ).rejects.toThrow("Update the host");
+  expect(mock.sent).toEqual([]);
+});
+
+test("repository discovery correlates checkout-independent pages and provider errors", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "forge_discovery_pages",
+    transportFactory: () => mock.transport,
+    reconnect: { enabled: false },
+  });
+  clients.push(client);
+  const connecting = client.connect();
+  mock.triggerOpen({ features: { forgeRepositoryDiscovery: ["github"] } });
+  await connecting;
+
+  await expect(
+    client.searchForgeRepositories({ forge: "gitlab", host: "gitlab.com" }),
+  ).rejects.toThrow("Update the host");
+  expect(mock.sent).toEqual([]);
+  const pending = client.searchForgeRepositories(
+    { forge: "github", host: "github.com", cursor: "next", limit: 2 },
+    "repos",
+  );
+  await Promise.resolve();
+  expect(parseSentFrame(mock.sent[0])).toEqual({
+    type: "forge.repositories.search.request",
+    requestId: "repos",
+    forge: "github",
+    host: "github.com",
+    cursor: "next",
+    limit: 2,
+  });
+  const payload = { requestId: "repos", items: [], nextCursor: "following" };
+  mock.triggerMessage(wrapSessionMessage({ type: "forge.repositories.search.response", payload }));
+  await expect(pending).resolves.toEqual(payload);
+
+  const repository = { forge: "github", host: "github.com", id: "R_selected" };
+  const pendingWork = client.searchForgeRepositoryWork(
+    { repository, kind: "issue", cursor: "page-2" },
+    "work",
+  );
+  await Promise.resolve();
+  expect(parseSentFrame(mock.sent[1])).toEqual({
+    type: "forge.repositories.search_work.request",
+    requestId: "work",
+    repository,
+    kind: "issue",
+    cursor: "page-2",
+  });
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "rpc_error",
+      payload: {
+        requestId: "work",
+        requestType: "forge.repositories.search_work.request",
+        code: "forge_discovery_rate_limited",
+        error: "GitHub rate limit reached. Retry later.",
+      },
+    }),
+  );
+  await expect(pendingWork).rejects.toThrow("GitHub rate limit reached");
+});
+
 test("Hub management requires daemon support before dispatching requests", async () => {
   const mock = createMockTransport();
   const client = new DaemonClient({
