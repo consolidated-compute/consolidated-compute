@@ -4,6 +4,7 @@ import {
   createForgeCliRunner,
   ForgeCommandError,
   type ForgeCliRunner,
+  type ForgeCliRunnerOptions,
 } from "./forge-cli-command.js";
 
 const repository = {
@@ -40,7 +41,7 @@ function workResponses(item = work) {
 }
 
 function fixture(responses: unknown[]) {
-  const calls: Array<{ args: string[]; cwd: string; envOverlay?: Record<string, string> }> = [];
+  const calls: Array<ForgeCliRunnerOptions & { args: string[] }> = [];
   const run: ForgeCliRunner = async (args, options) => {
     calls.push({ args, ...options });
     if (responses.length === 0) throw new Error("Unexpected CLI call");
@@ -52,6 +53,63 @@ function fixture(responses: unknown[]) {
 }
 
 describe("GitHub repository discovery", () => {
+  it("retries the stored-host probe without --active when an older gh rejects that flag", async () => {
+    const unknownActiveFlag = Object.assign(new Error("CLI failed"), {
+      code: 1,
+      stderr: "unknown flag: --active\n\nUsage: gh auth status [flags]\n",
+    });
+    const { discovery, calls } = fixture([unknownActiveFlag, ...workResponses()]);
+    const page = await discovery.searchWork({ repository: identity, kind: "issue" });
+    expect(page.items.map(({ id }) => id)).toEqual([work.id]);
+    expect(calls.slice(0, 2).map(({ args }) => args)).toEqual([
+      ["auth", "status", "--active", "--hostname", "github.com"],
+      ["auth", "status", "--hostname", "github.com"],
+    ]);
+    const tokenKeys = [
+      "GH_TOKEN",
+      "GITHUB_TOKEN",
+      "GH_ENTERPRISE_TOKEN",
+      "GITHUB_ENTERPRISE_TOKEN",
+    ];
+    expect(calls.map(({ envUnset }) => envUnset)).toEqual([
+      [...tokenKeys, "GH_HOST"],
+      [...tokenKeys, "GH_HOST"],
+      tokenKeys,
+      tokenKeys,
+    ]);
+  });
+
+  it.each([
+    { stderr: "authentication failed", code: "unauthenticated" },
+    { stderr: "unknown flag: --active", code: "provider_error" },
+  ])("stops when the legacy probe fails with $code", async ({ stderr, code }) => {
+    const { discovery, calls } = fixture([
+      Object.assign(new Error("CLI failed"), { code: 1, stderr: "unknown flag: --active\r\n" }),
+      Object.assign(new Error("CLI failed"), { code: 1, stderr }),
+    ]);
+    await expect(discovery.searchRepositories(identity)).rejects.toMatchObject({ code });
+    expect(calls.map(({ args }) => args)).toEqual([
+      ["auth", "status", "--active", "--hostname", "github.com"],
+      ["auth", "status", "--hostname", "github.com"],
+    ]);
+  });
+
+  it.each([
+    { stderr: "unknown flag: --hostname", code: "provider_error" },
+    { stderr: "unknown flag: --active-extra", code: "provider_error" },
+    { stderr: "authentication failed", code: "unauthenticated" },
+    { stderr: "API rate limit exceeded", code: "rate_limited" },
+    { stderr: "context deadline exceeded", code: "provider_error" },
+  ])("does not retry an active-account probe for $stderr", async ({ stderr, code }) => {
+    const { discovery, calls } = fixture([
+      Object.assign(new Error("CLI failed"), { code: 1, stderr }),
+    ]);
+    await expect(discovery.searchRepositories(identity)).rejects.toMatchObject({ code });
+    expect(calls.map(({ args }) => args)).toEqual([
+      ["auth", "status", "--active", "--hostname", "github.com"],
+    ]);
+  });
+
   it("excludes inherited tokens from the actual CLI child for both authentication and work reads", async () => {
     const inheritedTokens = {
       GH_TOKEN: "fixture-public-primary",
@@ -85,7 +143,7 @@ describe("GitHub repository discovery", () => {
           const tokens = ${JSON.stringify(Object.keys(inheritedTokens))};
           process.stdout.write(JSON.stringify({
             presentTokenKeys: tokens.filter((key) => Object.hasOwn(process.env, key)),
-            host: process.env.GH_HOST,
+            host: process.env.GH_HOST ?? null,
             kept: process.env.FORGE_TEST_VISIBLE,
           }));
         `,
@@ -101,7 +159,7 @@ describe("GitHub repository discovery", () => {
       kind: "issue",
     });
     expect(childEnvironments).toEqual([
-      { presentTokenKeys: [], host: "ghe.acme.test", kept: "keep" },
+      { presentTokenKeys: [], host: null, kept: "keep" },
       { presentTokenKeys: [], host: "ghe.acme.test", kept: "keep" },
       { presentTokenKeys: [], host: "ghe.acme.test", kept: "keep" },
     ]);

@@ -75,6 +75,7 @@ export function createGitHubRepositoryDiscovery(
   const cwd = options.cwd ?? homedir();
 
   async function command(args: string[], host: string): Promise<string> {
+    const isAuthProbe = args[0] === "auth" && args[1] === "status";
     try {
       return (
         await run(args, {
@@ -83,11 +84,31 @@ export function createGitHubRepositoryDiscovery(
           // Environment tokens are not bound to a stored hostname and cannot establish
           // trust in a client-selected host. Use host-specific CLI credentials for
           // the probe AND subsequent reads, even if inherited tokens override them.
-          envUnset: ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"],
+          envUnset: [
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+            "GH_ENTERPRISE_TOKEN",
+            "GITHUB_ENTERPRISE_TOKEN",
+            // Older gh includes GH_HOST in its known-host list. The probe must
+            // derive trust only from stored configuration, not this request.
+            ...(isAuthProbe ? ["GH_HOST"] : []),
+          ],
         })
       ).stdout;
     } catch (error) {
       const normalized = cli.normalizeError(error, { args, cwd });
+      const detail =
+        normalized instanceof ForgeCommandError || normalized instanceof ForgeAuthenticationError
+          ? normalized.stderr
+          : "";
+      if (isAuthProbe && args.includes("--active") && /^unknown flag: --active\r?$/m.test(detail)) {
+        // COMPAT(ghAuthActive): added in v0.7.2, remove after 2027-03-05 once
+        // every supported gh version accepts --active (2.23 does not).
+        return command(
+          args.filter((arg) => arg !== "--active"),
+          host,
+        );
+      }
       if (normalized instanceof ForgeCliMissingError) {
         throw new ForgeRepositoryDiscoveryError(
           "cli_missing",
@@ -100,7 +121,6 @@ export function createGitHubRepositoryDiscovery(
           `Sign in with gh auth login --hostname ${host} on the host.`,
         );
       }
-      const detail = normalized instanceof ForgeCommandError ? normalized.stderr : "";
       if (/rate limit|secondary rate|abuse detection/i.test(detail)) {
         throw new ForgeRepositoryDiscoveryError(
           "rate_limited",
