@@ -37,17 +37,24 @@ const daemonTest = metroTest.extend<
   {
     e2eForkProviders: string[];
     e2eInjectPaseoTools: boolean;
+    e2eGithubWorkFixture: boolean;
     e2eWorker: void;
     e2eWorkerClient: SeedDaemonClient;
   }
 >({
   e2eForkProviders: [[], { scope: "worker", option: true }],
   e2eInjectPaseoTools: [false, { scope: "worker", option: true }],
+  e2eGithubWorkFixture: [false, { scope: "worker", option: true }],
   e2eWorker: [
-    async ({ e2eForkProviders, e2eInjectPaseoTools }, provide, workerInfo) => {
+    async (
+      { e2eForkProviders, e2eInjectPaseoTools, e2eGithubWorkFixture },
+      provide,
+      workerInfo,
+    ) => {
       const worker = await startE2EWorker(workerInfo.workerIndex, {
         forkProviders: e2eForkProviders,
         injectPaseoTools: e2eInjectPaseoTools,
+        githubWorkFixture: e2eGithubWorkFixture,
       });
       try {
         await provide();

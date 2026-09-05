@@ -436,6 +436,10 @@ export function buildAssignmentsRoute() {
   return "/assignments" as const;
 }
 
+export function buildGitHubWorkRoute() {
+  return "/github-work" as const;
+}
+
 export function buildAssignmentRoute(serverId: string, assignmentId: string) {
   const normalizedServerId = trimNonEmpty(serverId);
   const normalizedAssignmentId = trimNonEmpty(assignmentId);

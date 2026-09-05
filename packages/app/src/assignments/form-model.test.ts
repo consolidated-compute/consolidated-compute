@@ -2,6 +2,38 @@ import { describe, expect, it, vi } from "vitest";
 import type { AssignmentDto } from "@getpaseo/protocol/assignment/types";
 import { openAssignmentForm } from "./form-model";
 
+it("seeds a bounded external Work Item without implicitly importing its body as an objective", () => {
+  const workItem = {
+    sourceId: "github",
+    sourceLabel: "GitHub",
+    resourceType: "issue",
+    resourceId: "github.com:R_1:I_1",
+    identifier: "#1",
+    title: "x".repeat(512),
+    url: "https://github.com/org/project/issues/1",
+  };
+  const model = openAssignmentForm({
+    mode: "create",
+    hosts: [{ serverId: "laptop", label: "Laptop" }],
+    initialWorkItem: workItem,
+  });
+  expect(model.getState()).toMatchObject({
+    title: "x".repeat(120),
+    objective: "",
+    workItem,
+    canSubmit: false,
+    validationIssue: "objective_required",
+  });
+  model.setObjective("Operator intent");
+  expect(model.getState().submission).toEqual({
+    kind: "create",
+    serverId: "laptop",
+    assignment: { title: "x".repeat(120), objective: "Operator intent", workItem },
+  });
+  model.setHost("desktop", "Desktop");
+  expect(model.getState().workItem).toBeNull();
+});
+
 const existing: AssignmentDto = {
   id: "asgn_0123456789abcdef",
   revision: 4,

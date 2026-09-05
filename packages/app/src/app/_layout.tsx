@@ -866,6 +866,7 @@ function AppWithSidebar({ children }: { children: ReactNode }) {
       pathname === "/sessions" ||
       pathname === "/schedules" ||
       pathname === "/assignments" ||
+      pathname === "/github-work" ||
       pathname.startsWith("/assignments/") ||
       pathname === "/teams" ||
       pathname.startsWith("/teams/") ||
@@ -900,6 +901,7 @@ function RootStack() {
         <Stack.Screen name="sessions" />
         <Stack.Screen name="schedules" />
         <Stack.Screen name="assignments/index" />
+        <Stack.Screen name="github-work" />
         <Stack.Screen name="assignments/[serverId]/[assignmentId]" />
         <Stack.Screen name="teams/index" />
         <Stack.Screen name="teams/[serverId]/[teamId]" />

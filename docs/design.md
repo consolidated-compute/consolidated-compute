@@ -181,7 +181,7 @@ Terminology:
 
 - Workspace, never "checkout".
 - Host, except where the user-facing concept is the daemon process itself ("Restart daemon").
-- Project, not "repo" or "repository".
+- Use the [Project and Repository distinction](glossary.md) when naming local roots and remote Forge resources.
 - Provider, not "model provider".
 - Session and agent are distinct: a session is a historical entry in `sessions-screen.tsx`; an agent is a live entity in the workspace.
 
