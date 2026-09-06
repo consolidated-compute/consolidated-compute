@@ -16,6 +16,7 @@ import {
   buildTeamsRoute,
   buildAssignmentRoute,
   buildAssignmentsRoute,
+  buildGitHubWorkRoute,
   buildProjectSettingsRoute,
   buildProjectsSettingsRoute,
   decodeFilePathFromPathSegment,
@@ -218,6 +219,7 @@ describe("projects settings routes", () => {
 describe("global routes", () => {
   it("builds host-qualified Assignment routes", () => {
     expect(buildAssignmentsRoute()).toBe("/assignments");
+    expect(buildGitHubWorkRoute()).toBe("/github-work");
     expect(buildAssignmentRoute("host a", "assignment/1")).toBe(
       "/assignments/host%20a/assignment%2F1",
     );

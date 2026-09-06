@@ -59,6 +59,10 @@ if (recordPath) {
   const fakeGhSource = `#!/usr/bin/env node
 const { spawnSync } = require("child_process");
 const args = process.argv.slice(2);
+if (process.env.PASEO_E2E_GITHUB_WORK_FIXTURE === "1") {
+  const runFixture = require(${JSON.stringify(path.join(__dirname, "../../fixtures/github-work.cjs"))});
+  if (runFixture(args)) process.exit(0);
+}
 const fixtureRemote = "https://github.com/paseo-e2e/local-fixture.git";
 const origin = spawnSync("git", ["config", "--get", "remote.origin.url"], {
   encoding: "utf8",
@@ -156,7 +160,11 @@ async function applyMetadataFork(targetHome: string, providerIds: string[]): Pro
 
 export async function startE2EWorker(
   workerIndex: number,
-  options: { forkProviders?: string[]; injectPaseoTools?: boolean } = {},
+  options: {
+    forkProviders?: string[];
+    injectPaseoTools?: boolean;
+    githubWorkFixture?: boolean;
+  } = {},
 ): Promise<E2EWorker> {
   const requestedRoot = resolveOptionalHome(process.env.E2E_PASEO_HOME);
   const paseoHome = requestedRoot
@@ -179,6 +187,7 @@ export async function startE2EWorker(
         NODE_ENV: "development",
         PATH: `${fakeEditorBin}${path.delimiter}${process.env.PATH ?? ""}`,
         PASEO_E2E_EDITOR_RECORD_PATH: editorRecordPath,
+        PASEO_E2E_GITHUB_WORK_FIXTURE: options.githubWorkFixture ? "1" : "0",
       },
     });
 

@@ -20,6 +20,8 @@ Do not store the Work Item body, comments, labels, assignees, status, or lifecyc
 
 Several Assignments may link to the same Work Item. The reference is context, not a uniqueness key or synchronization contract.
 
+The GitHub Work browser selects a daemon host and a remote repository before any Workspace exists. Its body preview stays outside the Assignment; the operator supplies the objective when creating one. Workspace/worktree selection belongs to subsequent Team Run admission. Keep the existing Workspace-scoped Work Item picker available for work already on disk. Host authentication and discovery limits are owned by [forge-providers.md](forge-providers.md#repository-discovery-without-a-checkout).
+
 ## Assignment lifecycle
 
 An Assignment is `open`, `completed`, or `canceled`. Active execution is derived from Team Runs and is never duplicated on the Assignment.

@@ -25,6 +25,7 @@ export interface AssignmentFormSheetProps {
   hosts: AssignmentFormHostOption[];
   selectedServerId?: string | null;
   assignment?: AssignmentDto;
+  initialWorkItem?: AssignmentWorkItemReferenceDto;
   authoringEnabled?: boolean;
   onClose: () => void;
   onSaved: (serverId: string, assignment: AssignmentDto) => void;
@@ -48,6 +49,7 @@ export function AssignmentFormSheet(props: AssignmentFormSheetProps): ReactEleme
     hosts: props.hosts,
     selectedServerId: props.selectedServerId,
     ...(props.assignment ? { assignment: props.assignment } : {}),
+    ...(props.initialWorkItem ? { initialWorkItem: props.initialWorkItem } : {}),
   });
   const state = useSyncExternalStore(model.subscribe, model.getState, model.getState);
   const { cancelCompletion, pending, savePress } = useAssignmentFormSubmission(

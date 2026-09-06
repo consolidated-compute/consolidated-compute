@@ -54,6 +54,7 @@ export interface AssignmentFormSnapshot {
   hosts: readonly AssignmentFormHostOption[];
   selectedServerId?: string | null;
   assignment?: AssignmentDto;
+  initialWorkItem?: AssignmentWorkItemReferenceDto;
 }
 
 export interface AssignmentFormModel {
@@ -107,9 +108,12 @@ export function openAssignmentForm(snapshot: AssignmentFormSnapshot): Assignment
     selectedHostDisplay: initialHost?.label ?? null,
     assignmentId: assignment?.id ?? null,
     expectedRevision: assignment?.revision ?? null,
-    title: assignment?.title ?? "",
+    title:
+      assignment?.title ??
+      snapshot.initialWorkItem?.title.slice(0, ASSIGNMENT_TITLE_MAX_CHARS) ??
+      "",
     objective: assignment?.objective ?? "",
-    workItem: assignment?.workItem ?? null,
+    workItem: assignment ? assignment.workItem : (snapshot.initialWorkItem ?? null),
     validationIssue: null,
     canSubmit: false,
     submission: null,
