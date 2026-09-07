@@ -349,6 +349,15 @@ export const ko: TranslationResources = {
     },
     runs: {
       ...en.teams.runs,
+      actions: {
+        ...en.teams.runs.actions,
+        reviewChanges: "변경 사항 검토",
+      },
+      detail: {
+        ...en.teams.runs.detail,
+        reviewChangesHint:
+          "현재 워크스페이스의 변경 사항이며 이후 작업이 포함될 수 있습니다. 실행의 아티팩트는 변경되지 않습니다.",
+      },
       form: {
         ...en.teams.runs.form,
         execution: "실행 방식",

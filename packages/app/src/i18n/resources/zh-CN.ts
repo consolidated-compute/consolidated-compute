@@ -348,6 +348,14 @@ export const zhCN: TranslationResources = {
     },
     runs: {
       ...en.teams.runs,
+      actions: {
+        ...en.teams.runs.actions,
+        reviewChanges: "审查更改",
+      },
+      detail: {
+        ...en.teams.runs.detail,
+        reviewChangesHint: "显示工作区的当前更改，可能包含后续工作。运行的产物保持不变。",
+      },
       form: {
         ...en.teams.runs.form,
         execution: "执行方式",

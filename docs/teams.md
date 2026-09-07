@@ -10,6 +10,10 @@ The daemon that stores a Team owns it. Team and Team Run IDs are daemon-local. T
 
 Definitions and runs are separate records. Deleting a Team never deletes its run history. A run freezes the accepted Team revision and Workspace facts, so later edits, deletion, or Workspace removal cannot rewrite history.
 
+Reviewing changes from a run opens that Workspace's existing Changes view. The checkout is live
+and may contain later work; do not present it as a frozen run diff. Artifacts retain the accepted
+run's output, and merge remains an operator decision.
+
 Disk schemas belong to the server. Protocol schemas project those records onto wire DTOs. Do not export a persistence schema as the protocol contract.
 
 ## Definition

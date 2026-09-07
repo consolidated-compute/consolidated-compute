@@ -1,4 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
+import { writeFile } from "node:fs/promises";
+import path from "node:path";
 import type { AgentProfile } from "@getpaseo/protocol/messages";
 import type { TeamDefinitionInputDto } from "@getpaseo/protocol/team/types";
 import { expect, test } from "../support/fixtures";
@@ -27,7 +29,9 @@ const SUPERVISOR_PROFILE: AgentProfile = {
 };
 
 test.describe("Assignments reliability", () => {
-  test("preserves authored intent, frozen runs, and exact Artifacts", async ({ page }) => {
+  test("preserves authored intent, frozen runs, and exact Artifacts", async ({
+    page,
+  }, testInfo) => {
     test.setTimeout(150_000);
     const profiles = await seedAgentProfiles([WORKER_PROFILE, SUPERVISOR_PROFILE]);
     const workspace = await seedWorkspace({
@@ -152,6 +156,55 @@ test.describe("Assignments reliability", () => {
         await expect(artifacts).toContainText("Worker output", { timeout: 30_000 });
         await expect(artifacts).toContainText("team_step_output · worker · work");
         await waitForArtifactCount(assignments, persistedAssignmentId, 1);
+      });
+
+      await test.step("review the run Workspace through the existing Changes view", async () => {
+        // A deterministic filesystem fixture exercises review navigation without
+        // asking a paid provider to generate another change.
+        await writeFile(
+          path.join(workspace.workspaceDirectory, "review-checklist.md"),
+          "# Review handoff\nInspect the diff and test results.\nLeave merge to a human.\n",
+        );
+        await runDetail.getByTestId("team-run-review-changes").click({ timeout: 10_000 });
+        await expect(page).toHaveURL(
+          new RegExp(`/h/${getServerId()}/workspace/${workspace.workspaceId}$`),
+        );
+        const changes = page.getByTestId("working-diff-panel").filter({ visible: true });
+        await expect(changes).toBeVisible({ timeout: 30_000 });
+        await expect(changes.getByTestId("diff-file-0")).toHaveAccessibleName(
+          "review-checklist.md, +3, -0",
+          { timeout: 30_000 },
+        );
+        await expect(changes.getByTestId("git-diff-canvas")).toBeVisible();
+        await page.screenshot({ path: testInfo.outputPath("team-run-review-desktop.png") });
+
+        await page.locator('[data-testid="sidebar-assignments"]:visible').click();
+        await page.getByTestId(assignmentTestId("assignment-row", persistedAssignmentId)).click();
+        await page
+          .getByTestId(assignmentRunTestId("assignment-run", persistedAssignmentId, persistedRunId))
+          .click();
+        await expect(runDetail.getByTestId("team-run-review-changes")).toBeVisible();
+      });
+
+      await test.step("retain review navigation across compact layout and reload", async () => {
+        await page.setViewportSize({ width: 480, height: 900 });
+        const review = runDetail.getByTestId("team-run-review-changes");
+        await review.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath("team-run-review-compact.png") });
+        await review.click();
+        const changes = page.getByTestId("working-diff-panel").filter({ visible: true });
+        await expect(changes.getByTestId("diff-file-0")).toHaveAccessibleName(
+          "review-checklist.md, +3, -0",
+          { timeout: 30_000 },
+        );
+        await page.reload();
+        await expect(changes.getByTestId("diff-file-0")).toHaveAccessibleName(
+          "review-checklist.md, +3, -0",
+          { timeout: 30_000 },
+        );
+        await expect(changes.getByTestId("git-diff-canvas")).toBeVisible();
+        await page.screenshot({ path: testInfo.outputPath("team-run-review-compact-diff.png") });
+        await page.setViewportSize({ width: 1280, height: 900 });
       });
 
       await test.step("later edits and completion leave frozen history unchanged", async () => {

@@ -351,6 +351,15 @@ export const ru: TranslationResources = {
     },
     runs: {
       ...en.teams.runs,
+      actions: {
+        ...en.teams.runs.actions,
+        reviewChanges: "Проверить изменения",
+      },
+      detail: {
+        ...en.teams.runs.detail,
+        reviewChangesHint:
+          "Это текущие изменения рабочего пространства; они могут включать более позднюю работу. Артефакты запуска остаются неизменными.",
+      },
       form: {
         ...en.teams.runs.form,
         execution: "Выполнение",
