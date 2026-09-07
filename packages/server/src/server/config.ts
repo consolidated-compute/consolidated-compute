@@ -259,7 +259,6 @@ interface ResolveRelayInput {
   persisted: PersistedConfig;
   cliRelayEnabled: boolean | undefined;
   cliRelayUseTls: boolean | undefined;
-  enabledFallback: boolean;
 }
 
 interface ResolvedRelay {
@@ -289,13 +288,9 @@ function resolveTlsFromEnv(
 
 function resolveRelayConfig(input: ResolveRelayInput): ResolvedRelay {
   const environmentEnabled = parseBooleanEnv(input.env.PASEO_RELAY_ENABLED);
-  // COMPAT(relayOptInDefault): daemons whose startup config omitted this field
-  // retain relay-on removal semantics until 2027-01-31. Modern homes use false.
+  // A missing setting is not consent to connect this host to an external relay.
   const enabled =
-    input.cliRelayEnabled ??
-    environmentEnabled ??
-    input.persisted.daemon?.relay?.enabled ??
-    input.enabledFallback;
+    input.cliRelayEnabled ?? environmentEnabled ?? input.persisted.daemon?.relay?.enabled ?? false;
   const endpoint =
     input.env.PASEO_RELAY_ENDPOINT ??
     input.persisted.daemon?.relay?.endpoint ??
@@ -552,7 +547,6 @@ function resolveStaticLoadConfigSettings(
 interface ResolveConfigFromPersistedOptions {
   env?: NodeJS.ProcessEnv;
   cli?: CliConfigOverrides;
-  relayEnabledFallback?: boolean;
 }
 
 export function resolveConfigFromPersisted(
@@ -563,8 +557,6 @@ export function resolveConfigFromPersisted(
   const resolvedOptions = options ?? {};
   const env = resolvedOptions.env ?? process.env;
   const cli = resolvedOptions.cli;
-  const relayEnabledFallback =
-    resolvedOptions.relayEnabledFallback ?? persisted.daemon?.relay?.enabled === undefined;
 
   const listen = resolveListenAddress(env, cli, persisted);
   const {
@@ -585,7 +577,6 @@ export function resolveConfigFromPersisted(
     persisted,
     cliRelayEnabled: cli?.relayEnabled,
     cliRelayUseTls: cli?.relayUseTls,
-    enabledFallback: relayEnabledFallback,
   });
   const serviceProxy = resolveServiceProxyConfig(env, persisted);
   const webUi = resolveWebUiConfig(paseoHome, env, cli, persisted);
@@ -653,7 +644,6 @@ export function resolveConfigFromPersisted(
       env: { ...env },
       cli: cli ? { ...cli } : undefined,
       overrideControlledPaths,
-      relayEnabledFallback,
       startupPersisted: persisted,
     },
   };
@@ -661,7 +651,7 @@ export function resolveConfigFromPersisted(
 
 export function loadConfig(
   paseoHome: string,
-  options?: Omit<ResolveConfigFromPersistedOptions, "relayEnabledFallback">,
+  options?: ResolveConfigFromPersistedOptions,
 ): PaseoDaemonConfig {
   const persisted = loadPersistedConfig(paseoHome);
   return resolveConfigFromPersisted(paseoHome, persisted, options);
