@@ -1,199 +1,66 @@
-<p align="center">
-  <img src="packages/website/public/logo.svg" width="64" height="64" alt="Consolidated Compute logo">
-</p>
+# Consolidated Compute
 
-<h1 align="center">Consolidated Compute</h1>
+An open control plane for **Harness Operations**. A harness for your harness.
 
-<p align="center">A control plane for agent teams, built as a shallow fork of <a href="https://github.com/getpaseo/paseo">Paseo</a>.</p>
+Operate work across the coding agents and machines you already use: select repository work, give it a durable objective, run a saved Team, and review its evidence before deciding what ships.
 
-> Consolidated Compute is in foundation development. Runtime compatibility identifiers, installation commands, and release artifacts still use Paseo names until the fork defines its own release destinations and migration policy.
+Consolidated Compute is a shallow fork of [Paseo](https://github.com/getpaseo/paseo). Paseo supplies the agent runtime, Workspaces, provider integrations, and host connectivity. CC adds Assignments, Teams, immutable Artifacts, supervised execution, and operator views. It does not replace your coding-agent runtime or your issue tracker.
 
-<p align="center">
-  <a href="README.md">English</a> ·
-  <a href="README.zh-CN.md">简体中文</a> ·
-  <a href="README.ja.md">日本語</a> ·
-  <a href="README.ko.md">한국어</a>
-</p>
+## Try it from source
 
-<p align="center">
-  <a href="https://github.com/getpaseo/paseo/stargazers">
-    <img src="https://img.shields.io/github/stars/getpaseo/paseo?style=flat&logo=github" alt="GitHub stars">
-  </a>
-  <a href="https://github.com/getpaseo/paseo/releases">
-    <img src="https://img.shields.io/github/v/release/getpaseo/paseo?style=flat&logo=github" alt="GitHub release">
-  </a>
-  <a href="https://x.com/moboudra">
-    <img src="https://img.shields.io/badge/%40moboudra-555?logo=x" alt="X">
-  </a>
-  <a href="https://discord.gg/jz8T2uahpH">
-    <img src="https://img.shields.io/badge/Discord-555?logo=discord" alt="Discord">
-  </a>
-  <a href="https://www.reddit.com/r/PaseoAI/">
-    <img src="https://img.shields.io/badge/Reddit-555?logo=reddit" alt="Reddit">
-  </a>
-</p>
+Start with the [source setup guide](public-docs/index.md), then follow [GitHub Work → your first Team Run](public-docs/github-work.md).
 
-<p align="center">One interface for Claude Code, Codex, Copilot, OpenCode, and Pi agents.</p>
+Use this repository's checkout for both the app and daemon. Upstream Paseo downloads, `@getpaseo/cli` on npm, and Paseo Docker images are **not CC distributions**. Independent release destinations and migration policy are still tracked in [#29](https://github.com/consolidated-compute/consolidated-compute/issues/29); this repository retains Paseo's package names, CLI, environment variables, and state paths for compatibility. Do not use an inherited update or publish command to install CC.
 
-<p align="center">
-  <img src="https://paseo.sh/hero-mockup.png" alt="Paseo app screenshot" width="100%">
-</p>
+## Pick work, run a Team, review the result
 
-<p align="center">
-  <img src="https://paseo.sh/mobile-mockup.png" alt="Paseo mobile app" width="100%">
-</p>
+1. Select a host and browse its authenticated GitHub repositories before creating a Workspace.
+2. Turn an issue or pull request into an **Assignment** with an explicit objective. GitHub keeps the source issue; CC stores a bounded reference.
+3. Choose a saved **Team** whose roles reference the host's ordinary Paseo **Agent Profiles**.
+4. Create a dedicated worktree **Workspace** and inspect the daemon's security preview and approval fingerprint.
+5. Start a supervised **Team Run**, respond to human checkpoints, and inspect immutable **Artifacts** with their producing role, agent, and run.
+6. Review live Workspace changes, test results, and the PR. Keep merge approval with a human.
 
-Run agents in parallel on your own machines. Ship from your phone or your desk.
+The [first-run guide](public-docs/github-work.md) provides a Plan → Implement → Review example, setup requirements, recovery steps, and proof limitations.
 
-- **Self-hosted:** Agents run on your machine with your full dev environment. Use your tools, your configs, and your skills.
-- **Multi-provider:** Claude Code, Codex, Copilot, OpenCode, and Pi through the same interface. Pick the right model for each job.
-- **Voice control:** Dictate tasks or talk through problems in voice mode. Hands-free when you need it.
-- **Cross-device:** iOS, Android, desktop, web, and CLI. Start work at your desk, check in from your phone, script it from the terminal.
-- **Privacy-first:** Paseo doesn't have any telemetry, tracking, or forced log-ins.
+## Local-first architecture
 
-## Getting Started
-
-Paseo runs a local server called the daemon that manages your coding agents. Clients like the desktop app, mobile app, web app, and CLI connect to it.
-
-### Prerequisites
-
-You need at least one agent CLI installed and configured with your credentials:
-
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-- [Codex](https://github.com/openai/codex)
-- [GitHub Copilot](https://github.com/features/copilot/cli/)
-- [OpenCode](https://github.com/anomalyco/opencode)
-- [Pi](https://pi.dev)
-
-### Desktop app (recommended)
-
-Download it from [paseo.sh/download](https://paseo.sh/download) or the [GitHub releases page](https://github.com/getpaseo/paseo/releases). Open the app and the daemon starts automatically. Nothing else to install.
-
-To connect from your phone, open **Settings → your host → Pair Device**.
-
-### CLI / headless
-
-Install the CLI and start Paseo:
-
-```bash
-npm install -g @getpaseo/cli
-paseo
+```text
+Consolidated Compute
+        ↓
+Paseo daemon on your host
+        ↓
+Forge / authenticated host gh
+        ↓
+GitHub
 ```
 
-Paseo starts locally, then asks whether to enable the end-to-end encrypted relay for device pairing. If you decline, connect directly over TCP, Tailscale, or another VPN. This path is useful for servers and remote machines.
+Interactive GitHub Work needs no Hub account, GitHub App installation, or webhook setup. Repository catalogs depend on the selected host's `gh` identity. Local operation needs no relay; relay is opt-in, and existing explicit relay settings remain in effect.
 
-For full setup and configuration, see:
+[Optional Hub integration](https://github.com/consolidated-compute/consolidated-compute/issues/140) is a separate, deferred track for concrete automation or hosted needs.
 
-- [Docs](https://paseo.sh/docs)
-- [Connectivity guide](https://paseo.sh/docs/connectivity)
-- [Configuration reference](https://paseo.sh/docs/configuration)
+## What is proved
 
-### Docker
+- **Self-work:** real supervised CC runs produced merged fixes. See [#126](https://github.com/consolidated-compute/consolidated-compute/issues/126).
+- **GitHub Work:** a real Codex/Spark run on macOS produced Plan, Implementation, and Review Artifacts from repository-selected work. Browser and Electron preflight and reload evidence are recorded in [#135](https://github.com/consolidated-compute/consolidated-compute/issues/135). That issue remains open for the complete end-to-end proof.
+- **Provider breadth:** Paseo integrates Claude Code, Codex, GitHub Copilot, OpenCode, and Pi. That is not a claim that every provider supports every Team security control; [#127](https://github.com/consolidated-compute/consolidated-compute/issues/127) tracks a second-harness proof.
+- **Platforms:** clients target browser, Electron, iOS, and Android. Remaining native evidence is tracked in [#19](https://github.com/consolidated-compute/consolidated-compute/issues/19) and the deferred [#64](https://github.com/consolidated-compute/consolidated-compute/pull/64).
 
-Run the Paseo daemon and self-hosted web UI in Docker:
-
-```bash
-docker run -d --name paseo \
-  -p 6767:6767 \
-  -e PASEO_PASSWORD=change-me \
-  -v "$PWD/paseo-home:/home/paseo" \
-  -v "$PWD:/workspace" \
-  ghcr.io/getpaseo/paseo:latest
-```
-
-Open `http://localhost:6767` after it starts. Extend the base image with the agent CLIs you use, then provide credentials through environment variables or the persistent `/home/paseo` volume. See the [Docker documentation](docs/docker.md) for full setup details.
-
-## CLI
-
-Everything you can do in the app, you can do from the terminal.
-
-```bash
-paseo run --provider claude/opus-4.6 "implement user authentication"
-paseo run --provider codex/gpt-5.5 --worktree feature-x "implement feature X"
-
-paseo ls                           # list running agents
-paseo attach abc123                # stream live output
-paseo send abc123 "also add tests" # follow-up task
-
-# run on a remote daemon; --cwd is a path on that host
-paseo run --host workstation.local:6767 --cwd /workspace "run the full test suite"
-```
-
-See the [full CLI reference](https://paseo.sh/docs/cli) for more.
-
-## TypeScript SDK
-
-Build issue integrations, dashboards, and orchestration services with `@getpaseo/client`:
-
-```ts
-import { createPaseoClient } from "@getpaseo/client";
-
-const client = createPaseoClient({ url: "ws://127.0.0.1:6767/ws" });
-await client.connect();
-
-const agent = await client.agents.create({
-  config: { provider: "codex/gpt-5.5" },
-  cwd: "/Users/me/dev/storefront",
-  prompt: "Review the current diff and name the riskiest change.",
-});
-
-const result = await agent.waitForFinish();
-console.log(result.lastMessage);
-
-await client.close();
-```
-
-See the [SDK quickstart](https://paseo.sh/docs/sdk/quickstart), [recipes](https://paseo.sh/docs/sdk/recipes), and [API reference](https://paseo.sh/docs/sdk/reference).
-
-## Skills
-
-Skills teach your agent to use Paseo to orchestrate other agents.
-
-```bash
-npx skills add getpaseo/paseo
-```
-
-Then use them in any agent conversation:
-
-- `/paseo-handoff` — hand off work between agents. I use this to plan with Claude and then handoff to Codex to implement.
-- `/paseo-advisor` — spin up a single agent as an advisor for a second opinion, without delegating the work itself.
-- `/paseo-committee` — form a committee of two contrasting agents to step back, do root cause analysis, and produce a plan.
+Security previews distinguish enforced controls, policy-only guidance, and unavailable controls. A worktree is not a credential sandbox, and a host's `gh` login is operator authority, not isolated per-agent least privilege. Read the [first-run security guidance](public-docs/github-work.md#review-the-security-preview) before starting work.
 
 ## Development
 
-Quick monorepo package map:
+This is an npm workspace monorepo:
 
-- `packages/server`: Paseo daemon (agent process orchestration, WebSocket API, MCP server)
-- `packages/app`: Expo client (iOS, Android, web)
-- `packages/cli`: `paseo` CLI for daemon and agent workflows
-- `packages/desktop`: Electron desktop app
-- `packages/relay`: Relay transport and encryption used by the daemon and clients
-- `packages/website`: Marketing site and documentation (`paseo.sh`)
+- `packages/server` — Paseo daemon and CC execution services
+- `packages/app` — Expo client for browser, Electron renderer, iOS, and Android
+- `packages/cli` — compatibility-named `paseo` CLI
+- `packages/desktop` — Electron wrapper
+- `packages/relay` — optional encrypted relay transport
+- `packages/website` — inherited website and public-docs renderer
 
-Common commands:
+See [development](docs/development.md) for source commands, [architecture](docs/architecture.md) for package boundaries, and [fork maintenance](docs/fork-maintenance.md) for stable-release sync and release quarantine. The [roadmap](https://github.com/consolidated-compute/consolidated-compute/issues/9) owns the next milestones. [CONTRIBUTING.md](CONTRIBUTING.md) describes the contribution workflow.
 
-```bash
-# run all local dev services
-npm run dev
+## Attribution and license
 
-# run individual surfaces
-npm run dev:server
-npm run dev:app
-npm run dev:desktop
-npm run dev:website
-
-# build the server stack
-npm run build:server
-
-# repo-wide checks
-npm run typecheck
-```
-
-## Related projects
-
-- [getpaseo/paseo-relay](https://github.com/getpaseo/paseo-relay) — official distributed relay, written in Elixir
-- [paseo-vscode](https://marketplace.visualstudio.com/items?itemName=hinnes.paseo-vscode) — VS Code extension
-
-## License
-
-Apache-2.0
+Built on [Paseo](https://github.com/getpaseo/paseo), created by Mohamed Boudra and its contributors. Upstream runtime identifiers and notices are preserved. Licensed under [Apache-2.0](LICENSE).

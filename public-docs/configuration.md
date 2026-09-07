@@ -168,7 +168,9 @@ paseo daemon set-password
 
 This prompts for a password, writes the bcrypt hash to `config.json`, and tells you to restart the daemon. Authentication is a startup setting, so `paseo reload` will also report it as restart-required.
 
-Alternatively, set the `PASEO_PASSWORD` environment variable (plaintext, hashed automatically at startup):
+For CC supervised Team Runs, use the persisted password above. Those runs reject daemons started with `PASEO_PASSWORD`, even when a stored password also exists: a same-user provider process may read the daemon's startup environment. See the [first Team Run guide](https://github.com/consolidated-compute/consolidated-compute/blob/main/public-docs/github-work.md).
+
+For other daemon use, you can instead set the `PASEO_PASSWORD` environment variable (plaintext, hashed automatically at startup):
 
 ```bash
 PASEO_PASSWORD=my-secret paseo daemon start
