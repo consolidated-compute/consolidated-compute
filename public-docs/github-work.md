@@ -101,8 +101,30 @@ When work finishes:
 1. Inspect the Run's **Artifacts** and the Assignment's history. Check content, truncation indicators, and producing run/role/agent, not only titles. Handoffs use exact persisted Artifact references, not whichever output was created most recently.
 2. Select **Review changes** to open this Workspace's Changes view. This is the live checkout and can include later edits; Artifacts remain frozen.
 3. Inspect actual test output in the producing agent timeline. Run any remaining repository-prescribed checks from an operator terminal in that worktree. A narrative claim that tests passed is not a substitute for the command and exit result.
-4. Review the diff and prepare the commit and PR through the existing Workspace/Forge tools or the host's Git/`gh` CLI. This example forbids agents from publishing; publishing is a separate operator action. Honor the repository's signing and protected-branch rules, inspect CI, and leave merge approval with a human.
+4. Review the diff and [publish through the host's Git/`gh` CLI](#publish-without-generated-metadata) or the existing Workspace/Forge tools. This example forbids agents from publishing; publishing is a separate operator action. Honor the repository's signing and protected-branch rules, inspect CI, and leave merge approval with a human.
 5. Mark the Assignment **Complete** when its objective is satisfied. Update the linked GitHub issue separately if appropriate.
+
+## Publish without generated metadata
+
+The Workspace's one-click **Commit** and **Create PR** actions request generated text from the daemon's Git metadata model. Those requests are separate from the Team's frozen Profiles and can consume additional provider usage. To supply your own commit message and PR text, use a terminal on the selected host, in the reviewed worktree.
+
+Confirm the feature branch and intended fork remote before publishing. Replace the example paths, message, title, and base branch below with your reviewed values. Keep repository hooks and signing enabled; do not publish from the base branch.
+
+```bash
+git status --short --branch
+git remote -v
+git diff
+git add -- path/to/reviewed-file
+git diff --cached
+git commit -S -m "Describe the reviewed change"
+git push -u origin HEAD
+gh pr create --base main --title "Describe the reviewed change" --body-file /path/to/reviewed-pr-body.md
+gh pr view --json url,headRefName,baseRefName
+```
+
+Review the PR body file before running the command. Git and `gh` do not ask a model to write it. If a push or PR request fails, keep the local commit and inspect the error before retrying; check `gh pr view` first when publication may already have succeeded.
+
+Return to the same Workspace and open **Pull request** from the new-tab menu. Check its repository, number, title, status, and CI results. Use **Commits** in Changes to inspect the published commit's diff; a clean working tree alone does not prove that the intended commit was published. Reload to verify that the PR remains associated with this Workspace. Do not merge until a human has reviewed the actual diff and required checks.
 
 ## Recover without editing stored records
 
