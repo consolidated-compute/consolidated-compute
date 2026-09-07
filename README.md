@@ -10,7 +10,7 @@ Consolidated Compute is a shallow fork of [Paseo](https://github.com/getpaseo/pa
 
 Start with the [source setup guide](public-docs/index.md), then follow [GitHub Work → your first Team Run](public-docs/github-work.md).
 
-Use this repository's checkout for both the app and daemon. Upstream Paseo downloads, `@getpaseo/cli` on npm, and Paseo Docker images are **not CC distributions**. Independent release destinations and migration policy are still tracked in [#29](https://github.com/consolidated-compute/consolidated-compute/issues/29); this repository retains Paseo's package names, CLI, environment variables, and state paths for compatibility. Do not use an inherited update or publish command to install CC.
+See the [distribution and compatibility guidance](public-docs/index.md#distribution-and-compatibility) before installing or updating.
 
 ## Pick work, run a Team, review the result
 

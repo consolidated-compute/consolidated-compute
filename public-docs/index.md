@@ -8,6 +8,8 @@ category: Getting started
 
 # Getting started with Consolidated Compute
 
+## Distribution and compatibility
+
 Run both the app and daemon from the [Consolidated Compute repository](https://github.com/consolidated-compute/consolidated-compute). Upstream Paseo downloads, npm packages, and Docker images do not include CC's fork-only features. Independent CC installation, update, and migration destinations remain tracked in [#29](https://github.com/consolidated-compute/consolidated-compute/issues/29).
 
 This source workflow uses browser web on macOS or Linux. For Electron, Windows, or native development, use the [development guide](https://github.com/consolidated-compute/consolidated-compute/blob/main/docs/development.md). Package names and commands still use Paseo compatibility identifiers; do not rename state directories or run the inherited release/update commands.
