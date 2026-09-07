@@ -1,4 +1,5 @@
 import { useSyncExternalStore, useMemo } from "react";
+import { useSyncExternalStoreWithSelector } from "use-sync-external-store/shim/with-selector";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import equal from "fast-deep-equal/es6";
 import {
@@ -2441,21 +2442,21 @@ export function useHostRuntimeConnectionStatuses(
   serverIds: readonly string[],
 ): ReadonlyMap<string, HostRuntimeConnectionStatus> {
   const store = getHostRuntimeStore();
-  const version = useSyncExternalStore(
+  // Return the selected data from the subscription. A useMemo that only reads
+  // mutable store state loses its unused version dependency under React Compiler.
+  return useSyncExternalStoreWithSelector(
     (onStoreChange) => store.subscribeAll(onStoreChange),
     () => store.getVersion(),
     () => store.getVersion(),
+    () =>
+      new Map(
+        serverIds.map((serverId) => [
+          serverId,
+          store.getSnapshot(serverId)?.connectionStatus ?? "connecting",
+        ]),
+      ),
+    equal,
   );
-
-  return useMemo(() => {
-    // The aggregate version is the reactivity trigger; re-read snapshots on every host tick.
-    void version;
-    const entries: Array<[string, HostRuntimeConnectionStatus]> = serverIds.map((serverId) => [
-      serverId,
-      store.getSnapshot(serverId)?.connectionStatus ?? "connecting",
-    ]);
-    return new Map(entries);
-  }, [serverIds, store, version]);
 }
 
 export function useHostRuntimeLastError(serverId: string): string | null {
