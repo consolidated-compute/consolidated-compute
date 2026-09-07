@@ -6,7 +6,8 @@ import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { connectDaemonClient } from "./daemon-client-loader";
 import { startIsolatedHostDaemon, type IsolatedHostDaemon } from "./isolated-host-daemon";
 
-export const GITHUB_WORK_PROOF_MODEL = "gpt-5.4-mini";
+// Keep proof traffic on the operator-selected Spark allowance; never fall back.
+export const GITHUB_WORK_PROOF_MODEL = "gpt-5.3-codex-spark";
 export const GITHUB_WORK_PROOF_FILE = "github-work-operator-checklist.md";
 export const GITHUB_WORK_PROOF_OBJECTIVE =
   "Prove the local GitHub Work journey for CC issue #135. Produce a short operator checklist in github-work-operator-checklist.md, then test and review it. Do not commit, push, open a PR, merge, or change any other file.";
@@ -130,7 +131,7 @@ export async function saveGithubWorkProofTeam(client: DaemonClient, cwd: string)
       (model) => model.id === GITHUB_WORK_PROOF_MODEL && model.isSelectable !== false,
     )
   ) {
-    throw new Error(`The low-cost proof model ${GITHUB_WORK_PROOF_MODEL} is unavailable`);
+    throw new Error(`Required proof model ${GITHUB_WORK_PROOF_MODEL} is unavailable; no fallback`);
   }
   const readOnly = codex.agentProfileSecurityPresets?.find(
     (preset) => preset.id === "fail-closed-read-only",

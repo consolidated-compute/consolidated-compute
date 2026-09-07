@@ -93,6 +93,17 @@ test("completes real GitHub Work preflight without starting an agent", async ({
       expectedRevision: team.revision,
       workspaceId: workspace.id,
     });
+    expect(
+      preview.roles.map(({ resolvedLaunch }) => ({
+        model: resolvedLaunch.model,
+        thinkingOptionId: resolvedLaunch.thinkingOptionId,
+      })),
+    ).toEqual(
+      Array.from({ length: 4 }, () => ({
+        model: "gpt-5.3-codex-spark",
+        thinkingOptionId: "low",
+      })),
+    );
     await expect(page.getByTestId("team-run-security-preview-fingerprint")).toContainText(
       preview.fingerprint,
     );
