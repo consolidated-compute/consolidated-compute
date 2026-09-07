@@ -202,7 +202,8 @@ test.describe("Assignments reliability", () => {
       await test.step("retain review navigation across compact layout and reload", async () => {
         await page.setViewportSize({ width: 480, height: 900 });
         const review = runDetail.getByTestId("team-run-review-changes");
-        await review.scrollIntoViewIfNeeded();
+        // The compact screen replaces the desktop element during the resize.
+        await review.click({ trial: true });
         await page.screenshot({ path: testInfo.outputPath("team-run-review-compact.png") });
         await review.click();
         const changes = page.getByTestId("working-diff-panel").filter({ visible: true });
