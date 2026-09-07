@@ -2,7 +2,7 @@
 
 Paseo is a client-server system for monitoring and controlling local AI coding agents. The daemon runs on your machine, manages agent processes, and streams their output in real time over WebSocket. Clients (mobile app, CLI, desktop app) connect to the daemon to observe and interact with agents.
 
-Your code never leaves your machine. Paseo is local-first.
+The [operator architecture guide](../public-docs/architecture.md) owns the CC/Paseo product boundary, local GitHub Work path, and optional Hub relationship. Its [network boundaries](../public-docs/architecture.md#network-and-authority-boundaries) explain why local-first does not mean offline model execution. This document covers implementation structure and protocols.
 
 ## System overview
 
