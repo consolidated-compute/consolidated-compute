@@ -102,6 +102,8 @@ Display branding is separate from runtime identity. The fork displays **Consolid
 
 The website's homepage and `/docs` shell belong to CC; their source links point to this fork and retain Paseo attribution. These pages must remain readable without upstream release metadata, star counts, or analytics. Leave their canonical origin unset until a CC website destination is approved. Other inherited marketing routes, sitemap identity, and deployment configuration still need separate productization work; running the preview does not make them release-ready. [Testing](testing.md#website-documentation) owns the local verification command.
 
+Keep `/download` pointed at the [distribution and compatibility guide](../public-docs/index.md#distribution-and-compatibility) until CC distributions are approved. Label inherited installation and update recipes as upstream Paseo guidance, and link to that policy instead of duplicating it.
+
 Keep application IDs, deep-link schemes, state directories, package scopes, environment variables, CLI names, artifact names, signing, update feeds, package destinations, and mobile ownership unchanged until the release process defines their Consolidated Compute replacements and migration behavior. Source code may therefore display Consolidated Compute while compatibility paths and unpublished package metadata still contain `Paseo` or `paseo`.
 
 ## Repository and release controls

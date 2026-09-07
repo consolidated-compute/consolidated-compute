@@ -1,12 +1,14 @@
 ---
-title: Docker
-description: Run the Paseo daemon and bundled web UI with the official Docker image.
-nav: Docker
+title: Upstream Paseo Docker
+description: Reference for upstream Paseo Docker images; use the Consolidated Compute setup guide for CC.
+nav: Upstream Docker
 order: 6
 category: Getting started
 ---
 
-# Docker
+# Upstream Paseo Docker
+
+This guide describes **upstream Paseo**. For Consolidated Compute, follow the [distribution and compatibility guide](https://github.com/consolidated-compute/consolidated-compute/blob/main/public-docs/index.md#distribution-and-compatibility).
 
 The official Paseo Docker image runs the daemon and serves the bundled browser UI from the same HTTP origin. It is meant for servers, dev boxes, NAS devices, homelab hosts, and other places where you want Paseo running without the desktop app.
 

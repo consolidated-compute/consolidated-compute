@@ -4,6 +4,7 @@ import { getCanonicalRedirect } from "~/canonical-url";
 import { getDoc } from "~/docs";
 import { getLatestAndroidVersion } from "~/latest-release";
 import { buildLlmsTxt } from "~/llms";
+import { CC_DISTRIBUTION_HREF, isCcDownloadPath } from "~/site-identity";
 
 interface WebsiteEnv {
   WEBSITE_CACHE?: KVNamespace;
@@ -36,6 +37,15 @@ function docSlugFromMarkdownPath(pathname: string): string | null {
 export default {
   async fetch(request: Request, env: WebsiteEnv, context: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    // Handle inherited download URLs before the upstream canonical redirect or
+    // release lookup. Keep this temporary until CC has approved distributions.
+    if (isCcDownloadPath(url.pathname)) {
+      return new Response(null, {
+        status: 302,
+        headers: { location: CC_DISTRIBUTION_HREF, "cache-control": "no-store" },
+      });
+    }
 
     const environment = import.meta.env.DEV ? "development" : "production";
     const canonicalRedirect = getCanonicalRedirect(url, environment);
