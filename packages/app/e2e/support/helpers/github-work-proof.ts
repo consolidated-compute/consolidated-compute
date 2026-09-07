@@ -4,6 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { connectDaemonClient } from "./daemon-client-loader";
+import {
+  buildGithubWorkChecklistReviewScript,
+  GITHUB_WORK_CHECKLIST_TERMS,
+} from "./github-work-checklist";
 import { startIsolatedHostDaemon, type IsolatedHostDaemon } from "./isolated-host-daemon";
 
 // Keep proof traffic on the operator-selected Spark allowance; never fall back.
@@ -174,13 +178,13 @@ export async function saveGithubWorkProofTeam(client: DaemonClient, cwd: string)
         id: "builder",
         name: "Builder",
         profileId: "github-proof-builder",
-        instructions: `Read the exact input plan Artifact. Write its operator checklist to ${GITHUB_WORK_PROOF_FILE} in this Workspace. Use these literal terms: GitHub Work, Assignment, worktree, security preview, Artifacts, gh, Hub, human. Do not read other repository files. Return the file path and a concise implementation summary.`,
+        instructions: `Read the exact input plan Artifact. Write its operator checklist to ${GITHUB_WORK_PROOF_FILE} in this Workspace. Include these exact terms and statements: ${JSON.stringify(GITHUB_WORK_CHECKLIST_TERMS)}. Do not read other repository files. Return the file path and a concise implementation summary.`,
       },
       {
         id: "reviewer",
         name: "Reviewer",
         profileId: "github-proof-reviewer",
-        instructions: `Read the input Artifacts. Run node with a script that reads ${GITHUB_WORK_PROOF_FILE} and asserts it includes every string in ["GitHub Work","Assignment","worktree","security preview","Artifacts","gh","Hub","human"]. Inspect this file only. Report the actual test result and whether its steps match the plan. Do not modify files.`,
+        instructions: `Read the input Artifacts. Run this exact Node script to check ${GITHUB_WORK_PROOF_FILE}; do not print CHECKLIST_TEST_PASS yourself:\n${buildGithubWorkChecklistReviewScript(GITHUB_WORK_PROOF_FILE)}\nInspect this file only. Report the file path, actual test result, and whether its steps match the plan. Do not modify files.`,
       },
     ],
     workflow: [

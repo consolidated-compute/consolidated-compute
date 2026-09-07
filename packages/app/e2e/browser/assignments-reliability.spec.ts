@@ -138,12 +138,15 @@ test.describe("Assignments reliability", () => {
 
       const persistedRunId = runId;
       if (!persistedRunId) throw new Error("Team Run ID was not captured");
+      const runDetail = page
+        .getByTestId(`team-run-detail-${getServerId()}-${persistedRunId}`)
+        .filter({ visible: true });
 
       await test.step("materialize and inspect the exact step Artifact", async () => {
-        await expect(page.getByTestId("team-run-status")).toContainText("Succeeded", {
+        await expect(runDetail.getByTestId("team-run-status")).toContainText("Succeeded", {
           timeout: 70_000,
         });
-        const artifacts = page.getByTestId(
+        const artifacts = runDetail.getByTestId(
           assignmentRunTestId("team-run-artifacts", persistedAssignmentId, persistedRunId),
         );
         await expect(artifacts).toContainText("Worker output", { timeout: 30_000 });
@@ -152,10 +155,24 @@ test.describe("Assignments reliability", () => {
       });
 
       await test.step("later edits and completion leave frozen history unchanged", async () => {
-        await page.getByRole("button", { name: "Back", exact: true }).first().click();
-        await expect(page.getByTestId(assignmentDetailTestId(persistedAssignmentId))).toBeVisible({
+        // Sidebar navigation retains the run screen. Scope Artifact assertions to
+        // the Assignment so both mounted copies cannot satisfy the same locator.
+        await page.locator('[data-testid="sidebar-assignments"]:visible').click();
+        await page.getByTestId(assignmentTestId("assignment-row", persistedAssignmentId)).click();
+        const detail = page.getByTestId(assignmentDetailTestId(persistedAssignmentId));
+        await expect(detail).toBeVisible({
           timeout: 30_000,
         });
+        const { artifacts } = await assignments.listAssignmentArtifacts({
+          assignmentId: persistedAssignmentId,
+        });
+        expect(artifacts).toHaveLength(1);
+        const artifact = artifacts[0]!;
+        await expect(
+          detail.getByTestId(
+            assignmentTestId("assignment-artifact", persistedAssignmentId, artifact.id),
+          ),
+        ).toContainText(artifact.producer.agentId);
         await page.getByTestId(assignmentTestId("assignment-edit", persistedAssignmentId)).click();
         const form = page.getByTestId("assignment-form-sheet");
         await form.getByTestId("assignment-form-title").fill("Current Assignment title");
@@ -166,16 +183,18 @@ test.describe("Assignments reliability", () => {
           .getByTestId(assignmentRunTestId("assignment-run", persistedAssignmentId, persistedRunId))
           .click();
         await expect(
-          page.getByTestId(assignmentTestId("team-run-frozen-assignment", persistedAssignmentId)),
+          runDetail.getByTestId(
+            assignmentTestId("team-run-frozen-assignment", persistedAssignmentId),
+          ),
         ).toContainText("Preserved Assignment draft");
         await expect(
-          page.getByTestId(
+          runDetail.getByTestId(
             assignmentRunTestId("team-run-artifacts", persistedAssignmentId, persistedRunId),
           ),
         ).toContainText("Worker output");
         await page.reload();
         await expect(
-          page.getByTestId(
+          runDetail.getByTestId(
             assignmentRunTestId("team-run-artifacts", persistedAssignmentId, persistedRunId),
           ),
         ).toContainText("Worker output", { timeout: 30_000 });
