@@ -8,6 +8,8 @@ category: Getting started
 
 # Getting started with Consolidated Compute
 
+The [architecture guide](https://github.com/consolidated-compute/consolidated-compute/blob/main/public-docs/architecture.md) explains how CC, Paseo, and your coding-agent harness fit together.
+
 ## Distribution and compatibility
 
 Run both the app and daemon from the [Consolidated Compute repository](https://github.com/consolidated-compute/consolidated-compute). Upstream Paseo downloads, npm packages, and Docker images do not include CC's fork-only features. Independent CC installation, update, and migration destinations remain tracked in [#29](https://github.com/consolidated-compute/consolidated-compute/issues/29).

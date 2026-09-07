@@ -4,7 +4,7 @@ An open control plane for **Harness Operations**. A harness for your harness.
 
 Operate work across the coding agents and machines you already use: select repository work, give it a durable objective, run a saved Team, and review its evidence before deciding what ships.
 
-Consolidated Compute is a shallow fork of [Paseo](https://github.com/getpaseo/paseo). Paseo supplies the agent runtime, Workspaces, provider integrations, and host connectivity. CC adds Assignments, Teams, immutable Artifacts, supervised execution, and operator views. It does not replace your coding-agent runtime or your issue tracker.
+Consolidated Compute is a shallow fork of [Paseo](https://github.com/getpaseo/paseo). See the [architecture guide](public-docs/architecture.md) for CC, Paseo, and coding-agent ownership.
 
 ## Try it from source
 
@@ -25,19 +25,7 @@ The [first-run guide](public-docs/github-work.md) provides a Plan → Implement 
 
 ## Local-first architecture
 
-```text
-Consolidated Compute
-        ↓
-Paseo daemon on your host
-        ↓
-Forge / authenticated host gh
-        ↓
-GitHub
-```
-
-Interactive GitHub Work needs no Hub account, GitHub App installation, or webhook setup. Repository catalogs depend on the selected host's `gh` identity. Local operation needs no relay; relay is opt-in, and existing explicit relay settings remain in effect.
-
-[Optional Hub integration](https://github.com/consolidated-compute/consolidated-compute/issues/140) is a separate, deferred track for concrete automation or hosted needs.
+The [architecture guide](public-docs/architecture.md#one-daemon-two-layers) shows what runs on your machine, how GitHub Work reaches the selected host's Forge adapter, and where optional Hub fits. Its [network and authority boundaries](public-docs/architecture.md#network-and-authority-boundaries) explain what local-first does and does not imply.
 
 ## Evidence and limits
 
