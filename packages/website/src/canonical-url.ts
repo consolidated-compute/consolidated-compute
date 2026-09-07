@@ -1,10 +1,12 @@
+import { isDocsPath } from "./docs-identity";
+
 const CANONICAL_HOST = "paseo.sh";
 
 export function getCanonicalRedirect(
   url: URL,
   environment: "development" | "production",
 ): string | null {
-  if (environment === "development") return null;
+  if (environment === "development" || isDocsPath(url.pathname)) return null;
 
   const isLocal = url.hostname === "localhost" || url.hostname === "127.0.0.1";
   if (isLocal || (url.hostname === CANONICAL_HOST && url.protocol === "https:")) {
