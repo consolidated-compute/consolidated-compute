@@ -180,7 +180,7 @@ export async function saveGithubWorkProofTeam(client: DaemonClient, cwd: string)
         id: "reviewer",
         name: "Reviewer",
         profileId: "github-proof-reviewer",
-        instructions: `Read the input Artifacts. Run node with a script that reads ${GITHUB_WORK_PROOF_FILE} and asserts it includes every string in ["GitHub Work","Assignment","worktree","security preview","Artifacts","gh","Hub","human"]. Inspect this file only. Report the actual test result and whether its steps match the plan. Do not modify files.`,
+        instructions: `Read the input Artifacts. Run node with a script that reads ${GITHUB_WORK_PROOF_FILE} and asserts it includes every string in ["GitHub Work","Assignment","worktree","security preview","Artifacts","gh","Hub","human"], then prints CHECKLIST_TEST_PASS only after every assertion passes. Inspect this file only. Report the file path, actual test result, and whether its steps match the plan. Do not modify files.`,
       },
     ],
     workflow: [

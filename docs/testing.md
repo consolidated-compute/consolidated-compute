@@ -176,6 +176,20 @@ available model that supports the capability being tested. Keep prompts and turn
 and record the model and usage with the evidence.
 Use test-specific Profiles; do not change the operator's saved Profiles or default model.
 
+For the GitHub Work journey, select one target instead of running every real-provider spec:
+
+```bash
+# Real GitHub discovery and security preview, with no agent turns:
+npm run test:e2e:real --workspace=@getpaseo/app -- github-work-preflight.real.spec.ts --retries=0
+# Paid Spark execution through the browser; no automatic retries:
+npm run test:e2e:real --workspace=@getpaseo/app -- github-work-execution.real.spec.ts --retries=0
+```
+
+Keep the recorded run, usage, Artifacts, timelines, and diff when a later UI assertion fails.
+Verify selector-only corrections with the deterministic `assignments-reliability.spec.ts`
+instead of repeating paid execution. Report the real run outcome separately from the browser
+test outcome; a successful Team Run does not make a failed test green.
+
 Codex MultiAgentV2 real tests use local Codex authentication rather than the OpenRouter-compatible test provider. OpenRouter does not accept Codex collaboration-history items on the parent follow-up request, so it cannot verify a complete native sub-agent turn.
 
 ### Test setup
