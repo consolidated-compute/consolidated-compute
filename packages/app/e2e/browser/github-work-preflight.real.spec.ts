@@ -1,6 +1,7 @@
 import { test } from "../support/fixtures";
 import { startGithubWorkProof } from "../support/helpers/github-work-proof";
 import { prepareGithubWorkRun } from "../support/helpers/github-work-journey";
+import { addConnectedHostAndReload } from "../support/helpers/hosts";
 
 // Opt-in real-host preflight for #135. Stop before Start: no agent turns or GitHub writes.
 test("completes real GitHub Work preflight without starting an agent", async ({
@@ -10,6 +11,8 @@ test("completes real GitHub Work preflight without starting an agent", async ({
   page.setDefaultTimeout(30_000);
   const proof = await startGithubWorkProof();
   try {
+    await page.goto("/github-work");
+    await addConnectedHostAndReload(page, { ...proof, label: "GitHub proof host" });
     await prepareGithubWorkRun(page, proof, testInfo);
   } finally {
     await proof.cleanup();

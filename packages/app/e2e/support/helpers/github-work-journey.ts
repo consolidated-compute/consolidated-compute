@@ -1,5 +1,5 @@
 import { expect, type Page, type TestInfo } from "@playwright/test";
-import { addConnectedHostAndReload, reloadPreservingHostRegistry } from "./hosts";
+import { reloadPreservingHostRegistry } from "./hosts";
 import {
   startGithubWorkProof,
   saveGithubWorkProofTeam,
@@ -7,15 +7,15 @@ import {
 } from "./github-work-proof";
 import { chooseAddProjectMethod } from "./add-project-flow";
 
-// The shared journey ends before Start so the preflight remains free of agent turns.
+// Callers open GitHub Work with the proof host registered in their browser or
+// real Electron context. The shared journey stops before any agent turns.
 export async function prepareGithubWorkRun(
   page: Page,
   proof: Awaited<ReturnType<typeof startGithubWorkProof>>,
   testInfo: TestInfo,
+  options?: { reloadAssignment?: (assignmentId: string) => Promise<void> },
 ) {
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto("/github-work");
-  await addConnectedHostAndReload(page, { ...proof, label: "GitHub proof host" });
   await page.getByTestId("github-work-host-field").getByRole("button").click();
   await page.getByTestId(`github-work-host-${proof.serverId}`).click();
   await page.getByTestId("github-work-site").fill("unconfigured.invalid");
@@ -54,7 +54,11 @@ export async function prepareGithubWorkRun(
   expect(assignment.objective).toBe(GITHUB_WORK_PROOF_OBJECTIVE);
   expect(JSON.stringify(assignment)).not.toContain("Golden flow");
   expect((await proof.client.fetchWorkspaces()).entries).toEqual([]);
-  await reloadPreservingHostRegistry(page);
+  if (options?.reloadAssignment) {
+    await options.reloadAssignment(assignmentId);
+  } else {
+    await reloadPreservingHostRegistry(page);
+  }
   await expect(page.getByTestId(`assignment-detail-${proof.serverId}-${assignmentId}`)).toBeVisible(
     { timeout: 30_000 },
   );

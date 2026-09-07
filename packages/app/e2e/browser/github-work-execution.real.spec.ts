@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import type { TeamRunDto } from "@getpaseo/protocol/team/types";
 import { expect, test } from "../support/fixtures";
-import { reloadPreservingHostRegistry } from "../support/helpers/hosts";
+import { addConnectedHostAndReload, reloadPreservingHostRegistry } from "../support/helpers/hosts";
 import { prepareGithubWorkRun } from "../support/helpers/github-work-journey";
 import { assertGithubWorkChecklist } from "../support/helpers/github-work-checklist";
 import {
@@ -23,6 +23,8 @@ test("executes real GitHub Work through supervised Artifacts and a reviewable di
   const proof = await startGithubWorkProof();
   let lastRun: TeamRunDto | null = null;
   try {
+    await page.goto("/github-work");
+    await addConnectedHostAndReload(page, { ...proof, label: "GitHub proof host" });
     const { assignment, workspace } = await prepareGithubWorkRun(page, proof, testInfo);
     await page.getByTestId("team-run-start").click();
     await expect(page).toHaveURL(/\/teams\/[^/]+\/[^/]+\/runs\//);
