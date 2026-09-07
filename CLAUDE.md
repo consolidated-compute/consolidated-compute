@@ -35,6 +35,7 @@ At the start of non-trivial work, list `docs/` and skim anything relevant to the
 | [docs/assignments.md](docs/assignments.md)                           | Durable execution intent, external Work Item references, immutable Artifacts, and exact Team handoffs                          |
 | [public-docs/index.md](public-docs/index.md)                         | CC source setup and operator-facing distribution and compatibility guidance                                                    |
 | [public-docs/github-work.md](public-docs/github-work.md)             | Canonical first Team Run walkthrough — GitHub Work, Profiles, worktree, security preview, review, and recovery                 |
+| [public-docs/capabilities.md](public-docs/capabilities.md)           | Operator capability matrix — provider mappings, frozen posture claims, recorded proof, and platform evidence gaps              |
 | [docs/hover.md](docs/hover.md)                                       | Hover — the canonical pattern (plain View + onPointerEnter/Leave, separate inner Pressable) and the three ways agents break it |
 | [docs/unistyles.md](docs/unistyles.md)                               | Unistyles gotchas — `useUnistyles()` is forbidden, alternatives in order                                                       |
 | [docs/floating-panels.md](docs/floating-panels.md)                   | Anchored popovers — Portal/Modal escape for Android, lifecycle gates, keyboard-shared-value, status-bar offset, the flash      |

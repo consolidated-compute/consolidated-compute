@@ -184,7 +184,7 @@ For an Assignment-backed step, persist its bounded final response under the prea
 
 For an objective-only step, delimit the previous response as untrusted handoff context. Cap it at 4 KiB of UTF-8 and state when it was truncated. An empty final response gets an explicit empty marker. Do not pass the full transcript.
 
-The Artifact handoff is not a security or context-isolation boundary. Provider-native launch controls may separately restrict each role. The current real-provider proof covers Codex on macOS. The restricted role uses `sandbox_mode: read-only` with `approval_policy: never`. The writer uses `sandbox_mode: workspace-write` with the same approval policy, no extra writable roots, and both standard temporary-root exclusions. It can write the selected Workspace but not a sibling directory. Both roles can still read the selected Workspace, and daemon tools are not isolated by this boundary. Run records keep step status, timestamps, agent IDs, frozen configuration, and bounded errors; agent timelines remain authoritative for output.
+The Artifact handoff is not a security or context-isolation boundary. Provider-native launch controls may separately restrict each role; the [capability and evidence matrix](../public-docs/capabilities.md) owns the recorded provider/platform boundary proof and its limits. Run records keep step status, timestamps, agent IDs, frozen configuration, and bounded errors; agent timelines remain authoritative for output.
 
 Freeze provider-reported usage on each successful step. Sum additive token fields in the Team Run
 projection, but retain only the latest cumulative cost for each reused agent before summing across
