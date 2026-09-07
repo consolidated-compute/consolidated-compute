@@ -241,8 +241,14 @@ export async function startRealElectronRenderer(input: {
     return {
       page,
       stop: async () => {
-        await browser?.close().catch(() => undefined);
-        await cleanupRuntime();
+        try {
+          // Playwright Test starts tracing CDP contexts too. Closing the context
+          // flushes its artifacts; disconnecting the browser first loses them.
+          await page.context().close();
+        } finally {
+          await browser?.close().catch(() => undefined);
+          await cleanupRuntime();
+        }
       },
     };
   } catch (error) {
