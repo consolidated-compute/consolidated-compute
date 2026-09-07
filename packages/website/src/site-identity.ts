@@ -1,9 +1,15 @@
 export const CC_PRODUCT_NAME = "Consolidated Compute";
 export const CC_REPOSITORY_URL = "https://github.com/consolidated-compute/consolidated-compute";
+export const CC_DISTRIBUTION_HREF = "/docs#distribution-and-compatibility";
+
+export function isCcDownloadPath(pathname: string): boolean {
+  return pathname === "/download" || pathname === "/download/";
+}
 
 export function isCcPagePath(pathname: string): boolean {
   return (
     pathname === "/" ||
+    isCcDownloadPath(pathname) ||
     pathname === "/docs" ||
     pathname === "/docs.md" ||
     pathname.startsWith("/docs/")

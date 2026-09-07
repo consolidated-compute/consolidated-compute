@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { ccPageMeta, docsPageMeta, docsSourceUrl } from "./site-identity";
+import { ccPageMeta, docsPageMeta, docsSourceUrl, isCcDownloadPath } from "./site-identity";
 
 describe("CC site identity", () => {
+  it.each(["/download", "/download/"])(
+    "recognizes the inherited download entry: %s",
+    (pathname) => {
+      expect(isCcDownloadPath(pathname)).toBe(true);
+    },
+  );
+  it.each(["/downloads", "/download/file", "/downloads.md", "/docs/download", "/"])(
+    "does not capture unrelated paths: %s",
+    (pathname) => {
+      expect(isCcDownloadPath(pathname)).toBe(false);
+    },
+  );
   it("keeps the homepage title separate from the docs suffix", () => {
     expect(
       ccPageMeta("Consolidated Compute — A harness for your harness", "Operate agent teams."),

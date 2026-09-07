@@ -1,12 +1,14 @@
 ---
-title: Updates
-description: How Paseo releases work, the difference between stable and beta channels, and how to opt in to earlier updates.
-nav: Updates
+title: Upstream Paseo updates
+description: Reference for upstream Paseo release channels; use the Consolidated Compute distribution guide for CC.
+nav: Upstream updates
 order: 5
 category: Getting started
 ---
 
-# Updates
+# Upstream Paseo updates
+
+This guide describes **upstream Paseo**. For Consolidated Compute, follow the [distribution and compatibility guide](https://github.com/consolidated-compute/consolidated-compute/blob/main/public-docs/index.md#distribution-and-compatibility).
 
 Paseo ships updates through two channels: **Stable** and **Beta**.
 

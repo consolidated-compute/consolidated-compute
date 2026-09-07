@@ -14,6 +14,8 @@ const release: ReleaseChannels = {
 
 describe("site data ownership", () => {
   it.each([
+    "/download",
+    "/download/",
     "/",
     "/docs",
     "/docs/",
@@ -33,7 +35,7 @@ describe("site data ownership", () => {
     ).resolves.toEqual({ kind: "cc" });
   });
 
-  it.each(["/download", "/agents", "/docstrings", "/docs-other"])(
+  it.each(["/changelog", "/agents", "/docstrings", "/docs-other"])(
     "preserves upstream data outside the CC pages: %s",
     async (pathname) => {
       const calls: string[] = [];
@@ -55,7 +57,7 @@ describe("site data ownership", () => {
 
   it("does not mask a marketing source failure", async () => {
     await expect(
-      loadSiteData("/download", {
+      loadSiteData("/changelog", {
         release: async () => {
           throw new Error("Release unavailable");
         },
