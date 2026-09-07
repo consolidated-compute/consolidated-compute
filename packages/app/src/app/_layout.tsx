@@ -7,6 +7,7 @@ import * as Notifications from "expo-notifications";
 import { Stack, useNavigationContainerRef, usePathname, useRouter } from "expo-router";
 import {
   createContext,
+  type ReactElement,
   type ReactNode,
   useCallback,
   useContext,
@@ -73,6 +74,7 @@ import {
 } from "@/navigation/host-runtime-bootstrap";
 import { registerWorkspaceRouteNavigationRef } from "@/navigation/workspace-route-navigation";
 import { ThemedStack } from "@/navigation/themed-stack";
+import { StartupSplashScreen } from "@/screens/startup-splash-screen";
 import { shouldUseDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
 import { AgentNavigationListener } from "@/desktop/agent-navigation";
 import { LegacyAgentSkillsMigration } from "@/agent-skills/legacy-migration";
@@ -887,27 +889,32 @@ const ROOT_STACK_SCREEN_OPTIONS = {
 
 function RootStack() {
   const storeReady = useStoreReady();
+  const screenLayout = useCallback(
+    ({ children }: { children: ReactElement }) => {
+      if (!storeReady) return <StartupSplashScreen />;
+      return children;
+    },
+    [storeReady],
+  );
   return (
-    <ThemedStack screenOptions={ROOT_STACK_SCREEN_OPTIONS}>
+    <ThemedStack screenOptions={ROOT_STACK_SCREEN_OPTIONS} screenLayout={screenLayout}>
       <Stack.Screen name="index" />
-      <Stack.Protected guard={storeReady}>
-        <Stack.Screen name="welcome" />
-        <Stack.Screen name="settings/index" />
-        <Stack.Screen name="settings/[section]" />
-        <Stack.Screen name="new" />
-        <Stack.Screen name="open-project" />
-        <Stack.Screen name="operations" />
-        <Stack.Screen name="visual" />
-        <Stack.Screen name="sessions" />
-        <Stack.Screen name="schedules" />
-        <Stack.Screen name="assignments/index" />
-        <Stack.Screen name="github-work" />
-        <Stack.Screen name="assignments/[serverId]/[assignmentId]" />
-        <Stack.Screen name="teams/index" />
-        <Stack.Screen name="teams/[serverId]/[teamId]" />
-        <Stack.Screen name="teams/[serverId]/[teamId]/runs/[runId]" />
-        <Stack.Screen name="pair-scan" />
-      </Stack.Protected>
+      <Stack.Screen name="welcome" />
+      <Stack.Screen name="settings/index" />
+      <Stack.Screen name="settings/[section]" />
+      <Stack.Screen name="new" />
+      <Stack.Screen name="open-project" />
+      <Stack.Screen name="operations" />
+      <Stack.Screen name="visual" />
+      <Stack.Screen name="sessions" />
+      <Stack.Screen name="schedules" />
+      <Stack.Screen name="assignments/index" />
+      <Stack.Screen name="github-work" />
+      <Stack.Screen name="assignments/[serverId]/[assignmentId]" />
+      <Stack.Screen name="teams/index" />
+      <Stack.Screen name="teams/[serverId]/[teamId]" />
+      <Stack.Screen name="teams/[serverId]/[teamId]/runs/[runId]" />
+      <Stack.Screen name="pair-scan" />
       <Stack.Screen name="h/[serverId]" />
       <Stack.Screen name="settings/hosts/[serverId]/index" />
       <Stack.Screen name="settings/hosts/[serverId]/[hostSection]" />

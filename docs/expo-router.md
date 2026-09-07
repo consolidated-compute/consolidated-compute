@@ -47,6 +47,11 @@ state.
 This split is deliberate. The host layout must mount first so native local
 dynamic params exist before any nested workspace leaf is selected.
 
+Keep daemon readiness out of `Stack.Protected`. A false guard removes matching
+routes from navigation history, so temporary desktop startup can discard an
+explicit Assignment or other global route. Keep the root route table stable and
+gate screen content with the startup splash through `screenLayout` instead.
+
 ## App-Wide Route Hops
 
 When app-wide routes such as `/new`, `/settings`, or `/sessions` navigate back

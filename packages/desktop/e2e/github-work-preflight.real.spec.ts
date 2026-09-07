@@ -44,14 +44,10 @@ test("real Electron completes GitHub Work preflight without starting an agent", 
     await page.reload();
     await page.locator('[data-testid="sidebar-github-work"]:visible').click();
 
-    const serverId = proof.serverId;
     const { assignment, workspace, preview } = await prepareGithubWorkRun(page, proof, testInfo, {
-      // #147: desktop startup drops global deep links while its daemon starts. Reopen
-      // from the sidebar to prove durable readback, not cold route restoration.
-      reloadAssignment: async (assignmentId) => {
+      // Real Electron does not use the browser fixture's host reseeding.
+      reloadAssignment: async () => {
         await page.reload();
-        await page.locator('[data-testid="sidebar-assignments"]:visible').click();
-        await page.getByTestId(`assignment-row-${serverId}-${assignmentId}`).click();
       },
     });
     expect((await proof.client.listTeamRuns()).runs).toEqual([]);
