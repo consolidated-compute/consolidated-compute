@@ -4,7 +4,7 @@ import { Outlet, createRootRoute, HeadContent, Scripts } from "@tanstack/react-r
 import type { ReleaseChannels, ReleaseInfo } from "~/latest-release";
 import { getLatestRelease } from "~/release";
 import { getStarCount } from "~/stars";
-import { DOCS_PRODUCT_NAME } from "~/docs-identity";
+import { CC_PRODUCT_NAME } from "~/site-identity";
 import { loadSiteData } from "~/site-data";
 
 interface StarsContext {
@@ -50,10 +50,10 @@ export const Route = createRootRoute({
       { name: "theme-color", content: "#101615" },
       {
         property: "og:site_name",
-        content: loaderData?.kind === "docs" ? DOCS_PRODUCT_NAME : "Paseo",
+        content: loaderData?.kind === "cc" ? CC_PRODUCT_NAME : "Paseo",
       },
       { property: "og:type", content: "website" },
-      ...(loaderData?.kind === "docs"
+      ...(loaderData?.kind === "cc"
         ? []
         : [
             { property: "og:image", content: "https://paseo.sh/og-image.png" },
@@ -72,9 +72,9 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   const data = Route.useLoaderData();
-  if (data.kind === "docs") {
+  if (data.kind === "cc") {
     return (
-      <RootDocument isDocs>
+      <RootDocument isCc>
         <Outlet />
       </RootDocument>
     );
@@ -92,13 +92,13 @@ function RootComponent() {
 
 function RootDocument({
   children,
-  isDocs = false,
-}: Readonly<{ children: ReactNode; isDocs?: boolean }>) {
+  isCc = false,
+}: Readonly<{ children: ReactNode; isCc?: boolean }>) {
   return (
     <html lang="en">
       <head>
         <HeadContent />
-        {!isDocs && (
+        {!isCc && (
           <>
             <script async src="https://plausible.io/js/pa-cKNUoWbeH_Iksb2fh82s3.js" />
             <script dangerouslySetInnerHTML={PLAUSIBLE_INIT_SCRIPT} />

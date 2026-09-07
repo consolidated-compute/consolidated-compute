@@ -1,34 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { LandingPage } from "~/components/landing-page";
-import { pageMeta } from "~/meta";
+import { CcHome } from "~/components/cc-home";
+import { ccPageMeta } from "~/site-identity";
 
 export const Route = createFileRoute("/")({
   head: () =>
-    pageMeta(
-      "Paseo – Run Claude Code, Codex, Copilot, OpenCode from anywhere",
-      "Self-hosted daemon for Claude Code, Codex, Copilot, OpenCode, and Pi. Agents run on your machine with your full dev environment. Connect from phone, desktop, or web.",
-      "/",
+    ccPageMeta(
+      "Consolidated Compute — A harness for your harness",
+      "The open control plane for Harness Operations. Operate agent teams across the harnesses and machines you already use.",
     ),
-  component: Home,
+  component: CcHome,
 });
-
-function Home() {
-  return (
-    <LandingPage
-      title={
-        <>
-          The control plane
-          <br />
-          for coding agents
-        </>
-      }
-      subtitle={
-        <>
-          Run any coding agent from anywhere.
-          <br />
-          Self-hosted, multi-provider, open source
-        </>
-      }
-    />
-  );
-}

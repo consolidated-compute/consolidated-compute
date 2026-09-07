@@ -1,5 +1,5 @@
 import type { Doc } from "~/docs";
-import { docsSourceUrl } from "~/docs-identity";
+import { docsSourceUrl } from "~/site-identity";
 
 export function DocsSourceFooter({ doc }: { doc: Doc }) {
   const sourceUrl = docsSourceUrl(doc.sourcePath);

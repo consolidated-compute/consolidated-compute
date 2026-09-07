@@ -146,13 +146,13 @@ npm run test:e2e:browser-tabs --workspace=@getpaseo/desktop
 
 ### Website documentation
 
-Run the website's documentation browser regression with:
+Run the website's homepage and documentation browser regressions with:
 
 ```bash
 npm run test:docs --workspace=@getpaseo/website
 ```
 
-It builds the website and starts a fresh, loopback-only production preview on port `43131`, then exercises desktop and compact browser navigation, reload, source ownership, metadata, and raw Markdown access. Keep that port free; the runner must not reuse a dev server. Vite's cold dependency optimizer can invalidate modules and reload a dev page during a click. It needs Playwright Chromium but no daemon or agent provider. Screenshots and failure traces go to `packages/website/test-results/`. The `Website` workflow runs website unit tests and this build-backed regression when website sources or public docs change; it never deploys.
+It builds the website and starts a fresh, loopback-only production preview on port `43131`, then exercises desktop and compact browser navigation, reload, source ownership, metadata, screenshot loading, and raw Markdown access. Keep that port free; the runner must not reuse a dev server. Vite's cold dependency optimizer can invalidate modules and reload a dev page during a click. It needs Playwright Chromium but no daemon or agent provider. Screenshots and failure traces go to `packages/website/test-results/`. The `Website` workflow runs website unit tests and these build-backed regressions when website sources or public docs change; it never deploys.
 
 ## Test organization
 

@@ -45,6 +45,11 @@ test("CC docs preserve identity, source ownership, and metadata through navigati
     .getByRole("link", { name: "Consolidated Compute", exact: true })
     .filter({ visible: true })
     .click();
+  await expect(page).toHaveURL("/");
+  await page
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("link", { name: "Documentation", exact: true })
+    .click();
   await expect(page).toHaveURL(/\/docs\/?$/);
   await expect(page).toHaveTitle(
     "Getting started with Consolidated Compute - Consolidated Compute Docs",
@@ -77,7 +82,7 @@ test("compact docs menu navigates between CC guides and preserves raw Markdown a
   await page.goto("/docs");
   await expect(
     page.getByRole("link", { name: "Consolidated Compute", exact: true }).filter({ visible: true }),
-  ).toHaveAttribute("href", "/docs");
+  ).toHaveAttribute("href", "/");
   await page.getByRole("button", { name: "Open menu", exact: true }).click();
   await page
     .getByRole("link", { name: "Capabilities and evidence", exact: true })

@@ -3,7 +3,7 @@ import { DocsMarkdown } from "~/components/docs-markdown";
 import { DocsMarkdownActions } from "~/components/docs-markdown-actions";
 import { DocsSourceFooter } from "~/components/docs-source-footer";
 import { getDoc } from "~/docs";
-import { docsPageMeta } from "~/docs-identity";
+import { docsPageMeta } from "~/site-identity";
 
 export const Route = createFileRoute("/docs/")({
   head: () => {

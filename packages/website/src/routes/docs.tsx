@@ -5,7 +5,7 @@ import { DocsBreadcrumbs } from "~/components/docs-breadcrumbs";
 import { DocsNav } from "~/components/docs-nav";
 import { DocsOutline } from "~/components/docs-outline";
 import { buildDocsNavTree, getDoc, getDocs } from "~/docs";
-import { DOCS_PRODUCT_NAME } from "~/docs-identity";
+import { CC_PRODUCT_NAME } from "~/site-identity";
 import "~/styles.css";
 
 export const Route = createFileRoute("/docs")({
@@ -29,8 +29,8 @@ function DocsLayout() {
       {/* Mobile header */}
       <header className="lg:hidden sticky top-0 z-50 bg-background border-b border-border">
         <div className="flex items-center justify-between p-4">
-          <Link to="/docs" className="text-lg font-medium leading-tight">
-            {DOCS_PRODUCT_NAME}
+          <Link to="/" className="text-lg font-medium leading-tight">
+            {CC_PRODUCT_NAME}
           </Link>
           <button
             type="button"
@@ -53,8 +53,8 @@ function DocsLayout() {
       <div className="max-w-[90rem] mx-auto flex items-start">
         {/* Desktop sidebar */}
         <aside className="hidden lg:block sticky top-0 h-screen w-60 shrink-0 border-r border-border p-6 overflow-y-auto">
-          <Link to="/docs" className="block text-lg font-medium leading-tight mb-8">
-            {DOCS_PRODUCT_NAME}
+          <Link to="/" className="block text-lg font-medium leading-tight mb-8">
+            {CC_PRODUCT_NAME}
           </Link>
           <DocsNav nodes={tree} />
         </aside>

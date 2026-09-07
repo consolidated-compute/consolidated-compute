@@ -54,7 +54,7 @@ This is an npm workspace monorepo:
 - `packages/cli` — compatibility-named `paseo` CLI
 - `packages/desktop` — Electron wrapper
 - `packages/relay` — optional encrypted relay transport
-- `packages/website` — inherited website and public-docs renderer
+- `packages/website` — CC homepage and public-docs renderer, with inherited secondary website routes
 
 See [development](docs/development.md) for source commands, [architecture](docs/architecture.md) for package boundaries, and [fork maintenance](docs/fork-maintenance.md) for stable-release sync and release quarantine. The [roadmap](https://github.com/consolidated-compute/consolidated-compute/issues/9) owns the next milestones. [CONTRIBUTING.md](CONTRIBUTING.md) describes the contribution workflow.
 
