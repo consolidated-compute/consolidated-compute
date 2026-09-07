@@ -181,9 +181,14 @@ For the GitHub Work journey, select one target instead of running every real-pro
 ```bash
 # Real GitHub discovery and security preview, with no agent turns:
 npm run test:e2e:real --workspace=@getpaseo/app -- github-work-preflight.real.spec.ts --retries=0
+# The same preflight in the real Electron shell, also with no agent turns:
+npm run test:e2e:real --workspace=@getpaseo/desktop -- github-work-preflight.real.spec.ts --retries=0
 # Paid Spark execution through the browser; no automatic retries:
 npm run test:e2e:real --workspace=@getpaseo/app -- github-work-execution.real.spec.ts --retries=0
 ```
+
+Desktop real-host specs use the opt-in `desktop-real` project; the normal desktop target
+excludes them. A preflight proves discovery, worktree creation, and approval UI, not execution.
 
 Keep the recorded run, usage, Artifacts, timelines, and diff when a later UI assertion fails.
 Verify selector-only corrections with the deterministic `assignments-reliability.spec.ts`
