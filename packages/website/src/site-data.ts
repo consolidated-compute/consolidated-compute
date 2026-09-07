@@ -1,4 +1,4 @@
-import { isDocsPath } from "./docs-identity";
+import { isCcPagePath } from "./site-identity";
 import type { ReleaseChannels } from "./latest-release";
 
 interface SiteDataSources {
@@ -7,8 +7,8 @@ interface SiteDataSources {
 }
 
 export async function loadSiteData(pathname: string, sources: SiteDataSources) {
-  // The docs are local content. Upstream marketing data must not gate a read.
-  if (isDocsPath(pathname)) return { kind: "docs" as const };
+  // CC pages are local content. Upstream marketing data must not gate a read.
+  if (isCcPagePath(pathname)) return { kind: "cc" as const };
   const [release, stars] = await Promise.all([sources.release(), sources.stars()]);
   return { kind: "upstream" as const, release, ...stars };
 }

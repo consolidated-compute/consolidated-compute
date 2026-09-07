@@ -1,7 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { docsPageMeta, docsSourceUrl } from "./docs-identity";
+import { ccPageMeta, docsPageMeta, docsSourceUrl } from "./site-identity";
 
-describe("CC documentation identity", () => {
+describe("CC site identity", () => {
+  it("keeps the homepage title separate from the docs suffix", () => {
+    expect(
+      ccPageMeta("Consolidated Compute — A harness for your harness", "Operate agent teams."),
+    ).toEqual({
+      meta: [
+        { title: "Consolidated Compute — A harness for your harness" },
+        { name: "description", content: "Operate agent teams." },
+        { property: "og:title", content: "Consolidated Compute — A harness for your harness" },
+        { property: "og:description", content: "Operate agent teams." },
+        { name: "twitter:title", content: "Consolidated Compute — A harness for your harness" },
+        { name: "twitter:description", content: "Operate agent teams." },
+      ],
+    });
+  });
   it.each(["public-docs/index.md", "public-docs/capabilities.md", "public-docs/hub/security.md"])(
     "links %s to the fork that owns its contents",
     (sourcePath) => {

@@ -14,6 +14,7 @@ const release: ReleaseChannels = {
 
 describe("site data ownership", () => {
   it.each([
+    "/",
     "/docs",
     "/docs/",
     "/docs/github-work",
@@ -22,18 +23,18 @@ describe("site data ownership", () => {
     "/docs/cli.md",
   ])("renders %s without invoking release or star sources", async (pathname) => {
     const forbiddenSource = async (): Promise<never> => {
-      throw new Error("Documentation must not request upstream metadata");
+      throw new Error("CC pages must not request upstream metadata");
     };
     await expect(
       loadSiteData(pathname, {
         release: forbiddenSource,
         stars: forbiddenSource,
       }),
-    ).resolves.toEqual({ kind: "docs" });
+    ).resolves.toEqual({ kind: "cc" });
   });
 
-  it.each(["/", "/download", "/docstrings", "/docs-other"])(
-    "preserves upstream data outside the documentation namespace: %s",
+  it.each(["/download", "/agents", "/docstrings", "/docs-other"])(
+    "preserves upstream data outside the CC pages: %s",
     async (pathname) => {
       const calls: string[] = [];
       await expect(
