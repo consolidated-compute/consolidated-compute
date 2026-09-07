@@ -187,10 +187,15 @@ npm run test:e2e:real --workspace=@getpaseo/desktop -- github-work-preflight.rea
 npm run test:e2e:real --workspace=@getpaseo/app -- github-work-execution.real.spec.ts --retries=0
 # The same paid execution and review assertions in real Electron; choose one surface per run:
 npm run test:e2e:real --workspace=@getpaseo/desktop -- github-work-execution.real.spec.ts --retries=0
+# Read back this checkout's already-published CC PR in Electron; no agent turns or GitHub writes:
+npm run test:e2e:real --workspace=@getpaseo/desktop -- github-work-publication.real.spec.ts --retries=0
 ```
 
 Desktop real-host specs use the opt-in `desktop-real` project; the normal desktop target
 excludes them. A preflight proves discovery, worktree creation, and approval UI, not execution.
+The publication target requires an open PR for the current `codex/` branch with its exact
+HEAD already pushed to CC. Run it after publishing, before merging. It verifies Forge
+readback in a disposable clone; it neither publishes the PR nor starts another Team Run.
 
 Keep the recorded run, usage, Artifacts, timelines, and diff when a later UI assertion fails.
 Verify selector-only corrections with the deterministic `assignments-reliability.spec.ts`
