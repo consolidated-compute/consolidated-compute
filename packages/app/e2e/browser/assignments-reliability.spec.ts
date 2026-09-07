@@ -13,6 +13,7 @@ import {
 import { getServerId } from "../support/helpers/server-id";
 import { seedWorkspace } from "../support/helpers/seed-client";
 import { connectTeamsClient, removeTeam } from "../support/helpers/teams";
+import { openAgentRoute } from "../support/helpers/mock-agent";
 import {
   openAssignmentRunForReview,
   openTeamRunAgentForReview,
@@ -213,6 +214,37 @@ test.describe("Assignments reliability", () => {
           stepId: worker.snapshot.stepId,
           agentId: worker.state.agentId,
         });
+        const decoy = await workspace.client.createAgent({
+          provider: "mock",
+          cwd: workspace.workspaceDirectory,
+          workspaceId: workspace.workspaceId,
+          title: "Unrelated review agent",
+          modeId: "load-test",
+          model: "e2e-fast-stream",
+          initialPrompt: "Keep another completed timeline available during run review.",
+        });
+        await openAgentRoute(page, { workspaceId: workspace.workspaceId, agentId: decoy.id });
+        const workerTab = page
+          .getByTestId(`workspace-tab-agent_${worker.state.agentId}`)
+          .filter({ visible: true })
+          .first();
+        const decoyTab = page
+          .getByTestId(`workspace-tab-agent_${decoy.id}`)
+          .filter({ visible: true })
+          .first();
+        await expect(decoyTab).toHaveAttribute("aria-selected", "true");
+        await expect(workerTab).toBeVisible();
+        await expect(workerTab).toHaveAttribute("aria-selected", "false");
+        await expect(
+          page.getByTestId("assistant-message").filter({ visible: true }).first(),
+        ).toBeVisible();
+        await openAssignmentRunForReview(page, reviewTarget);
+        await openTeamRunAgentForReview(page, reviewTarget, {
+          stepId: worker.snapshot.stepId,
+          agentId: worker.state.agentId,
+        });
+        await expect(decoyTab).toBeVisible();
+        await expect(decoyTab).toHaveAttribute("aria-selected", "false");
         await page.screenshot({ path: testInfo.outputPath("team-run-worker-timeline.png") });
         await openAssignmentRunForReview(page, reviewTarget);
         await expect(runDetail.getByTestId("team-run-status-succeeded")).toBeVisible();

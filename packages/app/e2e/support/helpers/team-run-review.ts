@@ -36,7 +36,7 @@ export async function openTeamRunAgentForReview(
   );
   await expect(
     page.getByTestId(`workspace-tab-agent_${step.agentId}`).filter({ visible: true }).first(),
-  ).toBeVisible();
+  ).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
   await expect(
     page.getByTestId("assistant-message").filter({ visible: true }).first(),
   ).toBeVisible();
@@ -48,7 +48,7 @@ export async function openTeamRunChangesForReview(page: Page, target: TeamRunRev
     (url) => url.pathname === `/h/${target.serverId}/workspace/${target.workspaceId}`,
   );
   const changes = page.getByTestId("working-diff-panel").filter({ visible: true });
-  await expect(changes).toBeVisible();
-  await expect(changes.getByTestId("git-diff-canvas")).toBeVisible();
+  await expect(changes).toBeVisible({ timeout: 30_000 });
+  await expect(changes.getByTestId("git-diff-canvas")).toBeVisible({ timeout: 30_000 });
   return changes;
 }
