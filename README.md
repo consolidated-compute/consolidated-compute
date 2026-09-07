@@ -41,7 +41,7 @@ Interactive GitHub Work needs no Hub account, GitHub App installation, or webhoo
 
 ## Evidence and limits
 
-For GitHub Work verification and provider/platform coverage, see the first-run guide's [evidence and current limits](public-docs/github-work.md#evidence-and-current-limits). [Self-work evidence](https://github.com/consolidated-compute/consolidated-compute/issues/126) tracks the CC dogfood runs.
+The [capability and evidence matrix](public-docs/capabilities.md) separates provider mappings, frozen security claims, real Team proof, and platform coverage.
 
 Security previews distinguish enforced controls, policy-only guidance, and unavailable controls. A worktree is not a credential sandbox, and a host's `gh` login is operator authority, not isolated per-agent least privilege. Read the [first-run security guidance](public-docs/github-work.md#review-the-security-preview) before starting work.
 

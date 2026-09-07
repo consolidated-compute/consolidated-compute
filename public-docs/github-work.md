@@ -82,9 +82,7 @@ Before **Start Run**, inspect every resolved role: profile, provider, model, thi
 
 You can stop at this preview without spending agent turns. Pressing **Start Run** begins provider execution and consumes provider usage.
 
-- **Enforced** describes a provider-native restriction derived from this frozen launch configuration.
-- **Policy only** is guidance, not a technical restriction.
-- **Unavailable** means no control is established by that preview; do not read it as permission or protection.
+Read each dimension using the matrix's [Enforced, Policy only, and Unavailable definitions](https://github.com/consolidated-compute/consolidated-compute/blob/main/public-docs/capabilities.md#read-support-and-evidence-separately). Do not infer one restriction from a badge on another dimension.
 
 The fingerprint binds the accepted configuration, not future code correctness. If profiles or Workspace facts change, obtain and review a new preview. Start revalidates the configuration; do not work around a stale-preview rejection. Later profile edits affect future runs, not this run's frozen launch snapshot.
 
@@ -140,8 +138,4 @@ Return to the same Workspace and open **Pull request** from the new-tab menu. Ch
 
 ## Evidence and current limits
 
-As of September 7, 2026, [#135](https://github.com/consolidated-compute/consolidated-compute/issues/135) records fully green real-provider browser and real Electron proofs on macOS: host-local GitHub discovery, a supervised Codex/Spark Team Run, exact Artifact handoffs, a reviewer shell check, reload, the selected producing agent's timeline, live Workspace changes, and unchanged Assignment history. Each execution proof used one Spark/low run with no test retries or model fallback. Browser and real Electron preflight/reload checks also pass without paid agent turns.
-
-A separate zero-agent Electron proof verifies an operator-published Git/`gh` PR through CC's Forge path: exact published head, PR identity/status, selected commit diff, and reload. It uses the proof implementation's PR, not the earlier Team Run's generated worktree, and does not exercise the app's generated-metadata publication buttons. The proof's agents make no commits, pushes, PRs, or merges.
-
-Native proof and publication of a Team Run's generated changes remain open. [#127](https://github.com/consolidated-compute/consolidated-compute/issues/127) tracks a second-harness proof; [#64](https://github.com/consolidated-compute/consolidated-compute/pull/64) tracks deferred native test work. Treat this as a source-build walkthrough with those limits, not a claim of completed cross-platform release QA.
+The [capability and evidence matrix](https://github.com/consolidated-compute/consolidated-compute/blob/main/public-docs/capabilities.md) owns the recorded run results, provider mappings, platform coverage, and remaining proof gaps. Consult it before applying this walkthrough to another provider or host; this guide is not cross-platform release certification.
