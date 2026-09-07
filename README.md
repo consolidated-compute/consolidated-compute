@@ -39,12 +39,9 @@ Interactive GitHub Work needs no Hub account, GitHub App installation, or webhoo
 
 [Optional Hub integration](https://github.com/consolidated-compute/consolidated-compute/issues/140) is a separate, deferred track for concrete automation or hosted needs.
 
-## What is proved
+## Evidence and limits
 
-- **Self-work:** real supervised CC runs produced merged fixes. See [#126](https://github.com/consolidated-compute/consolidated-compute/issues/126).
-- **GitHub Work:** a real Codex/Spark run on macOS produced Plan, Implementation, and Review Artifacts from repository-selected work. Browser and Electron preflight and reload evidence are recorded in [#135](https://github.com/consolidated-compute/consolidated-compute/issues/135). That issue remains open for the complete end-to-end proof.
-- **Provider breadth:** Paseo integrates Claude Code, Codex, GitHub Copilot, OpenCode, and Pi. That is not a claim that every provider supports every Team security control; [#127](https://github.com/consolidated-compute/consolidated-compute/issues/127) tracks a second-harness proof.
-- **Platforms:** clients target browser, Electron, iOS, and Android. Remaining native evidence is tracked in [#19](https://github.com/consolidated-compute/consolidated-compute/issues/19) and the deferred [#64](https://github.com/consolidated-compute/consolidated-compute/pull/64).
+For GitHub Work verification and provider/platform coverage, see the first-run guide's [evidence and current limits](public-docs/github-work.md#evidence-and-current-limits). [Self-work evidence](https://github.com/consolidated-compute/consolidated-compute/issues/126) tracks the CC dogfood runs.
 
 Security previews distinguish enforced controls, policy-only guidance, and unavailable controls. A worktree is not a credential sandbox, and a host's `gh` login is operator authority, not isolated per-agent least privilege. Read the [first-run security guidance](public-docs/github-work.md#review-the-security-preview) before starting work.
 
