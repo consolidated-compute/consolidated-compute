@@ -65,6 +65,15 @@ test("real Electron reads back the operator-published PR and its exact checkout"
     git(source, ["clone", "--shared", "--no-checkout", source, proof.checkout]);
     git(proof.checkout, ["checkout", "-B", branch, head]);
     git(proof.checkout, ["remote", "set-url", "origin", `https://github.com/${REPOSITORY}.git`]);
+    // A local clone inherits the source checkout's current branch as origin/HEAD.
+    // Use GitHub's real base so Commits compares the published feature against main.
+    git(proof.checkout, [
+      "fetch",
+      "--no-tags",
+      "origin",
+      "refs/heads/main:refs/remotes/origin/main",
+    ]);
+    git(proof.checkout, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
     const { workspace, error } = await proof.client.createWorkspace({
       source: { kind: "directory", path: proof.checkout },
       title: "Operator publication proof",
