@@ -65,7 +65,7 @@ paseo daemon restart
 
 Runtime-safe settings include relay enablement, MCP settings, browser tools, hostnames, CORS origins, trusted proxies, Git process limits, agent and terminal profiles, provider definitions, metadata generation, the app base URL, provider catalog timeout, and the global plugin switch. Removing one of these settings applies its omitted-field behavior; removing a provider removes it from future launches.
 
-New homes keep relay disabled when you remove `daemon.relay.enabled`. A daemon whose config already omitted this field when it started keeps the legacy relay-enabled behavior for compatibility. Set `daemon.relay.enabled` explicitly when editing an older config.
+Relay access requires explicit opt-in. If `daemon.relay.enabled` is omitted, relay stays disabled at startup and on reload, including for older configs and checkout-local dev homes. Set it to `true` to enable remote pairing through the relay. Removing it disables relay on reload without restarting the daemon, unless an environment variable or daemon start flag overrides the file setting.
 
 Listen addresses, authentication, relay endpoints and TLS, worktree allocation, service-proxy addresses, the bundled web UI, logging, speech, voice, credentials, and local model settings require a restart. Reload applies other valid edits in the same file before reporting those paths.
 
