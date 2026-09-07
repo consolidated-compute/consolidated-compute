@@ -19,6 +19,9 @@ test("CC docs preserve identity, source ownership, and metadata through navigati
 
   const response = await page.goto("/docs/capabilities");
   expect(response?.status()).toBe(200);
+  // A dev optimizer reload can interrupt navigation even after the HTML is ready.
+  // Exercise the built site, never Vite's development client.
+  await expect(page.locator('script[src*="tanstack-start-dev-client-entry"]')).toHaveCount(0);
   await expect(page).toHaveTitle("Capabilities and evidence - Consolidated Compute Docs");
   await expect(page.locator('meta[property="og:site_name"]')).toHaveAttribute(
     "content",

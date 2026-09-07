@@ -45,11 +45,9 @@ jobs:
         run: node scripts/npm-retry.mjs ci
       - name: Website unit tests
         run: npx vitest run packages/website/src --bail=1
-      - name: Build website
-        run: npm run build --workspace=@getpaseo/website
       - name: Install browser
         run: npx playwright install --with-deps chromium
-      - name: Documentation browser regression
+      - name: Build and verify documentation
         run: npm run test:docs --workspace=@getpaseo/website
       - uses: actions/upload-artifact@v4
         if: always()
