@@ -185,6 +185,8 @@ npm run test:e2e:real --workspace=@getpaseo/app -- github-work-preflight.real.sp
 npm run test:e2e:real --workspace=@getpaseo/desktop -- github-work-preflight.real.spec.ts --retries=0
 # Paid Spark execution through the browser; no automatic retries:
 npm run test:e2e:real --workspace=@getpaseo/app -- github-work-execution.real.spec.ts --retries=0
+# The same paid execution and review assertions in real Electron; choose one surface per run:
+npm run test:e2e:real --workspace=@getpaseo/desktop -- github-work-execution.real.spec.ts --retries=0
 ```
 
 Desktop real-host specs use the opt-in `desktop-real` project; the normal desktop target
