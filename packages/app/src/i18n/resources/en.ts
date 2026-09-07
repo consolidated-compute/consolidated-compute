@@ -456,6 +456,7 @@ export const en = {
         start: "Start Run",
         cancel: "Cancel Run",
         openWorkspace: "Open Workspace",
+        reviewChanges: "Review changes",
         openAgent: "Open agent",
         loadMore: "Load more",
       },
@@ -605,6 +606,8 @@ export const en = {
         workspace: "Workspace",
         steps: "Workflow progress",
         frozenTeam: "Frozen Team snapshot",
+        reviewChangesHint:
+          "These are current Workspace changes and may include later work. Run Artifacts remain frozen.",
         frozenAssignment: "Frozen Assignment snapshot",
         artifacts: "Artifacts",
         featureCount: "{{count}} configured features",

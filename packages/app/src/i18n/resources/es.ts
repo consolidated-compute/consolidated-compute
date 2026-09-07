@@ -352,6 +352,15 @@ export const es: TranslationResources = {
     },
     runs: {
       ...en.teams.runs,
+      actions: {
+        ...en.teams.runs.actions,
+        reviewChanges: "Revisar cambios",
+      },
+      detail: {
+        ...en.teams.runs.detail,
+        reviewChangesHint:
+          "Estos son los cambios actuales del espacio de trabajo y pueden incluir trabajo posterior. Los artefactos de la ejecución permanecen inmutables.",
+      },
       form: {
         ...en.teams.runs.form,
         execution: "Ejecución",

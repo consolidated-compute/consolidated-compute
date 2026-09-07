@@ -13,10 +13,11 @@ import { StatusBadge, type StatusBadgeVariant } from "@/components/ui/status-bad
 import { AssignmentArtifactCard } from "@/assignments/artifact-card";
 import { useAssignmentArtifacts } from "@/assignments/use-assignment-artifacts";
 import { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
+import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
+import { useWorkspaceLayoutStoreHydrated } from "@/stores/workspace-layout-store";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import {
   buildHostAgentDetailRoute,
-  buildHostWorkspaceRoute,
   buildAssignmentRoute,
   buildTeamRoute,
 } from "@/utils/host-routes";
@@ -45,6 +46,7 @@ export function TeamRunScreen({
   const { t } = useTranslation();
   const isFocused = useIsFocused();
   const connected = useHostRuntimeIsConnected(serverId);
+  const layoutHydrated = useWorkspaceLayoutStoreHydrated();
   const query = useTeamRun(serverId, runId, { enabled: isFocused });
   const { refetch } = query;
   const mutations = useTeamRunMutations();
@@ -67,8 +69,16 @@ export function TeamRunScreen({
   }, [run?.assignmentId, serverId, teamId]);
   const openWorkspace = useCallback(() => {
     if (!run) return;
-    router.push(buildHostWorkspaceRoute(serverId, run.workspace.workspaceId) as Href);
+    navigateToWorkspace({ serverId, workspaceId: run.workspace.workspaceId });
   }, [run, serverId]);
+  const reviewChanges = useCallback(() => {
+    if (!run || !layoutHydrated) return;
+    navigateToWorkspace({
+      serverId,
+      workspaceId: run.workspace.workspaceId,
+      target: { kind: "working_diff" },
+    });
+  }, [layoutHydrated, run, serverId]);
   const cancel = useCallback(async () => {
     if (!run || !canCancelTeamRun(run.state.status)) return;
     const confirmed = await confirmDialog({
@@ -187,6 +197,18 @@ export function TeamRunScreen({
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{run.workspace.displayName}</Text>
             <Text style={styles.meta}>{run.workspace.cwd}</Text>
+            <Text style={styles.meta}>{t("teams.runs.detail.reviewChangesHint")}</Text>
+            <View style={styles.inlineAction}>
+              <Button
+                variant="outline"
+                onPress={reviewChanges}
+                disabled={!layoutHydrated}
+                loading={!layoutHydrated}
+                testID="team-run-review-changes"
+              >
+                {t("teams.runs.actions.reviewChanges")}
+              </Button>
+            </View>
           </View>
         </DetailSection>
         <DetailSection title={t("teams.runs.detail.steps")}>

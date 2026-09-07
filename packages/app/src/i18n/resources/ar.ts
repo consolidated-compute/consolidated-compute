@@ -348,6 +348,15 @@ export const ar: TranslationResources = {
     },
     runs: {
       ...en.teams.runs,
+      actions: {
+        ...en.teams.runs.actions,
+        reviewChanges: "مراجعة التغييرات",
+      },
+      detail: {
+        ...en.teams.runs.detail,
+        reviewChangesHint:
+          "هذه تغييرات مساحة العمل الحالية، وقد تتضمن عملاً لاحقًا. تبقى مخرجات التشغيل محفوظة دون تغيير.",
+      },
       form: {
         ...en.teams.runs.form,
         execution: "التنفيذ",

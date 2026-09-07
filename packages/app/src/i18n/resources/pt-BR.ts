@@ -351,6 +351,15 @@ export const ptBR: TranslationResources = {
     },
     runs: {
       ...en.teams.runs,
+      actions: {
+        ...en.teams.runs.actions,
+        reviewChanges: "Revisar alterações",
+      },
+      detail: {
+        ...en.teams.runs.detail,
+        reviewChangesHint:
+          "Estas são as alterações atuais do workspace e podem incluir trabalho posterior. Os artefatos da execução permanecem imutáveis.",
+      },
       form: {
         ...en.teams.runs.form,
         execution: "Execução",

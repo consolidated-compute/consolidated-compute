@@ -1,4 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
+import { writeFile } from "node:fs/promises";
+import path from "node:path";
 import type { AgentProfile } from "@getpaseo/protocol/messages";
 import type { TeamDefinitionInputDto } from "@getpaseo/protocol/team/types";
 import { expect, test } from "../support/fixtures";
@@ -27,7 +29,9 @@ const SUPERVISOR_PROFILE: AgentProfile = {
 };
 
 test.describe("Assignments reliability", () => {
-  test("preserves authored intent, frozen runs, and exact Artifacts", async ({ page }) => {
+  test("preserves authored intent, frozen runs, and exact Artifacts", async ({
+    page,
+  }, testInfo) => {
     test.setTimeout(150_000);
     const profiles = await seedAgentProfiles([WORKER_PROFILE, SUPERVISOR_PROFILE]);
     const workspace = await seedWorkspace({
@@ -154,6 +158,68 @@ test.describe("Assignments reliability", () => {
         await waitForArtifactCount(assignments, persistedAssignmentId, 1);
       });
 
+      await test.step("wait for persisted layout restoration on a cold Run link", async () => {
+        const release = await holdWorkspaceLayoutHydration(page);
+        await page.reload();
+        await expect(page.locator("html")).toHaveAttribute("data-workspace-layout-read", "pending");
+        await expect(runDetail.getByTestId("team-run-status")).toContainText("Succeeded");
+        const review = runDetail.getByTestId("team-run-review-changes");
+        await expect(review).toBeVisible();
+        await expect(review).toBeDisabled();
+        await page.screenshot({ path: testInfo.outputPath("team-run-review-hydrating.png") });
+        await release();
+        await expect(review).toBeEnabled();
+      });
+
+      await test.step("review the run Workspace through the existing Changes view", async () => {
+        // A deterministic filesystem fixture exercises review navigation without
+        // asking a paid provider to generate another change.
+        await writeFile(
+          path.join(workspace.workspaceDirectory, "review-checklist.md"),
+          "# Review handoff\nInspect the diff and test results.\nLeave merge to a human.\n",
+        );
+        await runDetail.getByTestId("team-run-review-changes").click({ timeout: 10_000 });
+        await expect(page).toHaveURL(
+          new RegExp(`/h/${getServerId()}/workspace/${workspace.workspaceId}$`),
+        );
+        const changes = page.getByTestId("working-diff-panel").filter({ visible: true });
+        await expect(changes).toBeVisible({ timeout: 30_000 });
+        await expect(changes.getByTestId("diff-file-0")).toHaveAccessibleName(
+          "review-checklist.md, +3, -0",
+          { timeout: 30_000 },
+        );
+        await expect(changes.getByTestId("git-diff-canvas")).toBeVisible();
+        await page.screenshot({ path: testInfo.outputPath("team-run-review-desktop.png") });
+
+        await page.locator('[data-testid="sidebar-assignments"]:visible').click();
+        await page.getByTestId(assignmentTestId("assignment-row", persistedAssignmentId)).click();
+        await page
+          .getByTestId(assignmentRunTestId("assignment-run", persistedAssignmentId, persistedRunId))
+          .click();
+        await expect(runDetail.getByTestId("team-run-review-changes")).toBeVisible();
+      });
+
+      await test.step("retain review navigation across compact layout and reload", async () => {
+        await page.setViewportSize({ width: 480, height: 900 });
+        const review = runDetail.getByTestId("team-run-review-changes");
+        await review.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: testInfo.outputPath("team-run-review-compact.png") });
+        await review.click();
+        const changes = page.getByTestId("working-diff-panel").filter({ visible: true });
+        await expect(changes.getByTestId("diff-file-0")).toHaveAccessibleName(
+          "review-checklist.md, +3, -0",
+          { timeout: 30_000 },
+        );
+        await page.reload();
+        await expect(changes.getByTestId("diff-file-0")).toHaveAccessibleName(
+          "review-checklist.md, +3, -0",
+          { timeout: 30_000 },
+        );
+        await expect(changes.getByTestId("git-diff-canvas")).toBeVisible();
+        await page.screenshot({ path: testInfo.outputPath("team-run-review-compact-diff.png") });
+        await page.setViewportSize({ width: 1280, height: 900 });
+      });
+
       await test.step("later edits and completion leave frozen history unchanged", async () => {
         // Sidebar navigation retains the run screen. Scope Artifact assertions to
         // the Assignment so both mounted copies cannot satisfy the same locator.
@@ -225,6 +291,42 @@ test.describe("Assignments reliability", () => {
     }
   });
 });
+
+async function holdWorkspaceLayoutHydration(page: Page): Promise<() => Promise<boolean>> {
+  await page.evaluate(() => {
+    localStorage.setItem(
+      "workspace-layout-state",
+      JSON.stringify({ version: 2, state: { layoutByWorkspace: {} } }),
+    );
+    sessionStorage.setItem("hold-workspace-layout-read", "1");
+  });
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("hold-workspace-layout-read") !== "1") return;
+    sessionStorage.removeItem("hold-workspace-layout-read");
+    const getItem = Storage.prototype.getItem;
+    // AsyncStorage resolves this read as a Promise. Hold only its layout
+    // value to reproduce native storage latency; other reads stay real.
+    Object.defineProperty(Storage.prototype, "getItem", {
+      configurable: true,
+      value: function (this: Storage, key: string) {
+        const value = getItem.call(this, key);
+        if (this !== localStorage || key !== "workspace-layout-state") return value;
+        Object.defineProperty(Storage.prototype, "getItem", {
+          configurable: true,
+          value: getItem,
+        });
+        document.documentElement.dataset.workspaceLayoutRead = "pending";
+        return new Promise<string | null>((resolve) => {
+          window.addEventListener("release-workspace-layout-read", () => resolve(value), {
+            once: true,
+          });
+        });
+      },
+    });
+  });
+  return () =>
+    page.evaluate(() => window.dispatchEvent(new Event("release-workspace-layout-read")));
+}
 
 async function openAssignments(page: Page): Promise<void> {
   await gotoAppShell(page);

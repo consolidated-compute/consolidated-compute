@@ -352,6 +352,15 @@ export const ja: TranslationResources = {
     },
     runs: {
       ...en.teams.runs,
+      actions: {
+        ...en.teams.runs.actions,
+        reviewChanges: "変更をレビュー",
+      },
+      detail: {
+        ...en.teams.runs.detail,
+        reviewChangesHint:
+          "現在のワークスペースの変更を表示します。後の作業が含まれる場合があります。実行のアーティファクトは変更されません。",
+      },
       form: {
         ...en.teams.runs.form,
         execution: "実行方式",
