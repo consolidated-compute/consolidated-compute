@@ -5,6 +5,7 @@ import type { TeamRunDto } from "@getpaseo/protocol/team/types";
 import { expect, test } from "../support/fixtures";
 import { reloadPreservingHostRegistry } from "../support/helpers/hosts";
 import { prepareGithubWorkRun } from "../support/helpers/github-work-journey";
+import { assertGithubWorkChecklist } from "../support/helpers/github-work-checklist";
 import {
   GITHUB_WORK_PROOF_FILE,
   GITHUB_WORK_PROOF_MODEL,
@@ -135,18 +136,7 @@ test("executes real GitHub Work through supervised Artifacts and a reviewable di
       path.join(workspace.workspaceDirectory, GITHUB_WORK_PROOF_FILE),
       "utf8",
     );
-    for (const term of [
-      "GitHub Work",
-      "Assignment",
-      "worktree",
-      "security preview",
-      "Artifacts",
-      "gh",
-      "Hub",
-      "human",
-    ]) {
-      expect(checklist).toContain(term);
-    }
+    assertGithubWorkChecklist(checklist);
     expect(
       execFileSync("git", ["status", "--porcelain"], {
         cwd: workspace.workspaceDirectory,
