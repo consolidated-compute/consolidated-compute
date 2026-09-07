@@ -13,6 +13,11 @@ import {
 import { getServerId } from "../support/helpers/server-id";
 import { seedWorkspace } from "../support/helpers/seed-client";
 import { connectTeamsClient, removeTeam } from "../support/helpers/teams";
+import {
+  openAssignmentRunForReview,
+  openTeamRunAgentForReview,
+  openTeamRunChangesForReview,
+} from "../support/helpers/team-run-review";
 
 const WORKER_PROFILE: AgentProfile = {
   id: "assignment-worker",
@@ -142,6 +147,12 @@ test.describe("Assignments reliability", () => {
 
       const persistedRunId = runId;
       if (!persistedRunId) throw new Error("Team Run ID was not captured");
+      const reviewTarget = {
+        serverId: getServerId(),
+        assignmentId: persistedAssignmentId,
+        runId: persistedRunId,
+        workspaceId: workspace.workspaceId,
+      };
       const runDetail = page
         .getByTestId(`team-run-detail-${getServerId()}-${persistedRunId}`)
         .filter({ visible: true });
@@ -178,12 +189,7 @@ test.describe("Assignments reliability", () => {
           path.join(workspace.workspaceDirectory, "review-checklist.md"),
           "# Review handoff\nInspect the diff and test results.\nLeave merge to a human.\n",
         );
-        await runDetail.getByTestId("team-run-review-changes").click({ timeout: 10_000 });
-        await expect(page).toHaveURL(
-          new RegExp(`/h/${getServerId()}/workspace/${workspace.workspaceId}$`),
-        );
-        const changes = page.getByTestId("working-diff-panel").filter({ visible: true });
-        await expect(changes).toBeVisible({ timeout: 30_000 });
+        const changes = await openTeamRunChangesForReview(page, reviewTarget);
         await expect(changes.getByTestId("diff-file-0")).toHaveAccessibleName(
           "review-checklist.md, +3, -0",
           { timeout: 30_000 },
@@ -197,6 +203,19 @@ test.describe("Assignments reliability", () => {
           .getByTestId(assignmentRunTestId("assignment-run", persistedAssignmentId, persistedRunId))
           .click();
         await expect(runDetail.getByTestId("team-run-review-changes")).toBeVisible();
+      });
+
+      await test.step("open the exact producing agent and return through Assignment history", async () => {
+        const { run } = await assignments.getTeamRun(persistedRunId);
+        const worker = run.steps[0]!;
+        if (worker.state.status !== "succeeded") throw new Error("Worker did not succeed");
+        await openTeamRunAgentForReview(page, reviewTarget, {
+          stepId: worker.snapshot.stepId,
+          agentId: worker.state.agentId,
+        });
+        await page.screenshot({ path: testInfo.outputPath("team-run-worker-timeline.png") });
+        await openAssignmentRunForReview(page, reviewTarget);
+        await expect(runDetail.getByTestId("team-run-status-succeeded")).toBeVisible();
       });
 
       await test.step("retain review navigation across compact layout and reload", async () => {

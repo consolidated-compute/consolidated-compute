@@ -7,6 +7,12 @@ import { addConnectedHostAndReload, reloadPreservingHostRegistry } from "../supp
 import { prepareGithubWorkRun } from "../support/helpers/github-work-journey";
 import { assertGithubWorkChecklist } from "../support/helpers/github-work-checklist";
 import {
+  openAssignmentRunForReview,
+  openTeamRunAgentForReview,
+  openTeamRunChangesForReview,
+  teamRunReviewDetail,
+} from "../support/helpers/team-run-review";
+import {
   GITHUB_WORK_PROOF_FILE,
   GITHUB_WORK_PROOF_MODEL,
   startGithubWorkProof,
@@ -164,13 +170,41 @@ test("executes real GitHub Work through supervised Artifacts and a reviewable di
       contentType: "application/json",
     });
     await reloadPreservingHostRegistry(page);
-    await expect(page.getByTestId("team-run-status-succeeded")).toBeVisible();
+    const reviewTarget = {
+      serverId: proof.serverId,
+      assignmentId: assignment.id,
+      runId,
+      workspaceId: workspace.id,
+    };
+    const runDetail = teamRunReviewDetail(page, reviewTarget);
+    await expect(runDetail.getByTestId("team-run-status-succeeded")).toBeVisible();
     for (const artifact of artifacts) {
       await expect(
-        page.getByTestId(`assignment-artifact-${proof.serverId}-${assignment.id}-${artifact.id}`),
+        runDetail.getByTestId(
+          `assignment-artifact-${proof.serverId}-${assignment.id}-${artifact.id}`,
+        ),
       ).toContainText(artifact.producer.agentId);
     }
     await page.screenshot({ path: testInfo.outputPath("completed-team-run.png"), fullPage: true });
+
+    await openTeamRunAgentForReview(page, reviewTarget, {
+      stepId: reviewer.snapshot.stepId,
+      agentId: reviewer.state.agentId,
+    });
+    await expect(
+      page
+        .getByTestId("assistant-message")
+        .filter({ visible: true, hasText: GITHUB_WORK_PROOF_FILE })
+        .first(),
+    ).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("reviewer-timeline.png") });
+    await openAssignmentRunForReview(page, reviewTarget);
+    const changes = await openTeamRunChangesForReview(page, reviewTarget);
+    await expect(changes.getByTestId("diff-file-0")).toHaveAccessibleName(
+      new RegExp(`^${GITHUB_WORK_PROOF_FILE.replaceAll(".", "\\.")}, \\+\\d+, -0$`),
+    );
+    await page.screenshot({ path: testInfo.outputPath("workspace-review-changes.png") });
+
     await page.locator('[data-testid="sidebar-assignments"]:visible').click();
     await page.getByTestId(`assignment-row-${proof.serverId}-${assignment.id}`).click();
     await expect(
