@@ -100,6 +100,8 @@ Record all four facts. A single ahead/behind number hides whether the fork is be
 
 Display branding is separate from runtime identity. The fork displays **Consolidated Compute** in translated app copy, native app labels, PWA metadata, and desktop window chrome. Keep the existing `Paseo` Electron user-data directory so the display rename does not strand settings or browser sessions.
 
+The website's `/docs` shell belongs to CC; its source links point to this fork and retain Paseo attribution. Documentation must remain readable without upstream release metadata, star counts, or analytics. Leave its canonical origin unset until a CC website destination is approved. The inherited marketing routes and deployment configuration still need separate productization work; running the docs preview does not make them release-ready. [Testing](testing.md#website-documentation) owns the local verification command.
+
 Keep application IDs, deep-link schemes, state directories, package scopes, environment variables, CLI names, artifact names, signing, update feeds, package destinations, and mobile ownership unchanged until the release process defines their Consolidated Compute replacements and migration behavior. Source code may therefore display Consolidated Compute while compatibility paths and unpublished package metadata still contain `Paseo` or `paseo`.
 
 ## Repository and release controls

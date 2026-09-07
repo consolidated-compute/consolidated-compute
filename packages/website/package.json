@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsgo --noEmit",
+    "test:docs": "playwright test --config playwright.config.ts",
     "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {

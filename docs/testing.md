@@ -144,6 +144,16 @@ Run it locally with the same command owned by the Ubuntu `desktop-tests` require
 npm run test:e2e:browser-tabs --workspace=@getpaseo/desktop
 ```
 
+### Website documentation
+
+Run the website's documentation browser regression with:
+
+```bash
+npm run test:docs --workspace=@getpaseo/website
+```
+
+It starts a loopback-only preview on port `43131` and exercises desktop and compact browser navigation, reload, source ownership, metadata, and raw Markdown access. It needs Playwright Chromium but no daemon or agent provider. Screenshots and failure traces go to `packages/website/test-results/`. The `Website` workflow runs website unit tests, builds the website, and runs this regression when website sources or public docs change; it never deploys.
+
 ## Test organization
 
 - Collocate tests with implementation: `thing.ts` + `thing.test.ts`

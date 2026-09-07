@@ -1,0 +1,59 @@
+name: Website
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "packages/website/**"
+      - "public-docs/**"
+      - "package.json"
+      - "package-lock.json"
+      - "vitest.config.ts"
+      - ".github/workflows/website-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "packages/website/**"
+      - "public-docs/**"
+      - "package.json"
+      - "package-lock.json"
+      - "vitest.config.ts"
+      - ".github/workflows/website-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      ONNXRUNTIME_NODE_INSTALL: skip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - name: Install dependencies
+        run: node scripts/npm-retry.mjs ci
+      - name: Website unit tests
+        run: npx vitest run packages/website/src --bail=1
+      - name: Build website
+        run: npm run build --workspace=@getpaseo/website
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+      - name: Documentation browser regression
+        run: npm run test:docs --workspace=@getpaseo/website
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: website-docs-evidence
+          path: packages/website/test-results
+          if-no-files-found: ignore

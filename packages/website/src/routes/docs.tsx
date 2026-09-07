@@ -1,10 +1,11 @@
-import { createFileRoute, Link, Outlet, useLocation } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useHydrated, useLocation } from "@tanstack/react-router";
 import { Menu, X } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { DocsBreadcrumbs } from "~/components/docs-breadcrumbs";
 import { DocsNav } from "~/components/docs-nav";
 import { DocsOutline } from "~/components/docs-outline";
 import { buildDocsNavTree, getDoc, getDocs } from "~/docs";
+import { DOCS_PRODUCT_NAME } from "~/docs-identity";
 import "~/styles.css";
 
 export const Route = createFileRoute("/docs")({
@@ -12,6 +13,7 @@ export const Route = createFileRoute("/docs")({
 });
 
 function DocsLayout() {
+  const hydrated = useHydrated();
   const location = useLocation();
   const tree = useMemo(() => buildDocsNavTree(getDocs()), []);
 
@@ -27,12 +29,12 @@ function DocsLayout() {
       {/* Mobile header */}
       <header className="lg:hidden sticky top-0 z-50 bg-background border-b border-border">
         <div className="flex items-center justify-between p-4">
-          <Link to="/" className="flex items-center gap-3">
-            <img src="/logo.svg" alt="Paseo" className="w-6 h-6" />
-            <span className="text-lg font-medium">Paseo</span>
+          <Link to="/docs" className="text-lg font-medium leading-tight">
+            {DOCS_PRODUCT_NAME}
           </Link>
           <button
             type="button"
+            disabled={!hydrated}
             onClick={toggleMobileNav}
             aria-label={mobileNavOpen ? "Close menu" : "Open menu"}
             aria-expanded={mobileNavOpen}
@@ -51,9 +53,8 @@ function DocsLayout() {
       <div className="max-w-[90rem] mx-auto flex items-start">
         {/* Desktop sidebar */}
         <aside className="hidden lg:block sticky top-0 h-screen w-60 shrink-0 border-r border-border p-6 overflow-y-auto">
-          <Link to="/" className="flex items-center gap-3 mb-8">
-            <img src="/logo.svg" alt="Paseo" className="w-6 h-6" />
-            <span className="text-lg font-medium">Paseo</span>
+          <Link to="/docs" className="block text-lg font-medium leading-tight mb-8">
+            {DOCS_PRODUCT_NAME}
           </Link>
           <DocsNav nodes={tree} />
         </aside>

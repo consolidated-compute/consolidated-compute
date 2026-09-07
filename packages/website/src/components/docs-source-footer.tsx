@@ -1,15 +1,17 @@
 import type { Doc } from "~/docs";
-
-const GITHUB_BASE_URL = "https://github.com/getpaseo/paseo/blob/main";
+import { docsSourceUrl } from "~/docs-identity";
 
 export function DocsSourceFooter({ doc }: { doc: Doc }) {
-  const sourceUrl = `${GITHUB_BASE_URL}/${doc.sourcePath}`;
+  const sourceUrl = docsSourceUrl(doc.sourcePath);
 
   return (
     <footer className="docs-source-footer">
       <a href={sourceUrl} target="_blank" rel="noreferrer">
         View this page on GitHub
       </a>
+      <p>
+        Built on <a href="https://github.com/getpaseo/paseo">Paseo</a>.
+      </p>
     </footer>
   );
 }

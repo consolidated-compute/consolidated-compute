@@ -4,6 +4,8 @@ import { Outlet, createRootRoute, HeadContent, Scripts } from "@tanstack/react-r
 import type { ReleaseChannels, ReleaseInfo } from "~/latest-release";
 import { getLatestRelease } from "~/release";
 import { getStarCount } from "~/stars";
+import { DOCS_PRODUCT_NAME } from "~/docs-identity";
+import { loadSiteData } from "~/site-data";
 
 interface StarsContext {
   stars: string;
@@ -39,20 +41,25 @@ export function useStars(): StarsContext {
 }
 
 export const Route = createRootRoute({
-  loader: async () => {
-    const [release, stars] = await Promise.all([getLatestRelease(), getStarCount()]);
-    return { release, ...stars };
-  },
-  head: () => ({
+  loader: ({ location }) =>
+    loadSiteData(location.pathname, { release: getLatestRelease, stars: getStarCount }),
+  head: ({ loaderData }) => ({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { name: "theme-color", content: "#101615" },
-      { property: "og:site_name", content: "Paseo" },
+      {
+        property: "og:site_name",
+        content: loaderData?.kind === "docs" ? DOCS_PRODUCT_NAME : "Paseo",
+      },
       { property: "og:type", content: "website" },
-      { property: "og:image", content: "https://paseo.sh/og-image.png" },
-      { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:image", content: "https://paseo.sh/og-image.png" },
+      ...(loaderData?.kind === "docs"
+        ? []
+        : [
+            { property: "og:image", content: "https://paseo.sh/og-image.png" },
+            { name: "twitter:card", content: "summary_large_image" },
+            { name: "twitter:image", content: "https://paseo.sh/og-image.png" },
+          ]),
     ],
     links: [
       { rel: "icon", href: "/favicon.ico", sizes: "48x48" },
@@ -65,6 +72,13 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   const data = Route.useLoaderData();
+  if (data.kind === "docs") {
+    return (
+      <RootDocument isDocs>
+        <Outlet />
+      </RootDocument>
+    );
+  }
   return (
     <ReleaseCtx value={data.release}>
       <StarsCtx value={data}>
@@ -76,13 +90,20 @@ function RootComponent() {
   );
 }
 
-function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
+function RootDocument({
+  children,
+  isDocs = false,
+}: Readonly<{ children: ReactNode; isDocs?: boolean }>) {
   return (
     <html lang="en">
       <head>
         <HeadContent />
-        <script async src="https://plausible.io/js/pa-cKNUoWbeH_Iksb2fh82s3.js" />
-        <script dangerouslySetInnerHTML={PLAUSIBLE_INIT_SCRIPT} />
+        {!isDocs && (
+          <>
+            <script async src="https://plausible.io/js/pa-cKNUoWbeH_Iksb2fh82s3.js" />
+            <script dangerouslySetInnerHTML={PLAUSIBLE_INIT_SCRIPT} />
+          </>
+        )}
       </head>
       <body className="antialiased bg-background text-foreground">
         {children}
