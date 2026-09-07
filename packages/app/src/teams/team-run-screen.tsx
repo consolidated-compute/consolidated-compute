@@ -14,6 +14,7 @@ import { AssignmentArtifactCard } from "@/assignments/artifact-card";
 import { useAssignmentArtifacts } from "@/assignments/use-assignment-artifacts";
 import { useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { navigateToWorkspace } from "@/stores/navigation-active-workspace-store";
+import { useWorkspaceLayoutStoreHydrated } from "@/stores/workspace-layout-store";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import {
   buildHostAgentDetailRoute,
@@ -45,6 +46,7 @@ export function TeamRunScreen({
   const { t } = useTranslation();
   const isFocused = useIsFocused();
   const connected = useHostRuntimeIsConnected(serverId);
+  const layoutHydrated = useWorkspaceLayoutStoreHydrated();
   const query = useTeamRun(serverId, runId, { enabled: isFocused });
   const { refetch } = query;
   const mutations = useTeamRunMutations();
@@ -70,13 +72,13 @@ export function TeamRunScreen({
     navigateToWorkspace({ serverId, workspaceId: run.workspace.workspaceId });
   }, [run, serverId]);
   const reviewChanges = useCallback(() => {
-    if (!run) return;
+    if (!run || !layoutHydrated) return;
     navigateToWorkspace({
       serverId,
       workspaceId: run.workspace.workspaceId,
       target: { kind: "working_diff" },
     });
-  }, [run, serverId]);
+  }, [layoutHydrated, run, serverId]);
   const cancel = useCallback(async () => {
     if (!run || !canCancelTeamRun(run.state.status)) return;
     const confirmed = await confirmDialog({
@@ -197,7 +199,13 @@ export function TeamRunScreen({
             <Text style={styles.meta}>{run.workspace.cwd}</Text>
             <Text style={styles.meta}>{t("teams.runs.detail.reviewChangesHint")}</Text>
             <View style={styles.inlineAction}>
-              <Button variant="outline" onPress={reviewChanges} testID="team-run-review-changes">
+              <Button
+                variant="outline"
+                onPress={reviewChanges}
+                disabled={!layoutHydrated}
+                loading={!layoutHydrated}
+                testID="team-run-review-changes"
+              >
                 {t("teams.runs.actions.reviewChanges")}
               </Button>
             </View>

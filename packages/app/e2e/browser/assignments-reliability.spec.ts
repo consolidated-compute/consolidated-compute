@@ -158,6 +158,19 @@ test.describe("Assignments reliability", () => {
         await waitForArtifactCount(assignments, persistedAssignmentId, 1);
       });
 
+      await test.step("wait for persisted layout restoration on a cold Run link", async () => {
+        const release = await holdWorkspaceLayoutHydration(page);
+        await page.reload();
+        await expect(page.locator("html")).toHaveAttribute("data-workspace-layout-read", "pending");
+        await expect(runDetail.getByTestId("team-run-status")).toContainText("Succeeded");
+        const review = runDetail.getByTestId("team-run-review-changes");
+        await expect(review).toBeVisible();
+        await expect(review).toBeDisabled();
+        await page.screenshot({ path: testInfo.outputPath("team-run-review-hydrating.png") });
+        await release();
+        await expect(review).toBeEnabled();
+      });
+
       await test.step("review the run Workspace through the existing Changes view", async () => {
         // A deterministic filesystem fixture exercises review navigation without
         // asking a paid provider to generate another change.
@@ -278,6 +291,42 @@ test.describe("Assignments reliability", () => {
     }
   });
 });
+
+async function holdWorkspaceLayoutHydration(page: Page): Promise<() => Promise<boolean>> {
+  await page.evaluate(() => {
+    localStorage.setItem(
+      "workspace-layout-state",
+      JSON.stringify({ version: 2, state: { layoutByWorkspace: {} } }),
+    );
+    sessionStorage.setItem("hold-workspace-layout-read", "1");
+  });
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("hold-workspace-layout-read") !== "1") return;
+    sessionStorage.removeItem("hold-workspace-layout-read");
+    const getItem = Storage.prototype.getItem;
+    // AsyncStorage resolves this read as a Promise. Hold only its layout
+    // value to reproduce native storage latency; other reads stay real.
+    Object.defineProperty(Storage.prototype, "getItem", {
+      configurable: true,
+      value: function (this: Storage, key: string) {
+        const value = getItem.call(this, key);
+        if (this !== localStorage || key !== "workspace-layout-state") return value;
+        Object.defineProperty(Storage.prototype, "getItem", {
+          configurable: true,
+          value: getItem,
+        });
+        document.documentElement.dataset.workspaceLayoutRead = "pending";
+        return new Promise<string | null>((resolve) => {
+          window.addEventListener("release-workspace-layout-read", () => resolve(value), {
+            once: true,
+          });
+        });
+      },
+    });
+  });
+  return () =>
+    page.evaluate(() => window.dispatchEvent(new Event("release-workspace-layout-read")));
+}
 
 async function openAssignments(page: Page): Promise<void> {
   await gotoAppShell(page);
