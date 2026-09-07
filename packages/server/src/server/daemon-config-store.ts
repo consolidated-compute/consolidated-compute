@@ -395,7 +395,7 @@ export class DaemonConfigStore {
     this.logger = getLogger(logger);
     this.current = MutableDaemonConfigSchema.parse({
       ...initial,
-      relay: initial.relay ?? { enabled: true },
+      relay: initial.relay ?? { enabled: false },
     });
     this.relayEnabledMutable = options.relayEnabledMutable ?? true;
     this.reloadSource = options.reloadSource;

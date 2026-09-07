@@ -152,7 +152,6 @@ describe("paseo daemon bootstrap", () => {
         mcp: { enabled: true, injectIntoAgents: false },
         git: { maxProcessesPerSecond: 64, maxProcessConcurrency: 8 },
         relay: {
-          enabled: false,
           endpoint: "127.0.0.1:9",
           publicEndpoint: "127.0.0.1:9",
           useTls: false,
@@ -231,6 +230,7 @@ describe("paseo daemon bootstrap", () => {
         "x-forwarded-proto": "https",
       });
       expect(await beforeProxyReload.text()).toBe("http");
+      expect((await client.getDaemonStatus()).relay?.enabled).toBe(false);
 
       const reloadedPersisted = {
         ...initialPersisted,
@@ -318,6 +318,24 @@ describe("paseo daemon bootstrap", () => {
       expect((await client.getDaemonPairingOffer()).url).toContain(
         "https://after.example.test/#offer=",
       );
+
+      await writeFile(
+        configPath,
+        `${JSON.stringify(
+          {
+            ...reloadedPersisted,
+            daemon: { ...reloadedPersisted.daemon, relay: initialPersisted.daemon.relay },
+          },
+          null,
+          2,
+        )}\n`,
+        "utf-8",
+      );
+      expect(await client.reloadDaemonConfig()).toMatchObject({
+        appliedPaths: ["daemon.relay.enabled"],
+        restartRequiredPaths: [],
+      });
+      expect((await client.getDaemonStatus()).relay?.enabled).toBe(false);
     } finally {
       configureGitProcessPolicy(DEFAULT_GIT_PROCESS_POLICY);
       await client?.close().catch(() => undefined);

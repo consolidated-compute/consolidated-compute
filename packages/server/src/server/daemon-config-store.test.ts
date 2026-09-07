@@ -8,17 +8,14 @@ import { loadPersistedConfig } from "./persisted-config.js";
 import type { PersistedConfig } from "./persisted-config.js";
 import type { MutableDaemonConfig } from "@getpaseo/protocol/messages";
 
-function reloadableConfig(
-  persisted: PersistedConfig,
-  options: { relayEnabledFallback?: boolean } = {},
-): MutableDaemonConfig {
+function reloadableConfig(persisted: PersistedConfig): MutableDaemonConfig {
   const daemon = persisted.daemon ?? {};
   const relay = daemon.relay ?? {};
   const git = daemon.git ?? {};
   const agents = persisted.agents ?? {};
   return {
     relay: {
-      enabled: relay.enabled ?? options.relayEnabledFallback ?? true,
+      enabled: relay.enabled ?? false,
     },
     mcp: { enabled: true, injectIntoAgents: false },
     browserTools: { enabled: daemon.browserTools?.enabled ?? false },
@@ -96,6 +93,19 @@ describe("DaemonConfigStore", () => {
     for (const dir of tempDirs) {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test("keeps an omitted relay disabled until explicit opt-in", () => {
+    const paseoHome = mkdtempSync(path.join(tmpdir(), "paseo-daemon-config-store-"));
+    tempDirs.push(paseoHome);
+    const initial = reloadableConfig({ version: 1 });
+    delete initial.relay;
+    const store = new DaemonConfigStore(paseoHome, initial);
+
+    expect(store.get().relay?.enabled).toBe(false);
+    store.patch({ relay: { enabled: true } });
+    expect(store.get().relay?.enabled).toBe(true);
+    expect(loadPersistedConfig(paseoHome).daemon?.relay?.enabled).toBe(true);
   });
 
   test("patch persists relay state and emits its field change", () => {
@@ -1122,12 +1132,11 @@ describe("DaemonConfigStore reload", () => {
       );
     }
     const persisted = loadPersistedConfig(paseoHome);
-    const relayEnabledFallback = persisted.daemon?.relay?.enabled === undefined;
-    const initialMutable = reloadableConfig(persisted, { relayEnabledFallback });
+    const initialMutable = reloadableConfig(persisted);
     const store = new DaemonConfigStore(paseoHome, initialMutable, undefined, {
       reloadSource: {
         resolve: (nextPersisted) => {
-          const mutable = reloadableConfig(nextPersisted, { relayEnabledFallback });
+          const mutable = reloadableConfig(nextPersisted);
           if (options.overrideControlledPaths?.includes("daemon.relay.enabled")) {
             mutable.relay = initialMutable.relay;
           }
@@ -1144,6 +1153,23 @@ describe("DaemonConfigStore reload", () => {
   function writeConfig(paseoHome: string, config: unknown): void {
     writeFileSync(path.join(paseoHome, "config.json"), `${JSON.stringify(config, null, 2)}\n`);
   }
+
+  test("removing relay opt-in emits a live disable without requiring restart", () => {
+    const { paseoHome, store } = createReloadableStore({
+      initialPersisted: { version: 1, daemon: { relay: { enabled: true } } },
+    });
+    const changes: unknown[] = [];
+    store.onFieldChange("relay.enabled", (enabled) => changes.push(enabled));
+    writeConfig(paseoHome, { version: 1 });
+
+    expect(store.reload()).toEqual({
+      appliedPaths: ["daemon.relay.enabled"],
+      restartRequiredPaths: [],
+      overrideControlledPaths: [],
+    });
+    expect(store.get().relay?.enabled).toBe(false);
+    expect(changes).toEqual([false]);
+  });
 
   test("applies mutable edits and reports startup-only edits", () => {
     const { paseoHome, store, persisted } = createReloadableStore();
@@ -1203,7 +1229,7 @@ describe("DaemonConfigStore reload", () => {
       version: 1,
       daemon: {
         relay: {
-          enabled: false,
+          enabled: true,
           endpoint: "relay.example.test:443",
           useTls: true,
         },
