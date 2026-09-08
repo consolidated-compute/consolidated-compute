@@ -32,6 +32,8 @@ export async function prepareGithubWorkRun(
   await expect(repository).toHaveCount(1);
   expect((await proof.client.fetchWorkspaces()).entries).toEqual([]);
   await repository.click();
+  // The proof issue remains selectable after its objective is completed on GitHub.
+  await page.getByTestId("github-work-all").click();
   await page.getByTestId("github-work-work-search").fill('"prove issue" in:title');
   await page.getByTestId("github-work-work-submit").click();
   await page.locator('[data-testid^="github-work-item-"]').filter({ hasText: "#135" }).click();
@@ -65,27 +67,44 @@ export async function prepareGithubWorkRun(
 
   await proof.prepareCheckout();
   const { team } = await saveGithubWorkProofTeam(proof.client, proof.checkout);
-  await page.getByTestId("sidebar-add-project").click();
-  await page.getByTestId(`add-project-flow-host-${proof.serverId}`).click();
+  await page.getByTestId(`assignment-create-workspace-${proof.serverId}-${assignmentId}`).click();
+  await expect(page.getByTestId("host-picker-trigger")).toHaveCount(0);
+  await expect(page.getByTestId("message-input-root")).toHaveCount(0);
+  await page.getByTestId("new-workspace-project-picker-trigger").click();
+  await page.getByTestId("new-workspace-project-picker-add-project").click();
   await chooseAddProjectMethod(page, "directory-search");
   await page.getByTestId("add-project-flow-input").fill(proof.checkout);
   await page.getByTestId("add-project-flow-input").press("Enter");
   await expect(page).toHaveURL(/\/new\?.*projectId=/);
-  await page.getByTestId("workspace-create-isolation-trigger").click();
-  await page.getByTestId("workspace-create-isolation-worktree").click();
-  await page
-    .getByTestId("message-input-root")
-    .getByRole("button", { name: "Create", exact: true })
-    .click();
-  await expect(page).toHaveURL(/\/workspace\//, { timeout: 60_000 });
+  expect(new URL(page.url()).searchParams.get("assignmentId")).toBe(assignmentId);
+  expect(new URL(page.url()).searchParams.get("serverId")).toBe(proof.serverId);
+  // Navigation can retain the previous setup screen hidden in the route stack.
+  await expect(
+    page.locator('[data-testid="workspace-create-isolation-trigger"]:visible'),
+  ).toContainText("New worktree");
+  await page.locator('[data-testid="assignment-workspace-create"]:visible').click();
+  await expect(page).toHaveURL(/\/assignments\/[^/]+\/asgn_[^?]+\?workspaceId=/, {
+    timeout: 60_000,
+  });
   const workspaces = (await proof.client.fetchWorkspaces()).entries;
   expect(workspaces).toHaveLength(1);
   const workspace = workspaces[0]!;
   expect(workspace.workspaceDirectory).not.toBe(proof.checkout);
-  await page.locator('[data-testid="sidebar-assignments"]:visible').click();
-  await page.getByTestId(`assignment-row-${proof.serverId}-${assignmentId}`).click();
+  expect(workspace.projectRootPath).toBe(proof.checkout);
+  expect(new URL(page.url()).pathname).toBe(`/assignments/${proof.serverId}/${assignmentId}`);
+  expect(new URL(page.url()).searchParams.get("workspaceId")).toBe(workspace.id);
+  expect((await proof.client.fetchAgents()).entries).toEqual([]);
+  expect((await proof.client.listTeamRuns()).runs).toEqual([]);
+  expect((await proof.client.getAssignment(assignmentId)).assignment).toEqual(assignment);
+  if (options?.reloadAssignment) {
+    await options.reloadAssignment(assignmentId);
+  } else {
+    await reloadPreservingHostRegistry(page);
+  }
+  expect(new URL(page.url()).searchParams.get("workspaceId")).toBe(workspace.id);
   await page.getByTestId(`assignment-run-open-${proof.serverId}-${assignmentId}`).click();
   await page.getByTestId(`assignment-team-${proof.serverId}-${team.id}`).click();
+  await expect(page.getByTestId("team-run-workspace-field")).toContainText(workspace.name);
   await page.getByTestId("team-run-mode-supervised").click();
   await page.getByTestId("team-run-supervisor-field").click();
   await page.getByTestId("team-run-supervisor-supervisor").click();
