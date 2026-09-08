@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 import { EventEmitter, once } from "node:events";
-import { WebSocketServer } from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 import { createPaseoClient, type PaseoClient } from "@getpaseo/client";
+import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import {
   createDaemonChannel,
   generateKeyPair,
@@ -14,12 +15,16 @@ import { createTestPaseoDaemon } from "./test-utils/paseo-daemon.js";
 
 const credential = `cc_device_${"a".repeat(43)}`;
 
-test.each(["direct", "encrypted relay"] as const)(
-  "SDK device credential authenticates through %s",
-  async (kind) => {
+test.each([
+  { kind: "direct", authHeader: undefined },
+  { kind: "encrypted relay", authHeader: undefined },
+  { kind: "encrypted relay", authHeader: "Bearer proxy-token" },
+])(
+  "SDK device credential authenticates through $kind (proxy: $authHeader)",
+  async ({ kind, authHeader }) => {
     const host = await createTestPaseoDaemon();
     let relay: WebSocketServer | null = null;
-    let client: PaseoClient | null = null;
+    let client: PaseoClient | DaemonClient | null = null;
     const relayHeaders: unknown[] = [];
     const wireFrames: string[] = [];
     const decryptedFrames: string[] = [];
@@ -96,18 +101,27 @@ test.each(["direct", "encrypted relay"] as const)(
             });
         });
       }
-      client = createPaseoClient({
+      const config = {
         url,
         deviceCredential: credential,
         e2ee,
         reconnect: { enabled: false },
-      });
+      };
+      client = authHeader
+        ? new DaemonClient({
+            ...config,
+            clientId: "proxy-device-test",
+            authHeader,
+            webSocketFactory: (address, options) =>
+              new WebSocket(address, options?.protocols, { headers: options?.headers }),
+          })
+        : createPaseoClient(config);
       await client.connect();
       expect(client.getConnectionState().status).toBe("connected");
       expect(handshakeErrors).toEqual([]);
       expect(wireFrames.join("\n")).not.toContain(credential);
       const expectedHeaders =
-        kind === "encrypted relay" ? [{ authorization: undefined, protocol: undefined }] : [];
+        kind === "encrypted relay" ? [{ authorization: authHeader, protocol: undefined }] : [];
       expect(relayHeaders).toEqual(expectedHeaders);
       const expectedHellos =
         kind === "encrypted relay"

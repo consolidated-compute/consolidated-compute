@@ -437,7 +437,7 @@ function resolveConnectionAuthentication(config: DaemonClientConfig): Connection
     if (!/^cc_device_[A-Za-z0-9_-]{43}$/.test(deviceCredential)) {
       throw new DeviceCredentialConfigurationError("invalid_credential");
     }
-    if (config.password !== undefined || config.authHeader !== undefined) {
+    if (config.password !== undefined) {
       throw new DeviceCredentialConfigurationError("conflicting_authentication");
     }
     if (relay && !shouldUseRelayE2ee) {
@@ -448,10 +448,12 @@ function resolveConnectionAuthentication(config: DaemonClientConfig): Connection
     }
   }
   const headers: Record<string, string> = {};
-  let bearer = normalizePassword(config.password);
-  if (deviceCredential !== undefined && !shouldUseRelayE2ee) bearer = deviceCredential;
-  if (bearer) headers.Authorization = `Bearer ${bearer}`;
+  const password = normalizePassword(config.password);
+  if (password) headers.Authorization = `Bearer ${password}`;
   else if (config.authHeader) headers.Authorization = config.authHeader;
+  // Proxy authorization belongs to the transport; device credentials never enter its headers.
+  const bearer =
+    deviceCredential !== undefined && !shouldUseRelayE2ee ? deviceCredential : password;
   const protocols = bearer ? [`paseo.bearer.${bearer}`] : undefined;
   return { headers, protocols, deviceCredential, shouldUseRelayE2ee };
 }

@@ -7,7 +7,6 @@ const credential = `cc_device_${"a".repeat(43)}`;
 test.each([
   { extra: { deviceCredential: "invalid" }, code: "invalid_credential" },
   { extra: { password: "password" }, code: "conflicting_authentication" },
-  { extra: { authHeader: "Bearer token" }, code: "conflicting_authentication" },
   {
     extra: { url: "wss://relay.invalid/ws?role=client&serverId=server" },
     code: "relay_encryption_required",
@@ -40,12 +39,13 @@ test.each([
 });
 
 test.each([
-  { advertised: true, outcome: "connected" },
+  { advertised: true, outcome: "connected", authHeader: undefined },
+  { advertised: true, outcome: "connected", authHeader: "Bearer proxy-token" },
   { advertised: false, outcome: "device_authentication_unavailable" },
   { advertised: undefined, outcome: "device_authentication_unavailable" },
 ])(
   "requires device authentication acknowledgement ($advertised)",
-  async ({ advertised, outcome }) => {
+  async ({ advertised, outcome, authHeader }) => {
     let open: () => void = () => {};
     let receive: (data: unknown, isBinary: boolean) => void = () => {};
     const options: Parameters<DaemonTransportFactory>[0][] = [];
@@ -91,6 +91,7 @@ test.each([
       url: "ws://localhost/ws",
       clientId: "test",
       deviceCredential: credential,
+      authHeader,
       reconnect: { enabled: false },
       transportFactory: (input) => {
         options.push(input);
@@ -110,7 +111,7 @@ test.each([
       expect(options).toEqual([
         {
           url: "ws://localhost/ws",
-          headers: { Authorization: `Bearer ${credential}` },
+          headers: authHeader ? { Authorization: authHeader } : {},
           protocols: [`paseo.bearer.${credential}`],
         },
       ]);
