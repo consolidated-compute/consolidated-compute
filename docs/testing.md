@@ -103,6 +103,18 @@ function createTestEmailSender() {
 
 When a test is labeled end-to-end, it calls the real service. No environment variable gates, no conditional skipping, no mocking the external dependency.
 
+### Team provider contracts
+
+Run the CI-backed Team contract regression without provider usage:
+
+```bash
+npx vitest run packages/server/src/server/team/supervised-proof.e2e.test.ts --bail=1
+```
+
+It uses the real daemon, WebSocket RPCs, persistence, and provider security projections with deterministic Codex and Claude response adapters. The adapters simulate permission requests and model output; they do not launch provider CLIs. Their model IDs are fixture catalog entries, not paid-test defaults.
+
+Use this regression for admission, frozen launch propagation, exact Artifact prompt inputs, human waits, and restart behavior. An `enforced` assertion here checks the daemon's projection, not the provider's runtime boundary. Real Claude SDK permissions, delegation rejection, and containment evidence still belong to [the second-harness proof](https://github.com/consolidated-compute/consolidated-compute/issues/127); keep simulated results out of the public real-provider evidence matrix.
+
 ### Packaged desktop smoke
 
 The packaged desktop smoke is an external observer of the production launch path. It must not add a smoke-only branch to Electron main or start the daemon itself.
