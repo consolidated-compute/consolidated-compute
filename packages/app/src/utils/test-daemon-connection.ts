@@ -1,6 +1,7 @@
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { DaemonClientConfig } from "@getpaseo/client/internal/daemon-client";
 import type { HostConnection } from "@/types/host-connection";
+import { resolveHostAuthentication } from "@/types/host-authentication";
 import { getOrCreateClientId } from "./client-id";
 import { resolveAppVersion } from "./app-version";
 import {
@@ -49,7 +50,6 @@ function buildRemoteSshClientConfig(input: {
   return {
     ...input.base,
     transportFactory: input.desktopTransportFactory,
-    ...(input.connection.daemonPassword ? { password: input.connection.daemonPassword } : {}),
     url: input.buildDesktopTransportUrl({
       transportType: "ssh",
       host: input.connection.host,
@@ -118,6 +118,7 @@ export async function buildClientConfig(
   connection: HostConnection,
   serverId?: string,
   options?: {
+    deviceCredential?: string;
     capabilities?: DaemonClientConfig["capabilities"];
     trace?: DaemonClientConfig["trace"];
   },
@@ -132,6 +133,7 @@ export async function buildClientConfig(
   const clientId = await deps.getClientId();
   const desktopTransportFactory = deps.createDesktopTransportFactory();
   const base = {
+    ...resolveHostAuthentication({ deviceCredential: options?.deviceCredential }, connection),
     clientId,
     clientType: "mobile" as const,
     appVersion: deps.resolveAppVersion() ?? undefined,
@@ -168,7 +170,6 @@ export async function buildClientConfig(
     return {
       ...base,
       url: buildDaemonWebSocketUrl(connection.endpoint, { useTls: connection.useTls ?? false }),
-      ...(connection.password ? { password: connection.password } : {}),
     };
   }
 
@@ -257,6 +258,7 @@ export function connectAndProbe(
 }
 
 interface ProbeOptions {
+  deviceCredential?: string;
   serverId?: string;
   timeoutMs?: number;
   capabilities?: DaemonClientConfig["capabilities"];

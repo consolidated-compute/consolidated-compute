@@ -111,6 +111,7 @@ export function redactAppDiagnosticReport(report: string, hosts: HostProfile[]):
     redacted = redacted.split(value).join("[redacted]");
   }
   return redacted
+    .replace(/cc_device_[A-Za-z0-9_-]{43}/g, "[redacted]")
     .replace(/paseo:\/\/\S+/gi, "paseo://[redacted]")
     .replace(
       /([?&](?:password|token|secret|key|publicKey|daemonPublicKeyB64)=)[^&\s"']+/gi,
@@ -125,6 +126,7 @@ export function redactAppDiagnosticReport(report: string, hosts: HostProfile[]):
 function collectSensitiveHostValues(hosts: HostProfile[]): string[] {
   const values = new Set<string>();
   for (const host of hosts) {
+    if (host.deviceCredential) values.add(host.deviceCredential);
     for (const connection of host.connections) {
       values.add(connection.id);
       if (connection.type === "directTcp") {

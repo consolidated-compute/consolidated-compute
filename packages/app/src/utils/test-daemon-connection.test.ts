@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DaemonClientConfig } from "@getpaseo/client/internal/daemon-client";
 import type { DaemonConnectionDependencies, DaemonProbeClient } from "./test-daemon-connection";
+import { resolvePairingProbe } from "./pairing-probe";
+import { normalizeStoredHostProfile } from "@/types/host-connection";
 
 class FakeDaemonClient implements DaemonProbeClient {
   readonly lastError: string | null;
@@ -73,6 +75,55 @@ describe("test-daemon-connection connectToDaemon", () => {
   beforeEach(() => {
     vi.stubGlobal("__DEV__", false);
     probe = new FakeDaemonProbe();
+  });
+
+  it.each([
+    { serverId: "srv_probe_test", deviceCredential: `cc_device_${"a".repeat(43)}` },
+    { serverId: "srv_probe_test", deviceCredential: "" },
+    { serverId: "other", deviceCredential: undefined },
+  ])(
+    "pairing probes use only the exact saved host credential ($serverId)",
+    async ({ serverId, deviceCredential }) => {
+      const { connectToDaemon } = await import("./test-daemon-connection");
+      const host = normalizeStoredHostProfile({
+        serverId: "srv_probe_test",
+        deviceCredential: deviceCredential ?? `cc_device_${"b".repeat(43)}`,
+        connections: [
+          { type: "relay", relayEndpoint: "old-relay.test:443", daemonPublicKeyB64: "old-key" },
+        ],
+      });
+      if (!host) throw new Error("Invalid host fixture");
+      const pairing = resolvePairingProbe(
+        {
+          v: 2,
+          serverId,
+          daemonPublicKeyB64: "refreshed-key",
+          relay: { endpoint: "new-relay.test:443", useTls: true },
+        },
+        [host],
+      );
+      const result = await connectToDaemon(pairing.connection, pairing.options, probe.deps);
+      await result.client.close();
+      const config = probe.createdConfigs()[0];
+      expect(config.deviceCredential).toBe(deviceCredential);
+      expect(config.password).toBeUndefined();
+      expect(config.e2ee).toEqual({ enabled: true, daemonPublicKeyB64: "refreshed-key" });
+      expect(new URL(config.url).host).toBe("new-relay.test");
+      expect(new URL(config.url).searchParams.get("serverId")).toBe(serverId);
+    },
+  );
+
+  it("uses the saved device credential for probes instead of a legacy password", async () => {
+    const { connectToDaemon } = await import("./test-daemon-connection");
+    const deviceCredential = `cc_device_${"a".repeat(43)}`;
+    const result = await connectToDaemon(
+      { id: "tcp", type: "directTcp", endpoint: "localhost:6767", password: "legacy" },
+      { serverId: "srv_probe_test", deviceCredential },
+      probe.deps,
+    );
+    await result.client.close();
+    expect(probe.createdConfigs()[0].deviceCredential).toBe(deviceCredential);
+    expect(probe.createdConfigs()[0].password).toBeUndefined();
   });
 
   it("reuses the app clientId for direct connections", async () => {

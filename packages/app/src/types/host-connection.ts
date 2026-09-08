@@ -60,6 +60,7 @@ export type HostLifecycle = Record<string, never>;
 
 export interface HostProfile {
   serverId: string;
+  deviceCredential?: string;
   label: string;
   appearance: HostAppearance;
   lifecycle: HostLifecycle;
@@ -231,7 +232,9 @@ export function upsertHostConnectionInProfiles(input: {
   const matchedProfiles = matchingIndexes.map((index) => existing[index]);
   const prev = matchedProfiles.find((daemon) => daemon.serverId === serverId) ?? matchedProfiles[0];
   const nextConnections = upsertHostConnectionById(
-    matchedProfiles.flatMap((daemon) => daemon.connections),
+    matchedProfiles
+      .filter((daemon) => daemon.serverId === serverId)
+      .flatMap((daemon) => daemon.connections),
     input.connection,
   );
   const nextLifecycle = prev.lifecycle;
@@ -264,6 +267,8 @@ export function upsertHostConnectionInProfiles(input: {
 
   const nextProfile: HostProfile = {
     ...prev,
+    // An endpoint match must never transfer a credential to a different daemon identity.
+    deviceCredential: prev.serverId === serverId ? prev.deviceCredential : undefined,
     serverId,
     label: nextLabel,
     lifecycle: nextLifecycle,
@@ -392,6 +397,7 @@ const StoredHostConnectionSchema = z.discriminatedUnion("type", [
 ]);
 const StoredHostProfileSchema = z.strictObject({
   serverId: z.string().trim().min(1),
+  deviceCredential: z.string().optional(),
   label: z.string().optional(),
   appearance: HostAppearanceSchema.optional(),
   lifecycle: z.strictObject({}).optional(),
@@ -488,6 +494,7 @@ export function normalizeStoredHostProfile(entry: unknown): HostProfile | null {
   return {
     serverId,
     label,
+    ...(record.deviceCredential !== undefined ? { deviceCredential: record.deviceCredential } : {}),
     appearance: record.appearance ?? defaultHostAppearance(),
     lifecycle: defaultLifecycle(),
     connections,

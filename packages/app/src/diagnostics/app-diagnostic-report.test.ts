@@ -47,6 +47,15 @@ function makeHost(): HostProfile {
 }
 
 describe("app diagnostics report", () => {
+  test("redacts device credentials even when the host is no longer saved", () => {
+    const deviceCredential = `cc_device_${"a".repeat(43)}`;
+    expect(redactAppDiagnosticReport(`Bearer ${deviceCredential}`, [])).toBe("Bearer [redacted]");
+    expect(
+      redactAppDiagnosticReport("deviceCredential=damaged", [
+        { ...makeHost(), deviceCredential: "damaged" },
+      ]),
+    ).toBe("deviceCredential=[redacted]");
+  });
   test("reports whether the connected daemon is managed by Paseo Desktop", () => {
     const report = formatServerInfoSection({
       status: "server_info",
