@@ -81,6 +81,8 @@ import {
   type DaemonAuthConfig,
 } from "./auth.js";
 import type { DeviceAccessStore } from "./device-access.js";
+import { DEVICE_ENROLLMENT_PROTOCOL } from "@getpaseo/protocol/device-enrollment";
+import { attachDeviceEnrollmentSocket } from "./device-enrollment.js";
 import {
   WebSocketRuntimeMetricsWindow,
   type WebSocketRuntimeCounters,
@@ -940,6 +942,14 @@ export class VoiceAssistantWebSocketServer {
     request: IncomingMessage,
     password: string | undefined,
   ): Promise<void> {
+    if (ws.protocol === DEVICE_ENROLLMENT_PROTOCOL) {
+      if (!this.deviceAccess || this.connectionLifecycle !== "accepting") {
+        ws.close(1013, "Enrollment unavailable");
+        return;
+      }
+      attachDeviceEnrollmentSocket(ws, this.deviceAccess);
+      return;
+    }
     if (this.deviceAccess) {
       let enabled: boolean;
       try {
@@ -2993,6 +3003,9 @@ function selectWebSocketProtocol(
   protocols: Set<string>,
   password: string | undefined,
 ): string | false {
+  if (protocols.size === 1 && protocols.has(DEVICE_ENROLLMENT_PROTOCOL)) {
+    return DEVICE_ENROLLMENT_PROTOCOL;
+  }
   if (!password) {
     return protocols.values().next().value ?? false;
   }
