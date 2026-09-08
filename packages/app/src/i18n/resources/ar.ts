@@ -270,6 +270,9 @@ export const ar: TranslationResources = {
     },
   },
   githubWork: {
+    linkedAssignments: "التكليفات المرتبطة",
+    noLinkedAssignments: "لا توجد تكليفات مرتبطة على هذا المضيف",
+    openAssignment: "فتح",
     title: "عمل GitHub",
     host: "المضيف",
     selectHost: "اختر مضيفًا",

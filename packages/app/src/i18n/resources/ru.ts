@@ -272,6 +272,9 @@ export const ru: TranslationResources = {
     },
   },
   githubWork: {
+    linkedAssignments: "Связанные задания",
+    noLinkedAssignments: "На этом хосте нет связанных заданий",
+    openAssignment: "Открыть",
     title: "Работа в GitHub",
     host: "Хост",
     selectHost: "Выберите хост",

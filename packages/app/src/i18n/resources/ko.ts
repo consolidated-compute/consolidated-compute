@@ -271,6 +271,9 @@ export const ko: TranslationResources = {
     },
   },
   githubWork: {
+    linkedAssignments: "연결된 할당",
+    noLinkedAssignments: "이 호스트에 연결된 할당이 없습니다",
+    openAssignment: "열기",
     title: "GitHub 작업",
     host: "호스트",
     selectHost: "호스트 선택",

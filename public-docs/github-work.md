@@ -26,7 +26,8 @@ CC uses host-local Forge/`gh`; Hub is optional and is not involved in this path.
 1. Open **GitHub Work** and select the daemon **Host**.
 2. Search **Repositories** for `owner/repository`, then select the repository. No Project or Workspace needs to exist yet.
 3. Choose **Issues** or **Pull requests**, search, and open an item. Read the body preview; use **Open in GitHub** when the preview is truncated or you need comments.
-4. Select **Create Assignment** and write a bounded, explicit **Objective**. Save it and verify its **Work Item reference** and objective in Assignments.
+4. Check **Linked Assignments** for existing work on this host. **Open** shows the saved objective and execution history, including completed or canceled work, without creating another record. You can link several Assignments to one issue or PR for separate objectives.
+5. For a new objective, select **Create Assignment** and write a bounded, explicit **Objective**. Save it and verify its **Work Item reference** and objective in Assignments.
 
 For example, ask for one documentation correction and name the file, acceptance check, and excluded work. The issue body preview is not copied into the Assignment or implicitly fetched at run start. Put the necessary requirements in the objective; the linked issue alone does not supply them to the Team.
 

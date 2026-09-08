@@ -273,6 +273,9 @@ export const ptBR: TranslationResources = {
     },
   },
   githubWork: {
+    linkedAssignments: "Atribuições vinculadas",
+    noLinkedAssignments: "Nenhuma atribuição vinculada neste host",
+    openAssignment: "Abrir",
     title: "Trabalho do GitHub",
     host: "Host",
     selectHost: "Selecione um host",
