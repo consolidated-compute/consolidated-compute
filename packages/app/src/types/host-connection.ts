@@ -232,7 +232,9 @@ export function upsertHostConnectionInProfiles(input: {
   const matchedProfiles = matchingIndexes.map((index) => existing[index]);
   const prev = matchedProfiles.find((daemon) => daemon.serverId === serverId) ?? matchedProfiles[0];
   const nextConnections = upsertHostConnectionById(
-    matchedProfiles.flatMap((daemon) => daemon.connections),
+    matchedProfiles
+      .filter((daemon) => daemon.serverId === serverId)
+      .flatMap((daemon) => daemon.connections),
     input.connection,
   );
   const nextLifecycle = prev.lifecycle;

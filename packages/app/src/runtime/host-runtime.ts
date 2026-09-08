@@ -597,7 +597,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
 export class HostRuntimeController {
   private host: HostProfile;
   private deps: HostRuntimeControllerDeps;
-  private onReconcileServerId: ((oldId: string, newId: string) => void) | null;
+  private onReconcileServerId: ((oldId: string, newId: string) => void | Promise<void>) | null;
   private connectionMachineState: HostRuntimeConnectionMachineState;
   private connectionEpoch = 0;
   private snapshot: HostRuntimeSnapshot;
@@ -620,7 +620,7 @@ export class HostRuntimeController {
   constructor(input: {
     host: HostProfile;
     deps?: HostRuntimeControllerDeps;
-    onReconcileServerId?: (oldId: string, newId: string) => void;
+    onReconcileServerId?: (oldId: string, newId: string) => void | Promise<void>;
   }) {
     this.host = input.host;
     this.deps = input.deps ?? createDefaultDeps();
@@ -987,18 +987,17 @@ export class HostRuntimeController {
                 host: this.host,
                 connection,
               });
+              connectedClient = client;
+              shouldCloseClient = true;
               if (serverId !== this.host.serverId) {
                 if (isPlaceholderServerId(this.host.serverId) && this.onReconcileServerId) {
-                  this.onReconcileServerId(this.host.serverId, serverId);
+                  await this.onReconcileServerId(this.host.serverId, serverId);
                 } else {
-                  await client.close().catch(() => undefined);
                   throw new Error(
                     `Connection resolved to ${serverId}, expected ${this.host.serverId}.`,
                   );
                 }
               }
-              connectedClient = client;
-              shouldCloseClient = true;
             }
 
             if (!this.isCurrentProbeRequest(requestVersion)) {
@@ -1452,7 +1451,7 @@ export class HostRuntimeStore {
 
   private async runBoot(): Promise<void> {
     const override = readConfiguredLocalDaemonOverride();
-    await this.loadFromStorage();
+    await this.serializeHostMutation(() => this.loadFromStorage());
     this.markHostRegistryLoaded();
 
     let isE2E: string | null = null;
@@ -1522,7 +1521,7 @@ export class HostRuntimeStore {
       this.hostRegistryStatus = "ready";
       this.emitHostList();
       if (shouldPersistHosts) {
-        void this.persistHosts().catch((error) =>
+        await this.persistHosts().catch((error) =>
           console.error("[HostRuntime] Failed to persist host registry", error),
         );
       }
@@ -1633,7 +1632,11 @@ export class HostRuntimeStore {
     }
   }
 
-  reconcileServerId(oldServerId: string, newServerId: string): void {
+  reconcileServerId(oldServerId: string, newServerId: string): Promise<void> {
+    return this.serializeHostMutation(() => this.applyReconciledServerId(oldServerId, newServerId));
+  }
+
+  private async applyReconciledServerId(oldServerId: string, newServerId: string): Promise<void> {
     if (oldServerId === newServerId) {
       return;
     }
@@ -1644,6 +1647,17 @@ export class HostRuntimeStore {
     if (this.controllers.has(newServerId)) {
       return;
     }
+
+    const next = this.hosts.map((host) =>
+      host.serverId === oldServerId
+        ? {
+            ...host,
+            serverId: newServerId,
+            updatedAt: new Date().toISOString(),
+          }
+        : host,
+    );
+    await this.persistHosts(next);
 
     rekeyMap(this.controllers, oldServerId, newServerId);
     rekeyMap(this.lastConnectionStatusByServer, oldServerId, newServerId);
@@ -1695,16 +1709,9 @@ export class HostRuntimeStore {
       this.serverListeners.set(newServerId, merged);
     }
 
-    this.hosts = this.hosts.map((host) =>
-      host.serverId === oldServerId
-        ? { ...host, serverId: newServerId, updatedAt: new Date().toISOString() }
-        : host,
-    );
+    this.hosts = next;
     this.emitHostList();
     this.emit(newServerId);
-    void this.persistHosts().catch((error) =>
-      console.error("[HostRuntime] Failed to persist host registry", error),
-    );
   }
 
   async upsertDirectConnection(input: {
@@ -1874,20 +1881,8 @@ export class HostRuntimeStore {
     });
   }
 
-  private async updateHost(
-    serverId: string,
-    apply: (host: HostProfile) => HostProfile,
-  ): Promise<void> {
-    const updatedAt = new Date().toISOString();
-    const next = this.hosts.map((host) =>
-      host.serverId === serverId ? { ...apply(host), updatedAt } : host,
-    );
-    this.setHostsAndSync(next);
-    await this.persistHosts();
-  }
-
   async renameHost(serverId: string, label: string): Promise<void> {
-    await this.updateHost(serverId, (host) => ({ ...host, label }));
+    await this.updatePersistedHost(serverId, (host) => ({ ...host, label }));
   }
 
   async setHostColor(serverId: string, color: HostColor): Promise<void> {
@@ -1908,10 +1903,15 @@ export class HostRuntimeStore {
     serverId: string,
     apply: (host: HostProfile) => HostProfile,
   ): Promise<void> {
-    const update = this.hostProfileMutationTail.then(() =>
-      this.applyPersistedHost(serverId, apply),
+    return this.serializeHostMutation(() => this.applyPersistedHost(serverId, apply));
+  }
+
+  private serializeHostMutation<T>(mutation: () => Promise<T>): Promise<T> {
+    const update = this.hostProfileMutationTail.then(mutation);
+    this.hostProfileMutationTail = update.then(
+      () => undefined,
+      () => undefined,
     );
-    this.hostProfileMutationTail = update.catch(() => undefined);
     return update;
   }
 
@@ -1928,30 +1928,36 @@ export class HostRuntimeStore {
   }
 
   async removeHost(serverId: string): Promise<void> {
+    await this.serializeHostMutation(() => this.applyRemoveHost(serverId));
+  }
+
+  private async applyRemoveHost(serverId: string): Promise<void> {
     await this.revokePushNotifications({ client: this.getClient(serverId), serverId });
     const remaining = this.hosts.filter((daemon) => daemon.serverId !== serverId);
+    await this.persistHosts(remaining);
     this.setHostsAndSync(remaining);
-    await this.persistHosts();
   }
 
   async saveDeviceCredential(serverId: string, deviceCredential: string): Promise<void> {
     if (!/^cc_device_[A-Za-z0-9_-]{43}$/.test(deviceCredential)) {
       throw new HostDeviceCredentialError("invalid_credential");
     }
-    const update = this.hostProfileMutationTail.then(() => {
+    await this.serializeHostMutation(() => {
       if (!this.hosts.some((host) => host.serverId === serverId)) {
         throw new HostDeviceCredentialError("host_not_found");
       }
       return this.applyPersistedHost(serverId, (host) => ({ ...host, deviceCredential }));
     });
-    this.hostProfileMutationTail = update.catch(() => undefined);
-    await update;
   }
 
   async removeConnection(serverId: string, connectionId: string): Promise<void> {
+    await this.serializeHostMutation(() => this.applyRemoveConnection(serverId, connectionId));
+  }
+
+  private async applyRemoveConnection(serverId: string, connectionId: string): Promise<void> {
     const host = this.hosts.find((candidate) => candidate.serverId === serverId);
     if (host?.connections.length === 1 && host.connections[0]?.id === connectionId) {
-      await this.removeHost(serverId);
+      await this.applyRemoveHost(serverId);
       return;
     }
     const now = new Date().toISOString();
@@ -1974,11 +1980,25 @@ export class HostRuntimeStore {
         } satisfies HostProfile;
       })
       .filter((entry): entry is HostProfile => entry !== null);
+    await this.persistHosts(next);
     this.setHostsAndSync(next);
-    await this.persistHosts();
   }
 
   private async upsertHostConnection(input: {
+    serverId: string;
+    label?: string;
+    connection: HostConnection;
+    existingClient?: DaemonClient;
+  }): Promise<HostProfile> {
+    try {
+      return await this.serializeHostMutation(() => this.applyHostConnection(input));
+    } catch (error) {
+      await input.existingClient?.close().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async applyHostConnection(input: {
     serverId: string;
     label?: string;
     connection: HostConnection;
@@ -1992,6 +2012,7 @@ export class HostRuntimeStore {
       connection: input.connection,
       now,
     });
+    await this.persistHosts(next);
     this.setHostsAndSync(next, {
       initialConnectionByServerId: input.existingClient
         ? new Map([
@@ -2005,9 +2026,6 @@ export class HostRuntimeStore {
           ])
         : undefined,
     });
-    void this.persistHosts().catch((error) =>
-      console.error("[HostRuntime] Failed to persist host registry", error),
-    );
     const profile = next.find((daemon) => daemon.serverId === input.serverId);
     if (!profile) {
       throw new Error(`Host ${input.serverId} was not inserted`);

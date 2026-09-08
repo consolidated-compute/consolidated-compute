@@ -374,6 +374,13 @@ function makeOffer(input?: Partial<ConnectionOffer>): ConnectionOffer {
   };
 }
 
+function summarizeRegistry(hosts: HostProfile[]) {
+  return hosts.map((host) => ({
+    label: host.label,
+    connections: host.connections.map((connection) => connection.id),
+  }));
+}
+
 function encodeOfferUrl(payload: unknown): string {
   const encoded = Buffer.from(JSON.stringify(payload), "utf8")
     .toString("base64")
@@ -1464,6 +1471,54 @@ describe("HostRuntimeController", () => {
 });
 
 describe("HostRuntimeStore", () => {
+  it("serializes every registry mutation behind a pending credential save", async () => {
+    const host = makeHost({ serverId: "srv_device" });
+    const storage = createMemoryHostRuntimeStorage({
+      "@paseo:daemon-registry": JSON.stringify([host]),
+      "@paseo:e2e": "1",
+    });
+    const store = createAppearanceStore(storage);
+    const writeStarted = createDeferred<void>();
+    const finishWrite = createDeferred<void>();
+    const writes: HostProfile[][] = [];
+    try {
+      await store.boot();
+      const originalHosts = store.getHosts();
+      const setItem = storage.setItem.bind(storage);
+      storage.setItem = async (key, value) => {
+        writes.push(JSON.parse(value));
+        writeStarted.resolve();
+        await finishWrite.promise;
+        await setItem(key, value);
+      };
+      const saving = store.saveDeviceCredential(host.serverId, `cc_device_${"a".repeat(43)}`);
+      await writeStarted.promise;
+      const rename = store.renameHost(host.serverId, "Renamed");
+      const removeConnection = store.removeConnection(host.serverId, host.connections[1].id);
+      const upsert = store.upsertDirectConnection({
+        serverId: host.serverId,
+        endpoint: "new:6767",
+      });
+      const remove = store.removeHost(host.serverId);
+      await Promise.resolve();
+      expect(writes).toHaveLength(1);
+      expect(store.getHosts()).toEqual(originalHosts);
+      finishWrite.resolve();
+      await Promise.all([saving, rename, removeConnection, upsert, remove]);
+      expect(writes.map(summarizeRegistry)).toEqual([
+        [{ label: host.label, connections: host.connections.map((connection) => connection.id) }],
+        [{ label: "Renamed", connections: host.connections.map((connection) => connection.id) }],
+        [{ label: "Renamed", connections: [host.connections[0].id] }],
+        [{ label: "Renamed", connections: [host.connections[0].id, "direct:new:6767"] }],
+        [],
+      ]);
+      expect(store.getHosts()).toEqual([]);
+      expect(JSON.parse((await storage.getItem("@paseo:daemon-registry")) ?? "null")).toEqual([]);
+    } finally {
+      finishWrite.resolve();
+      store.syncHosts([]);
+    }
+  });
   it("saves device credentials before publishing and restores them on boot", async () => {
     const host = makeHost({ serverId: "srv_device" });
     const storage = createMemoryHostRuntimeStorage({
@@ -3214,6 +3269,7 @@ describe("HostRuntimeStore", () => {
 
   it("renameHost updates label in memory", async () => {
     const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
       deps: {
         createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
         connectToDaemon: async ({ host }) => ({
@@ -3234,9 +3290,7 @@ describe("HostRuntimeStore", () => {
     });
     expect(store.getHosts().find((h) => h.serverId === "srv_rename")?.label).toBe("old name");
 
-    // persistHosts may throw in test env (no AsyncStorage/window), but the
-    // in-memory state should still be updated by setHostsAndSync.
-    await store.renameHost("srv_rename", "new name").catch(() => undefined);
+    await store.renameHost("srv_rename", "new name");
 
     const renamed = store.getHosts().find((h) => h.serverId === "srv_rename");
     expect(renamed?.label).toBe("new name");
@@ -3281,6 +3335,7 @@ describe("HostRuntimeStore", () => {
 
   it("upsertDirectConnection stores SSL and password settings", async () => {
     const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
       deps: {
         createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
         connectToDaemon: async ({ host }) => ({
@@ -3323,6 +3378,7 @@ describe("HostRuntimeStore", () => {
     const probeClient = makeConnectedProbeClient(5);
     const seenProbeHosts: string[] = [];
     const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
       deps: {
         createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
         connectToDaemon: async ({ host, connection: probedConnection }) => {
@@ -3362,6 +3418,7 @@ describe("HostRuntimeStore", () => {
       endpoint: "lan:6767",
     };
     const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
       deps: {
         createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
         connectToDaemon: async () => ({
@@ -3395,6 +3452,7 @@ describe("HostRuntimeStore", () => {
 
   it("uses the advertised hostname when adding a relay host from a pairing offer", async () => {
     const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
       deps: {
         createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
         connectToDaemon: async ({ host }) => ({
@@ -3416,6 +3474,7 @@ describe("HostRuntimeStore", () => {
 
   it("stores relay TLS from a pairing offer", async () => {
     const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
       deps: {
         createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
         connectToDaemon: async ({ host }) => ({
@@ -3453,6 +3512,7 @@ describe("HostRuntimeStore", () => {
 
   it("uses TLS for old pairing URLs that omit relay TLS on port 443", async () => {
     const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
       deps: {
         createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
         connectToDaemon: async ({ host }) => ({

@@ -10,6 +10,28 @@ import {
   type HostProfile,
 } from "./host-connection";
 
+it("excludes foreign endpoints when an exact credentialed host also matches", () => {
+  const incoming: HostConnection = {
+    id: "direct:shared:6767",
+    type: "directTcp",
+    endpoint: "shared:6767",
+  };
+  const own: HostConnection = { id: "direct:own:6767", type: "directTcp", endpoint: "own:6767" };
+  const foreign: HostConnection = { id: "ssh:foreign", type: "remoteSsh", host: "foreign" };
+  const deviceCredential = `cc_device_${"a".repeat(43)}`;
+  const next = upsertHostConnectionInProfiles({
+    profiles: [
+      { ...makeHost("owner"), deviceCredential, connections: [own] },
+      { ...makeHost("foreign"), connections: [incoming, foreign] },
+    ],
+    serverId: "owner",
+    connection: incoming,
+  });
+  expect(next).toHaveLength(1);
+  expect(next[0].deviceCredential).toBe(deviceCredential);
+  expect(next[0].connections).toEqual([own, incoming]);
+});
+
 it.each([`cc_device_${"a".repeat(43)}`, "damaged", ""])(
   "retains saved device authentication (%s)",
   (deviceCredential) => {
