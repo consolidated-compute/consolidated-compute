@@ -387,6 +387,7 @@ export const ptBR: TranslationResources = {
           "Identifica o Espaço de trabalho e a configuração de inicialização exatos que o daemon verificará novamente ao iniciar.",
         validation: {
           ...en.teams.runs.form.validation,
+          workspaces_loading: "Carregando espaços de trabalho.",
           supervisor_required: "Selecione uma função de supervisor.",
           supervisor_unavailable:
             "Esta equipe precisa de uma função fora do fluxo de trabalho para executar sob supervisão.",

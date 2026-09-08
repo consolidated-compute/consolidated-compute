@@ -223,6 +223,9 @@ describe("global routes", () => {
     expect(buildAssignmentRoute("host a", "assignment/1")).toBe(
       "/assignments/host%20a/assignment%2F1",
     );
+    expect(buildAssignmentRoute("host a", "assignment/1", { workspaceId: "work/space?1" })).toBe(
+      "/assignments/host%20a/assignment%2F1?workspaceId=work%2Fspace%3F1",
+    );
     expect(() => buildAssignmentRoute("", "assignment-1")).toThrow(
       "buildAssignmentRoute requires a serverId and assignmentId",
     );

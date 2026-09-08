@@ -3,7 +3,20 @@ import { assignmentKey, type AggregatedAssignment, type AssignmentHostState } fr
 
 export type AssignmentsView =
   | { kind: "list" }
-  | { kind: "detail"; serverId: string; assignmentId: string };
+  | { kind: "detail"; serverId: string; assignmentId: string; preferredWorkspaceId?: string };
+
+export function assignmentWorkspacePreference(
+  view: AssignmentsView,
+  assignment: Pick<AggregatedAssignment, "id" | "serverId">,
+): string | undefined {
+  if (
+    view.kind !== "detail" ||
+    view.serverId !== assignment.serverId ||
+    view.assignmentId !== assignment.id
+  )
+    return undefined;
+  return view.preferredWorkspaceId;
+}
 
 export function resolveActiveAssignmentKey(
   view: AssignmentsView,

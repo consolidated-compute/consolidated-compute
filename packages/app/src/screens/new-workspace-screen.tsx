@@ -2027,8 +2027,8 @@ export function NewWorkspaceScreen({
         payload: { cwd: selectedSourceDirectory ?? "", text: "", attachments: [] },
         ensureWorkspace,
         serverId,
-        navigate: () => {
-          returnToAssignment();
+        navigate: (targetServerId, workspaceId) => {
+          router.dismissTo(buildAssignmentRoute(targetServerId, assignmentId, { workspaceId }));
           toast.show(t("assignments.workspaceCreated"));
         },
       });
@@ -2043,7 +2043,6 @@ export function NewWorkspaceScreen({
     serverId,
     selectedSourceDirectory,
     ensureWorkspace,
-    returnToAssignment,
     t,
     toast,
   ]);

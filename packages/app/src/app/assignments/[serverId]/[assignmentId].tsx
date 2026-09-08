@@ -11,14 +11,16 @@ export default function AssignmentDetailRoute() {
   const params = useLocalSearchParams<{
     serverId?: string | string[];
     assignmentId?: string | string[];
+    workspaceId?: string | string[];
   }>();
   const view = useMemo(
     () => ({
       kind: "detail" as const,
       serverId: first(params.serverId),
       assignmentId: first(params.assignmentId),
+      preferredWorkspaceId: first(params.workspaceId) || undefined,
     }),
-    [params.assignmentId, params.serverId],
+    [params.assignmentId, params.serverId, params.workspaceId],
   );
   return (
     <HostRouteBootstrapBoundary>

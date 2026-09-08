@@ -17,7 +17,7 @@ import { SelectField, type SelectFieldOption } from "@/components/ui/select-fiel
 import { SegmentedControl, type SegmentedControlOption } from "@/components/ui/segmented-control";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { useSessionStore } from "@/stores/session-store";
-import { useHostWorkspaces } from "@/stores/session-store-hooks";
+import { useHasHydratedWorkspaces, useHostWorkspaces } from "@/stores/session-store-hooks";
 import { useAgentProfiles } from "@/agent-profiles";
 import {
   buildTeamRunWorkspaceOptions,
@@ -35,6 +35,7 @@ export interface TeamRunFormSheetProps {
   serverId: string;
   team: TeamDefinitionDto;
   assignment?: AssignmentDto;
+  preferredWorkspaceId?: string;
   onClose: () => void;
   onStarted: (run: TeamRunDto) => void;
 }
@@ -59,9 +60,10 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
   const onClose = props.onClose;
   const controlSize: FieldControlSize = useIsCompactFormFactor() ? "md" : "sm";
   const liveWorkspaces = useHostWorkspaces(props.serverId);
+  const workspacesHydrated = useHasHydratedWorkspaces(props.serverId);
   const workspaceOptions = useMemo(
-    () => buildTeamRunWorkspaceOptions(liveWorkspaces),
-    [liveWorkspaces],
+    () => (workspacesHydrated ? buildTeamRunWorkspaceOptions(liveWorkspaces) : null),
+    [liveWorkspaces, workspacesHydrated],
   );
   const { profiles } = useAgentProfiles(props.serverId);
   const supervisionSupported = useSessionStore((store) =>
@@ -73,6 +75,7 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
     workspaces: workspaceOptions,
     profiles,
     assignment: props.assignment,
+    preferredWorkspaceId: props.preferredWorkspaceId,
     supervisionSupported,
   });
   const state = useSyncExternalStore(model.subscribe, model.getState, model.getState);
@@ -175,7 +178,7 @@ export function TeamRunFormSheet(props: TeamRunFormSheetProps): ReactElement {
           onChange={model.setWorkspace}
           placeholder={t("teams.runs.form.selectWorkspace")}
           emptyText={t("teams.runs.form.noWorkspaces")}
-          disabled={pending}
+          disabled={pending || state.workspaceCatalogStatus === "pending"}
           size={controlSize}
           testID="team-run-workspace-field"
         />

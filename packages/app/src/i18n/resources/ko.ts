@@ -384,6 +384,7 @@ export const ko: TranslationResources = {
           "시작할 때 데몬이 다시 확인할 정확한 작업 공간과 실행 구성을 식별합니다.",
         validation: {
           ...en.teams.runs.form.validation,
+          workspaces_loading: "워크스페이스를 불러오는 중입니다.",
           supervisor_required: "감독자 역할을 선택하세요.",
           supervisor_unavailable: "감독 실행을 하려면 작업자 워크플로 외부의 역할이 필요합니다.",
           native_delegation_unenforced:
