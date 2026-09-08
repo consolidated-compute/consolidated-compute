@@ -23,6 +23,29 @@ function fixture() {
 }
 const token = `cc_device_${"a".repeat(43)}`;
 const otherToken = `cc_device_${"b".repeat(43)}`;
+test("access notifications follow durable authority changes and can be detached", () => {
+  const { store } = fixture();
+  const observations: Array<string[] | null> = [];
+  const unsubscribe = store.onAccessChanged(() => {
+    observations.push(store.authenticate(token)?.permissions ?? null);
+  });
+  const invitation = store.createLocalInvitation({
+    label: "Laptop",
+    permissions: ["access.manage"],
+  });
+  const admitted = store.enroll({ code: invitation.code, token });
+  expect(observations).toEqual([]);
+  store.enableDeviceAuthentication({ token });
+  store.setPrincipalPermissions({
+    principalId: admitted.principalId,
+    permissions: ["workspace.read"],
+  });
+  store.revokeCredential(admitted.credentialId);
+  expect(observations).toEqual([["access.manage"], ["workspace.read"], null]);
+  unsubscribe();
+  store.revokePrincipal(admitted.principalId);
+  expect(observations).toHaveLength(3);
+});
 test("authentication activation is explicit and survives a reopened store", () => {
   const { home, store } = fixture();
   expect(store.isDeviceAuthenticationEnabled()).toBe(false);
