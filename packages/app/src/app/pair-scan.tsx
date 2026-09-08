@@ -6,9 +6,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import type { BarcodeScanningResult, BarcodeSettings } from "expo-camera";
-import { useHostMutations } from "@/runtime/host-runtime";
-import { decodeOfferFragmentPayload, normalizeHostPort } from "@/utils/daemon-endpoints";
+import { useHosts, useHostMutations } from "@/runtime/host-runtime";
+import { decodeOfferFragmentPayload } from "@/utils/daemon-endpoints";
 import { connectToDaemon } from "@/utils/test-daemon-connection";
+import { resolvePairingProbe } from "@/utils/pairing-probe";
 import { ConnectionOfferSchema } from "@getpaseo/protocol/connection-offer";
 import { buildHostRootRoute, buildSettingsHostRoute } from "@/utils/host-routes";
 import { isWeb } from "@/constants/platform";
@@ -129,6 +130,7 @@ export default function PairScanScreen() {
   }>();
   const source = typeof params.source === "string" ? params.source : "settings";
   const { upsertConnectionFromOfferUrl: upsertDaemonFromOfferUrl } = useHostMutations();
+  const hosts = useHosts();
 
   const [permission, requestPermission] = useCameraPermissions();
   const [isPairing, setIsPairing] = useState(false);
@@ -175,16 +177,8 @@ export default function PairScanScreen() {
         const offerPayload = decodeOfferFragmentPayload(encoded);
         const offer = ConnectionOfferSchema.parse(offerPayload);
 
-        const { client, hostname } = await connectToDaemon(
-          {
-            id: "probe",
-            type: "relay",
-            relayEndpoint: normalizeHostPort(offer.relay.endpoint),
-            useTls: offer.relay.useTls,
-            daemonPublicKeyB64: offer.daemonPublicKeyB64,
-          },
-          { serverId: offer.serverId },
-        );
+        const probe = resolvePairingProbe(offer, hosts);
+        const { client, hostname } = await connectToDaemon(probe.connection, probe.options);
         await client.close().catch(() => undefined);
 
         const profile = await upsertDaemonFromOfferUrl(offerUrl, hostname ?? undefined);
@@ -198,7 +192,7 @@ export default function PairScanScreen() {
         setIsPairing(false);
       }
     },
-    [isPairing, navigateToPairedHost, t, upsertDaemonFromOfferUrl],
+    [hosts, isPairing, navigateToPairedHost, t, upsertDaemonFromOfferUrl],
   );
 
   const handleRouterBack = useCallback(() => router.back(), [router]);
