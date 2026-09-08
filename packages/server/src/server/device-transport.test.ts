@@ -8,10 +8,21 @@ import { createTestPaseoDaemon } from "./test-utils/paseo-daemon.js";
 const token = `cc_device_${"a".repeat(43)}`;
 const hello = { type: "hello", clientId: "device-test", clientType: "cli", protocolVersion: 1 };
 
-test("malformed credential hellos never appear in daemon logs", async () => {
+test("admitted session failures retain their message, stack, and structured error fields", async () => {
   const lines: string[] = [];
+  const failure = Object.assign(new Error("Session trace sink unavailable"), {
+    code: "TRACE_SINK_UNAVAILABLE",
+  });
   const logger = pino(
-    { level: "trace" },
+    {
+      level: "trace",
+      hooks: {
+        logMethod(args, method) {
+          if (args[1] === "agent.session.inbound") throw failure;
+          method.apply(this, args);
+        },
+      },
+    },
     new Writable({
       write(chunk, _encoding, done) {
         lines.push(chunk.toString());
@@ -23,16 +34,65 @@ test("malformed credential hellos never appear in daemon logs", async () => {
   const ws = new WebSocket(`ws://127.0.0.1:${host.port}/ws`);
   try {
     await once(ws, "open");
-    const closed = once(ws, "close");
-    ws.send(`{"type":"hello","deviceCredential":"${token}",`);
-    await closed;
-    expect(lines.join("\n")).toContain("Failed to parse/handle pending handshake");
-    expect(lines.join("\n")).not.toContain(token);
+    const ready = once(ws, "message");
+    ws.send(JSON.stringify(hello));
+    await ready;
+    const response = once(ws, "message");
+    ws.send(
+      JSON.stringify({
+        type: "session",
+        message: { type: "fetch_agents_request", requestId: "trace-failure" },
+      }),
+    );
+    await response;
+    const records = lines.map((line) => JSON.parse(line));
+    expect(records.find((record) => record.msg === "Failed to parse/handle message")).toMatchObject(
+      {
+        err: { message: failure.message, stack: failure.stack, code: failure.code },
+      },
+    );
   } finally {
     ws.terminate();
     await host.close();
   }
 });
+
+test.each([
+  { admitted: false, event: "close", logMessage: "Failed to parse/handle pending handshake" },
+  { admitted: true, event: "message", logMessage: "Failed to parse/handle message" },
+])(
+  "malformed credential hellos stay redacted (admitted: $admitted)",
+  async ({ admitted, event, logMessage }) => {
+    const lines: string[] = [];
+    const logger = pino(
+      { level: "trace" },
+      new Writable({
+        write(chunk, _encoding, done) {
+          lines.push(chunk.toString());
+          done();
+        },
+      }),
+    );
+    const host = await createTestPaseoDaemon({ logger });
+    const ws = new WebSocket(`ws://127.0.0.1:${host.port}/ws`);
+    try {
+      await once(ws, "open");
+      if (admitted) {
+        const ready = once(ws, "message");
+        ws.send(JSON.stringify(hello));
+        await ready;
+      }
+      const handled = once(ws, event);
+      ws.send(`{"type":"hello","deviceCredential":"${token}",`);
+      await handled;
+      expect(lines.join("\n")).toContain(logMessage);
+      expect(lines.join("\n")).not.toContain(token);
+    } finally {
+      ws.terminate();
+      await host.close();
+    }
+  },
+);
 
 test("activation closes an existing anonymous owner connection", async () => {
   const host = await createTestPaseoDaemon();

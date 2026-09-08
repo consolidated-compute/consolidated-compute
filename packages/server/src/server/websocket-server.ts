@@ -2251,6 +2251,7 @@ export class VoiceAssistantWebSocketServer {
           ws,
           data: buffer,
           error,
+          source: "session",
           log: activeConnection.connectionLogger,
         });
       },
@@ -2374,7 +2375,13 @@ export class VoiceAssistantWebSocketServer {
 
       if (message.type === "session") {
         void this.dispatchSessionMessage(ws, activeConnection, message).catch((error: unknown) => {
-          this.handleRawMessageError({ ws, data, error, log: activeConnection.connectionLogger });
+          this.handleRawMessageError({
+            ws,
+            data,
+            error,
+            source: "session",
+            log: activeConnection.connectionLogger,
+          });
         });
       }
     } catch (error) {
@@ -2435,6 +2442,7 @@ export class VoiceAssistantWebSocketServer {
     ws: WebSocketLike;
     data: Buffer | ArrayBuffer | Buffer[] | string;
     error: unknown;
+    source?: "session";
     log: pino.Logger;
   }): void {
     const { ws, data, error, log } = params;
@@ -2453,9 +2461,13 @@ export class VoiceAssistantWebSocketServer {
     }
     const err = error instanceof Error ? error : new Error(String(error));
     const parsedPayload = this.decodeRawMessagePayloadForError(data);
-    // A hello can also fail after its pending entry has been consumed.
-    // Payloads and parser error messages can contain its credential.
-    log.error({ errorName: err.name }, "Failed to parse/handle message");
+    // Only dispatched session failures are safe to log in full. A hello can
+    // fail after admission, and raw parser errors may quote credentials.
+    if (params.source === "session" && this.sessions.has(ws)) {
+      log.error({ err }, "Failed to parse/handle message");
+    } else {
+      log.error({ errorName: err.name }, "Failed to parse/handle message");
+    }
 
     const requestInfo = extractRequestInfoFromUnknownWsInbound(parsedPayload);
     if (requestInfo) {
