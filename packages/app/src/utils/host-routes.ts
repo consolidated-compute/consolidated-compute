@@ -440,13 +440,19 @@ export function buildGitHubWorkRoute() {
   return "/github-work" as const;
 }
 
-export function buildAssignmentRoute(serverId: string, assignmentId: string) {
+export function buildAssignmentRoute(
+  serverId: string,
+  assignmentId: string,
+  options?: { workspaceId?: string },
+) {
   const normalizedServerId = trimNonEmpty(serverId);
   const normalizedAssignmentId = trimNonEmpty(assignmentId);
   if (!normalizedServerId || !normalizedAssignmentId) {
     throw new Error("buildAssignmentRoute requires a serverId and assignmentId");
   }
-  return `/assignments/${encodeSegment(normalizedServerId)}/${encodeSegment(normalizedAssignmentId)}` as const;
+  const workspaceId = trimNonEmpty(options?.workspaceId);
+  const search = workspaceId ? `?workspaceId=${encodeSegment(workspaceId)}` : "";
+  return `/assignments/${encodeSegment(normalizedServerId)}/${encodeSegment(normalizedAssignmentId)}${search}` as const;
 }
 
 export function buildTeamRoute(serverId: string, teamId: string) {
@@ -485,6 +491,7 @@ interface NewWorkspaceRouteOptions {
   displayName?: string;
   projectId?: string;
   draftId?: string;
+  assignmentId?: string;
 }
 
 function buildNewWorkspaceSearch(options: NewWorkspaceRouteOptions): string {
@@ -504,6 +511,10 @@ function buildNewWorkspaceSearch(options: NewWorkspaceRouteOptions): string {
   }
   if (options.draftId) {
     params.set("draftId", options.draftId);
+  }
+  if (options.assignmentId) {
+    if (!serverId) throw new Error("Assignment Workspace setup requires a serverId");
+    params.set("assignmentId", options.assignmentId);
   }
   return params.toString();
 }

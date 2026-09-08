@@ -303,7 +303,16 @@ export const ar: TranslationResources = {
     loadMore: "تحميل المزيد",
     refresh: "تحديث",
   },
-  assignments: en.assignments,
+  assignments: {
+    ...en.assignments,
+    workspaceCreated:
+      "تم إنشاء مساحة العمل. اختر تشغيل الفريق عندما تكون مستعدًا لمراجعة إعدادات التشغيل.",
+    actions: {
+      ...en.assignments.actions,
+      createWorkspace: "إنشاء مساحة عمل",
+      backToAssignment: "العودة إلى التكليف",
+    },
+  },
   teams: {
     ...en.teams,
     title: "الفرق",
@@ -375,6 +384,7 @@ export const ar: TranslationResources = {
           "تحدد مساحة العمل وإعداد التشغيل الدقيقين اللذين سيعيد البرنامج الخفي التحقق منهما عند البدء.",
         validation: {
           ...en.teams.runs.form.validation,
+          workspaces_loading: "جارٍ تحميل مساحات العمل.",
           supervisor_required: "اختر دور المشرف.",
           supervisor_unavailable:
             "يحتاج هذا الفريق إلى دور خارج سير عمل المنفذين ليعمل تحت الإشراف.",

@@ -223,6 +223,9 @@ describe("global routes", () => {
     expect(buildAssignmentRoute("host a", "assignment/1")).toBe(
       "/assignments/host%20a/assignment%2F1",
     );
+    expect(buildAssignmentRoute("host a", "assignment/1", { workspaceId: "work/space?1" })).toBe(
+      "/assignments/host%20a/assignment%2F1?workspaceId=work%2Fspace%3F1",
+    );
     expect(() => buildAssignmentRoute("", "assignment-1")).toThrow(
       "buildAssignmentRoute requires a serverId and assignmentId",
     );
@@ -254,6 +257,15 @@ describe("global routes", () => {
 
   it("buildNewWorkspaceRoute accepts an initial host", () => {
     expect(buildNewWorkspaceRoute({ serverId: "local" })).toBe("/new?serverId=local");
+  });
+
+  it("keeps an Assignment return target scoped to its host", () => {
+    expect(buildNewWorkspaceRoute({ serverId: "host a", assignmentId: "asgn/1" })).toBe(
+      "/new?serverId=host+a&assignmentId=asgn%2F1",
+    );
+    expect(() => buildNewWorkspaceRoute({ assignmentId: "asgn_1" })).toThrow(
+      "Assignment Workspace setup requires a serverId",
+    );
   });
 
   it("buildNewWorkspaceRoute accepts initial project context", () => {

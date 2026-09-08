@@ -306,7 +306,16 @@ export const ja: TranslationResources = {
     loadMore: "さらに読み込む",
     refresh: "更新",
   },
-  assignments: en.assignments,
+  assignments: {
+    ...en.assignments,
+    workspaceCreated:
+      "ワークスペースを作成しました。起動設定を確認するには、チームを実行を選択してください。",
+    actions: {
+      ...en.assignments.actions,
+      createWorkspace: "ワークスペースを作成",
+      backToAssignment: "アサインメントに戻る",
+    },
+  },
   teams: {
     ...en.teams,
     title: "チーム",
@@ -379,6 +388,7 @@ export const ja: TranslationResources = {
           "開始時にデーモンが再確認する正確なワークスペースと起動構成を識別します。",
         validation: {
           ...en.teams.runs.form.validation,
+          workspaces_loading: "ワークスペースを読み込んでいます。",
           supervisor_required: "監督者ロールを選択してください。",
           supervisor_unavailable:
             "監督付きで実行するには、ワーカーワークフロー外のロールが必要です。",

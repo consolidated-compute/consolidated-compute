@@ -815,6 +815,119 @@ describe("Team Run form model", () => {
     expect(model.getState().submission).toBeNull();
   });
 
+  it("seeds the requested Workspace rather than the only loaded alternative", () => {
+    const model = openTeamRunForm({
+      serverId: "host-a",
+      team: team(),
+      workspaces: [workspace],
+      preferredWorkspaceId: "new-workspace",
+      profiles: [profile()],
+    });
+    expect(model.getState()).toMatchObject({
+      selectedWorkspaceId: "new-workspace",
+      selectedWorkspaceDisplay: null,
+      selectedWorkspaceCwd: null,
+      validationIssue: "workspace_missing",
+      canSubmit: false,
+      submission: null,
+    });
+  });
+
+  it("resolves a late Workspace preference and requires its fresh security preview", () => {
+    const model = openTeamRunForm({
+      serverId: "host-a",
+      team: team(),
+      workspaces: null,
+      preferredWorkspaceId: workspace.workspaceId,
+      profiles: [profile()],
+    });
+    model.setObjective("Plan");
+    model.applySecurityPreviewCapability(true);
+    expect(model.getState()).toMatchObject({
+      workspaceCatalogStatus: "pending",
+      selectedWorkspaceId: workspace.workspaceId,
+      selectedWorkspaceDisplay: null,
+      selectedWorkspaceCwd: null,
+      validationIssue: "workspaces_loading",
+      securityPreviewRequest: null,
+      submission: null,
+    });
+    model.applyWorkspaces([]);
+    expect(model.getState().validationIssue).toBe("workspace_missing");
+    model.applyWorkspaces([workspace]);
+    model.applyProviderCatalog(workspace.workspaceId, workspace.cwd, [provider()]);
+    const featureRequest = buildTeamRunFeatureRequest(
+      model.getState().roleResolutions[0]!,
+      workspace.cwd,
+      model.getState().catalogGeneration,
+    )!;
+    model.applyFeatureCatalog("planner", featureRequest.requestKey, [webFeature]);
+    expect(model.getState()).toMatchObject({
+      workspaceCatalogStatus: "ready",
+      selectedWorkspaceDisplay: workspace.display,
+      selectedWorkspaceCwd: workspace.cwd,
+      validationIssue: "security_preview_loading",
+      submission: null,
+    });
+    const request = model.getState().securityPreviewRequest!;
+    expect(request.input.workspaceId).toBe(workspace.workspaceId);
+    model.applySecurityPreview(request.requestKey, securityPreview());
+    expect(model.getState()).toMatchObject({
+      canSubmit: true,
+      submission: {
+        workspaceId: workspace.workspaceId,
+        expectedPreviewFingerprint: "a".repeat(64),
+      },
+    });
+    model.applyWorkspaces(null);
+    expect(model.getState()).toMatchObject({
+      validationIssue: "workspaces_loading",
+      selectedWorkspaceDisplay: workspace.display,
+      securityPreviewFingerprint: null,
+      submission: null,
+    });
+    model.applyWorkspaces([workspace]);
+    model.applyProviderCatalog(workspace.workspaceId, workspace.cwd, [provider()]);
+    const refreshedFeatureRequest = buildTeamRunFeatureRequest(
+      model.getState().roleResolutions[0]!,
+      workspace.cwd,
+      model.getState().catalogGeneration,
+    )!;
+    model.applyFeatureCatalog("planner", refreshedFeatureRequest.requestKey, [webFeature]);
+    model.applySecurityPreview(request.requestKey, securityPreview());
+    expect(model.getState()).toMatchObject({
+      canSubmit: false,
+      securityPreviewFingerprint: null,
+      validationIssue: "security_preview_loading",
+    });
+  });
+
+  it("never reapplies the initial preference over a manual selection or refreshes its captured display", () => {
+    const other = { workspaceId: "other", cwd: "/other", display: { label: "Other checkout" } };
+    const model = openTeamRunForm({
+      serverId: "host-a",
+      team: team(),
+      workspaces: null,
+      preferredWorkspaceId: workspace.workspaceId,
+    });
+    model.applyWorkspaces([other]);
+    model.setWorkspace(other.workspaceId, other.display);
+    model.applyWorkspaces([workspace, { ...other, display: { label: "Renamed checkout" } }]);
+    expect(model.getState()).toMatchObject({
+      selectedWorkspaceId: other.workspaceId,
+      selectedWorkspaceDisplay: other.display,
+      selectedWorkspaceCwd: other.cwd,
+    });
+    model.applyWorkspaces([workspace]);
+    expect(model.getState()).toMatchObject({
+      selectedWorkspaceId: other.workspaceId,
+      selectedWorkspaceDisplay: other.display,
+      selectedWorkspaceCwd: null,
+      validationIssue: "workspace_missing",
+      canSubmit: false,
+    });
+  });
+
   it("ignores a late provider catalog from the previously selected Workspace", () => {
     const other = {
       workspaceId: "workspace-2",

@@ -3,11 +3,13 @@ import { create } from "zustand";
 export interface AddProjectFlowRequest {
   id: number;
   preferredHostId?: string;
+  assignmentId?: string;
 }
 
 interface AddProjectFlowStoreState {
   request: AddProjectFlowRequest | null;
   open: (preferredHostId?: string) => void;
+  openForAssignment: (input: { serverId: string; assignmentId: string }) => void;
   close: () => void;
 }
 
@@ -24,4 +26,7 @@ export const useAddProjectFlowStore = create<AddProjectFlowStoreState>((set) => 
     });
   },
   close: () => set({ request: null }),
+  openForAssignment: ({ serverId, assignmentId }) => {
+    set({ request: { id: nextRequestId++, preferredHostId: serverId, assignmentId } });
+  },
 }));

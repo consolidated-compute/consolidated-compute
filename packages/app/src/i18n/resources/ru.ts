@@ -305,7 +305,16 @@ export const ru: TranslationResources = {
     loadMore: "Загрузить ещё",
     refresh: "Обновить",
   },
-  assignments: en.assignments,
+  assignments: {
+    ...en.assignments,
+    workspaceCreated:
+      "Рабочее пространство создано. Выберите запуск команды, когда будете готовы проверить параметры запуска.",
+    actions: {
+      ...en.assignments.actions,
+      createWorkspace: "Создать рабочее пространство",
+      backToAssignment: "Вернуться к заданию",
+    },
+  },
   teams: {
     ...en.teams,
     title: "Команды",
@@ -378,6 +387,7 @@ export const ru: TranslationResources = {
           "Идентифицирует точные рабочую область и конфигурацию запуска, которые демон повторно проверит при запуске.",
         validation: {
           ...en.teams.runs.form.validation,
+          workspaces_loading: "Загрузка рабочих пространств.",
           supervisor_required: "Выберите роль руководителя.",
           supervisor_unavailable:
             "Для выполнения под наблюдением команде нужна роль вне рабочего процесса исполнителей.",

@@ -9,6 +9,10 @@ import { StyleSheet, useUnistyles, withUnistyles } from "react-native-unistyles"
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { createNameId } from "mnemonic-id";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { router } from "expo-router";
+import { AssignmentWorkspaceSubmission } from "./assignment-workspace-submission";
+import { buildAssignmentRoute } from "@/utils/host-routes";
+import { useAddProjectFlowStore } from "@/stores/add-project-flow-store";
 import { ChevronDown, Folder, FolderPlus, GitBranch, GitPullRequest } from "lucide-react-native";
 import { Composer } from "@/composer";
 import { FileDropZone } from "@/components/file-drop/file-drop-zone";
@@ -178,6 +182,7 @@ interface NewWorkspaceScreenProps {
   projectId?: string;
   displayName?: string;
   draftId?: string;
+  assignmentId?: string;
 }
 
 // A terminal launch sends argv, not a message: there is nothing to attach and
@@ -693,13 +698,16 @@ interface WorkspaceIsolationState {
 function useWorkspaceIsolation(input: {
   supportsMultiplicity: boolean;
   worktreeSupport: "supported" | "unsupported" | "unknown";
+  preferWorktree: boolean;
 }): WorkspaceIsolationState {
   const { supportsMultiplicity, worktreeSupport } = input;
   // The last isolation choice is remembered alongside the other New Workspace
   // form preferences (provider, model, mode). A manual in-screen pick overrides
   // the remembered default until the screen remounts.
   const { preferences, updatePreferences } = useFormPreferences();
-  const [manualIsolation, setManualIsolation] = useState<"local" | "worktree" | null>(null);
+  const [manualIsolation, setManualIsolation] = useState<"local" | "worktree" | null>(
+    input.preferWorktree ? "worktree" : null,
+  );
   const isolation = manualIsolation ?? preferences.isolation ?? "local";
   const canCreateWorktree = supportsMultiplicity && worktreeSupport !== "unsupported";
   const isWorktree = isolation === "worktree" && canCreateWorktree;
@@ -1173,8 +1181,14 @@ function useNewWorkspaceInitialContext({
   sourceDirectory: sourceDirectoryProp,
   projectId,
   displayName: displayNameProp,
+  assignmentId,
 }: NewWorkspaceScreenProps): NewWorkspaceInitialContextState {
-  const allHosts = useHosts();
+  const configuredHosts = useHosts();
+  const allHosts = useMemo(
+    () =>
+      assignmentId ? configuredHosts.filter((host) => host.serverId === serverId) : configuredHosts,
+    [assignmentId, configuredHosts, serverId],
+  );
   const allServerIds = useMemo(() => allHosts.map((h) => h.serverId), [allHosts]);
   const projects = useHostProjects(allServerIds);
   const routeDisplayName = displayNameProp?.trim() ?? "";
@@ -1256,6 +1270,7 @@ interface FormPickerControl {
 }
 
 interface NewWorkspaceFormStackInput {
+  assignmentId?: string;
   isCompact: boolean;
   isPending: boolean;
   project: FormPickerControl & {
@@ -1299,6 +1314,10 @@ interface NewWorkspaceFormStackInput {
     profiles: readonly TerminalProfile[];
     disabled: boolean;
   };
+}
+
+function OptionalFormRow({ children }: { children: ReactElement | null }) {
+  return children ? <FormRow>{children}</FormRow> : null;
 }
 
 function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactElement {
@@ -1466,15 +1485,8 @@ function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactEleme
     </View>
   ) : null;
 
-  const launchControl = (
-    <LaunchControl
-      serverId={launch.serverId}
-      target={launch.target}
-      onChange={launch.onChange}
-      profiles={launch.profiles}
-      disabled={launch.disabled}
-      badgePressableStyle={badgePressableStyle}
-    />
+  const launchControl = input.assignmentId ? null : (
+    <LaunchControl {...launch} badgePressableStyle={badgePressableStyle} />
   );
 
   return isCompact ? (
@@ -1483,7 +1495,7 @@ function useNewWorkspaceFormStack(input: NewWorkspaceFormStackInput): ReactEleme
       {hostControl ? <FormRow>{hostControl}</FormRow> : null}
       {isolationControl ? <FormRow>{isolationControl}</FormRow> : null}
       {baseControl ? <FormRow>{baseControl}</FormRow> : null}
-      <FormRow>{launchControl}</FormRow>
+      <OptionalFormRow>{launchControl}</OptionalFormRow>
       {/* Keep fixed stack height without separating the visible controls. */}
       {isolationControl ? null : <View style={styles.baseSpacer} />}
       {baseControl ? null : <View style={styles.baseSpacer} />}
@@ -1506,6 +1518,7 @@ export function NewWorkspaceScreen({
   projectId,
   displayName: displayNameProp,
   draftId,
+  assignmentId,
 }: NewWorkspaceScreenProps) {
   const queryClient = useQueryClient();
   const { theme } = useUnistyles();
@@ -1530,6 +1543,7 @@ export function NewWorkspaceScreen({
     sourceDirectory: sourceDirectoryProp,
     projectId,
     displayName: displayNameProp,
+    assignmentId,
   });
   // COMPAT(workspaceMultiplicity): added in v0.1.97, drop the gate when floor >= v0.1.97
   const supportsWorkspaceMultiplicity = useHostFeature(selectedServerId, "workspaceMultiplicity");
@@ -1679,6 +1693,7 @@ export function NewWorkspaceScreen({
     useWorkspaceIsolation({
       supportsMultiplicity: supportsWorkspaceMultiplicity,
       worktreeSupport,
+      preferWorktree: Boolean(assignmentId),
     });
 
   const branchSuggestionsQuery = useQuery({
@@ -1800,8 +1815,12 @@ export function NewWorkspaceScreen({
 
   const handleAddProject = useCallback(() => {
     setProjectPickerOpen(false);
+    if (assignmentId) {
+      useAddProjectFlowStore.getState().openForAssignment({ serverId, assignmentId });
+      return;
+    }
     openAddProjectPicker(selectedServerId);
-  }, [openAddProjectPicker, selectedServerId]);
+  }, [assignmentId, serverId, openAddProjectPicker, selectedServerId]);
 
   const openPicker = useCallback(() => {
     setPickerOpen(true);
@@ -1995,6 +2014,39 @@ export function NewWorkspaceScreen({
     ],
   );
 
+  const returnToAssignment = useCallback(() => {
+    if (assignmentId) router.dismissTo(buildAssignmentRoute(serverId, assignmentId));
+  }, [serverId, assignmentId]);
+
+  const createAssignmentWorkspace = useCallback(async () => {
+    if (!assignmentId || isPending || selectedServerId !== serverId) return;
+    setErrorMessage(null);
+    setPendingAction("empty");
+    try {
+      await runCreateEmptyWorkspace({
+        payload: { cwd: selectedSourceDirectory ?? "", text: "", attachments: [] },
+        ensureWorkspace,
+        serverId,
+        navigate: (targetServerId, workspaceId) => {
+          router.dismissTo(buildAssignmentRoute(targetServerId, assignmentId, { workspaceId }));
+          toast.show(t("assignments.workspaceCreated"));
+        },
+      });
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+      setPendingAction(null);
+    }
+  }, [
+    assignmentId,
+    isPending,
+    selectedServerId,
+    serverId,
+    selectedSourceDirectory,
+    ensureWorkspace,
+    t,
+    toast,
+  ]);
+
   const handleSubmitNewWorkspace = useCallback(
     async (payload: MessagePayload) => {
       try {
@@ -2166,6 +2218,7 @@ export function NewWorkspaceScreen({
       : t("newWorkspace.refPicker.noMatchingRefs");
 
   const formStack = useNewWorkspaceFormStack({
+    assignmentId,
     isCompact,
     isPending,
     project: {
@@ -2239,67 +2292,82 @@ export function NewWorkspaceScreen({
             <Text style={styles.composerTitle}>{t("newWorkspace.title")}</Text>
           </View>
           {formStack}
-          {isTerminalLaunch ? (
-            <Composer
-              key="terminal"
-              externalKeyboardShift
-              inputMode="terminal"
-              readOnly={!terminalTakesPrompt}
-              placeholder={terminalPlaceholder}
-              submitLabel={terminalSubmitLabel}
-              agentId={draftKey}
-              serverId={selectedServerId}
-              isPaneFocused={true}
-              onSubmitMessage={handleSubmitTerminalLaunch}
-              allowEmptySubmit={true}
-              submitButtonAccessibilityLabel={t("newWorkspace.launch.submit")}
-              submitButtonTestID="new-workspace-launch-submit"
-              isSubmitLoading={isPending}
-              submitBehavior="preserve-and-lock"
-              blurOnSubmit={true}
-              value={terminalComposerValue}
-              onChangeText={setTerminalPromptText}
-              textReplacement={terminalTextReplacement}
-              attachments={NO_TERMINAL_ATTACHMENTS}
-              onChangeAttachments={noopChangeAttachments}
-              cwd={selectedSourceDirectory ?? ""}
-              clearDraft={noopClearDraft}
-              autoFocus={terminalTakesPrompt}
-              autoFocusKey={launchFocusKey}
-            />
-          ) : (
-            <Composer
-              key="chat"
-              externalKeyboardShift
-              agentId={draftKey}
-              serverId={selectedServerId}
-              isPaneFocused={true}
-              onSubmitMessage={handleSubmitNewWorkspace}
-              allowEmptySubmit={true}
-              submitButtonAccessibilityLabel={t("newWorkspace.create")}
-              submitButtonTestID="workspace-create-submit"
-              submitIcon="return"
-              isSubmitLoading={isPending}
-              waitForForgeAutoAttachOnSubmit
-              submitBehavior="preserve-and-lock"
-              blurOnSubmit={true}
-              value={chatDraft.text}
-              onChangeText={chatDraft.editText}
-              textReplacement={chatDraft.textReplacement}
-              attachments={chatDraft.attachments}
-              attachmentScopeKeys={visibleDraftContextScopeKeys}
-              onChangeAttachments={chatDraft.setAttachments}
-              onForgeChangeRequestDetected={handleForgeChangeRequestDetected}
-              onForgeChangeRequestAutoAttach={handleForgeChangeRequestAutoAttach}
-              cwd={selectedSourceDirectory ?? ""}
-              clearDraft={handleClearDraft}
-              autoFocus
-              autoFocusKey={launchFocusKey}
-              commandDraftConfig={composerState?.commandDraftConfig}
-              agentControls={agentControlsWithDisabled}
-            />
-          )}
-          {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+          <AssignmentWorkspaceSubmission
+            assignmentId={assignmentId}
+            isPending={isPending}
+            clientReady={clientReady}
+            sourceDirectory={selectedSourceDirectory}
+            serverId={serverId}
+            selectedServerId={selectedServerId}
+            onReturn={returnToAssignment}
+            onCreate={createAssignmentWorkspace}
+          >
+            {isTerminalLaunch ? (
+              <Composer
+                key="terminal"
+                externalKeyboardShift
+                inputMode="terminal"
+                readOnly={!terminalTakesPrompt}
+                placeholder={terminalPlaceholder}
+                submitLabel={terminalSubmitLabel}
+                agentId={draftKey}
+                serverId={selectedServerId}
+                isPaneFocused={true}
+                onSubmitMessage={handleSubmitTerminalLaunch}
+                allowEmptySubmit={true}
+                submitButtonAccessibilityLabel={t("newWorkspace.launch.submit")}
+                submitButtonTestID="new-workspace-launch-submit"
+                isSubmitLoading={isPending}
+                submitBehavior="preserve-and-lock"
+                blurOnSubmit={true}
+                value={terminalComposerValue}
+                onChangeText={setTerminalPromptText}
+                textReplacement={terminalTextReplacement}
+                attachments={NO_TERMINAL_ATTACHMENTS}
+                onChangeAttachments={noopChangeAttachments}
+                cwd={selectedSourceDirectory ?? ""}
+                clearDraft={noopClearDraft}
+                autoFocus={terminalTakesPrompt}
+                autoFocusKey={launchFocusKey}
+              />
+            ) : (
+              <Composer
+                key="chat"
+                externalKeyboardShift
+                agentId={draftKey}
+                serverId={selectedServerId}
+                isPaneFocused={true}
+                onSubmitMessage={handleSubmitNewWorkspace}
+                allowEmptySubmit={true}
+                submitButtonAccessibilityLabel={t("newWorkspace.create")}
+                submitButtonTestID="workspace-create-submit"
+                submitIcon="return"
+                isSubmitLoading={isPending}
+                waitForForgeAutoAttachOnSubmit
+                submitBehavior="preserve-and-lock"
+                blurOnSubmit={true}
+                value={chatDraft.text}
+                onChangeText={chatDraft.editText}
+                textReplacement={chatDraft.textReplacement}
+                attachments={chatDraft.attachments}
+                attachmentScopeKeys={visibleDraftContextScopeKeys}
+                onChangeAttachments={chatDraft.setAttachments}
+                onForgeChangeRequestDetected={handleForgeChangeRequestDetected}
+                onForgeChangeRequestAutoAttach={handleForgeChangeRequestAutoAttach}
+                cwd={selectedSourceDirectory ?? ""}
+                clearDraft={handleClearDraft}
+                autoFocus
+                autoFocusKey={launchFocusKey}
+                commandDraftConfig={composerState?.commandDraftConfig}
+                agentControls={agentControlsWithDisabled}
+              />
+            )}
+          </AssignmentWorkspaceSubmission>
+          {errorMessage ? (
+            <Text accessibilityRole="alert" style={styles.errorText}>
+              {errorMessage}
+            </Text>
+          ) : null}
         </ReanimatedAnimated.View>
       </View>
     </FileDropZone>

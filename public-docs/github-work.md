@@ -71,11 +71,13 @@ Instructions are policy guidance, not access controls. A read-only reviewer cann
 
 ## Create a dedicated worktree
 
-Discovery did not need a checkout; execution does. Clone or locate the selected repository **on the same daemon host**, then add that directory as a Project. From the Project's new Workspace composer, choose **Worktree**, review the base branch, leave the agent prompt empty, and select **Create**. Wait for setup to finish before starting the Team.
+Discovery did not need a checkout; execution does. Open the Assignment and choose **Create Workspace**. Select the repository's Project, or use **Add Project** to clone or locate it on the Assignment's daemon host. Setup stays on that host. For a Git Project, **New worktree** is selected by default; review the base branch before choosing **Create Workspace**.
+
+This entry creates the Workspace without an agent or terminal, then returns to the Assignment. **Back to Assignment** leaves setup without creating a Workspace. If creation fails, read the error, repair the checkout or connection, and retry.
 
 Use a dedicated branch and inspect the repository's worktree setup hooks before running them. A worktree separates files from your main checkout; it does not isolate credentials or other processes. Team Run locking excludes another Team Run from this Workspace, not ordinary agents or manual edits.
 
-Return to **Assignments**, open the Assignment, and choose **Run Team**. Select the saved Team, the new Workspace, **Supervised**, and the Supervisor role. This is not the objective-only start from the Teams screen.
+On the Assignment, choose **Run Team** and select the saved Team. The Workspace you just created is preselected, including after reloading the return page; you can change it before proceeding. If it is unavailable, select another Workspace explicitly. Choose **Supervised** and the Supervisor role. Workspace creation does not start a Team Run or approve its security preview.
 
 ## Review the security preview
 

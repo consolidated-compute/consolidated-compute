@@ -56,6 +56,7 @@ export interface TeamRunRoleResolution {
 }
 
 export type TeamRunFormValidationIssue =
+  | "workspaces_loading"
   | "workspace_required"
   | "workspace_missing"
   | "objective_required"
@@ -103,6 +104,7 @@ export interface TeamRunFormState {
   serverId: string;
   team: TeamDefinitionDto;
   workspaces: TeamRunWorkspaceOption[];
+  workspaceCatalogStatus: "pending" | "ready";
   selectedWorkspaceId: string | null;
   selectedWorkspaceDisplay: TeamRunFormDisplay | null;
   selectedWorkspaceCwd: string | null;
@@ -129,7 +131,8 @@ export interface TeamRunFormState {
 export interface TeamRunFormSnapshot {
   serverId: string;
   team: TeamDefinitionDto;
-  workspaces: readonly TeamRunWorkspaceOption[];
+  workspaces: readonly TeamRunWorkspaceOption[] | null;
+  preferredWorkspaceId?: string;
   profiles?: readonly AgentProfile[] | null;
   assignment?: AssignmentDto;
   supervisionSupported?: boolean;
@@ -139,7 +142,7 @@ export interface TeamRunFormModel {
   getState: () => TeamRunFormState;
   subscribe: (listener: () => void) => () => void;
   close: () => void;
-  applyWorkspaces: (workspaces: readonly TeamRunWorkspaceOption[]) => void;
+  applyWorkspaces: (workspaces: readonly TeamRunWorkspaceOption[] | null) => void;
   applyProfiles: (profiles: readonly AgentProfile[] | null) => void;
   applySupervisionCapability: (supported: boolean) => void;
   applyProviderCatalog: (
@@ -569,6 +572,7 @@ function buildSubmission(
 }
 
 function baseValidationIssue(state: TeamRunFormState): TeamRunFormValidationIssue | null {
+  if (state.workspaceCatalogStatus === "pending") return "workspaces_loading";
   if (!state.selectedWorkspaceId) return "workspace_required";
   if (!state.workspaces.some((workspace) => workspace.workspaceId === state.selectedWorkspaceId)) {
     return "workspace_missing";
@@ -615,6 +619,22 @@ function supervisedRoleResolutions(state: TeamRunFormState): TeamRunRoleResoluti
   return state.roleResolutions.filter((resolution) => roleIds.has(resolution.roleId));
 }
 
+function initialWorkspaceState(snapshot: TeamRunFormSnapshot) {
+  const workspaces = snapshot.workspaces ?? [];
+  const selectedWorkspaceId =
+    snapshot.preferredWorkspaceId ?? (workspaces.length === 1 ? workspaces[0]!.workspaceId : null);
+  const selected = workspaces.find((entry) => entry.workspaceId === selectedWorkspaceId);
+  const workspaceCatalogStatus: TeamRunFormState["workspaceCatalogStatus"] =
+    snapshot.workspaces === null ? "pending" : "ready";
+  return {
+    workspaces: [...workspaces],
+    workspaceCatalogStatus,
+    selectedWorkspaceId,
+    selectedWorkspaceDisplay: selected?.display ?? null,
+    selectedWorkspaceCwd: selected?.cwd ?? null,
+  };
+}
+
 export function openTeamRunForm(
   snapshot: TeamRunFormSnapshot,
   options: OpenTeamRunFormOptions = {},
@@ -628,7 +648,6 @@ export function openTeamRunForm(
   let securityPreviewFailure: { requestKey: string; error: string } | null = null;
   const featureCatalogs = new Map<string, FeatureCatalogResult>();
   const idempotencyKey = (options.generateIdempotencyKey ?? generateIdempotencyKey)();
-  const initialWorkspace = snapshot.workspaces.length === 1 ? snapshot.workspaces[0]! : null;
   const supervisorOptions = buildTeamRunSupervisorOptions(snapshot.team);
   const initialSupervisor = supervisorOptions.length === 1 ? supervisorOptions[0]! : null;
   let closed = false;
@@ -636,10 +655,7 @@ export function openTeamRunForm(
   let state: TeamRunFormState = {
     serverId: snapshot.serverId,
     team: snapshot.team,
-    workspaces: [...snapshot.workspaces],
-    selectedWorkspaceId: initialWorkspace?.workspaceId ?? null,
-    selectedWorkspaceDisplay: initialWorkspace?.display ?? null,
-    selectedWorkspaceCwd: initialWorkspace?.cwd ?? null,
+    ...initialWorkspaceState(snapshot),
     catalogGeneration: 0,
     profileGeneration: 0,
     objective: snapshot.assignment?.objective ?? "",
@@ -720,7 +736,7 @@ export function openTeamRunForm(
       listeners.clear();
     },
     applyWorkspaces: (workspaces) => {
-      const nextWorkspaces = [...workspaces];
+      const nextWorkspaces = [...(workspaces ?? [])];
       const selectedWasAvailable = state.workspaces.some(
         (workspace) => workspace.workspaceId === state.selectedWorkspaceId,
       );
@@ -743,6 +759,8 @@ export function openTeamRunForm(
       publish({
         ...state,
         workspaces: nextWorkspaces,
+        workspaceCatalogStatus: workspaces === null ? "pending" : "ready",
+        selectedWorkspaceDisplay: state.selectedWorkspaceDisplay ?? selected?.display ?? null,
         selectedWorkspaceCwd: selected?.cwd ?? null,
         catalogGeneration: previewContextChanged
           ? state.catalogGeneration + 1

@@ -306,7 +306,16 @@ export const es: TranslationResources = {
     loadMore: "Cargar más",
     refresh: "Actualizar",
   },
-  assignments: en.assignments,
+  assignments: {
+    ...en.assignments,
+    workspaceCreated:
+      "Espacio de trabajo creado. Selecciona Ejecutar equipo cuando quieras revisar su configuración de inicio.",
+    actions: {
+      ...en.assignments.actions,
+      createWorkspace: "Crear espacio de trabajo",
+      backToAssignment: "Volver a la asignación",
+    },
+  },
   teams: {
     ...en.teams,
     title: "Equipos",
@@ -379,6 +388,7 @@ export const es: TranslationResources = {
           "Identifica el espacio de trabajo y la configuración de inicio exactos que el daemon volverá a comprobar al iniciar.",
         validation: {
           ...en.teams.runs.form.validation,
+          workspaces_loading: "Cargando espacios de trabajo.",
           supervisor_required: "Selecciona un rol supervisor.",
           supervisor_unavailable:
             "Este equipo necesita un rol fuera del flujo de trabajo para ejecutarse bajo supervisión.",

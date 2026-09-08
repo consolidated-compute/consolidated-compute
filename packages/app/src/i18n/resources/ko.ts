@@ -304,7 +304,15 @@ export const ko: TranslationResources = {
     loadMore: "더 불러오기",
     refresh: "새로 고침",
   },
-  assignments: en.assignments,
+  assignments: {
+    ...en.assignments,
+    workspaceCreated: "워크스페이스를 만들었습니다. 시작 설정을 검토하려면 팀 실행을 선택하세요.",
+    actions: {
+      ...en.assignments.actions,
+      createWorkspace: "워크스페이스 만들기",
+      backToAssignment: "할당으로 돌아가기",
+    },
+  },
   teams: {
     ...en.teams,
     title: "팀",
@@ -376,6 +384,7 @@ export const ko: TranslationResources = {
           "시작할 때 데몬이 다시 확인할 정확한 작업 공간과 실행 구성을 식별합니다.",
         validation: {
           ...en.teams.runs.form.validation,
+          workspaces_loading: "워크스페이스를 불러오는 중입니다.",
           supervisor_required: "감독자 역할을 선택하세요.",
           supervisor_unavailable: "감독 실행을 하려면 작업자 워크플로 외부의 역할이 필요합니다.",
           native_delegation_unenforced:

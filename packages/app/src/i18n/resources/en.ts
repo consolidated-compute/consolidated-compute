@@ -302,6 +302,8 @@ export const en = {
     refresh: "Refresh",
   },
   assignments: {
+    workspaceCreated:
+      "Workspace created. Select Run Team when you are ready to review its launch settings.",
     title: "Assignments",
     newAssignment: "New Assignment",
     selectAssignment: "Select an Assignment to inspect its execution history",
@@ -326,6 +328,8 @@ export const en = {
     },
     actions: {
       create: "Create Assignment",
+      createWorkspace: "Create Workspace",
+      backToAssignment: "Back to Assignment",
       save: "Save",
       edit: "Edit",
       run: "Run Team",
@@ -527,6 +531,7 @@ export const en = {
         launchPlan: "Resolved Agent Profiles",
         validation: {
           workspace_required: "Select a Workspace.",
+          workspaces_loading: "Workspaces are loading.",
           workspace_missing: "The selected Workspace is no longer available.",
           objective_required: "Enter an Objective.",
           objective_too_long: "Objectives must be 32,000 characters or fewer.",

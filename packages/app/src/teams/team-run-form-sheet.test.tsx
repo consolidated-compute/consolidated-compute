@@ -118,6 +118,7 @@ vi.mock("@/constants/layout", () => ({
 
 vi.mock("@/stores/session-store-hooks", () => ({
   useHostWorkspaces: () => [],
+  useHasHydratedWorkspaces: () => true,
 }));
 
 vi.mock("@/agent-profiles", () => ({

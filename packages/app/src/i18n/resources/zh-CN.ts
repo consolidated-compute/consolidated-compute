@@ -303,7 +303,15 @@ export const zhCN: TranslationResources = {
     loadMore: "加载更多",
     refresh: "刷新",
   },
-  assignments: en.assignments,
+  assignments: {
+    ...en.assignments,
+    workspaceCreated: "工作区已创建。准备好检查启动设置后，请选择运行团队。",
+    actions: {
+      ...en.assignments.actions,
+      createWorkspace: "创建工作区",
+      backToAssignment: "返回任务",
+    },
+  },
   teams: {
     ...en.teams,
     title: "团队",
@@ -373,6 +381,7 @@ export const zhCN: TranslationResources = {
         approvalFingerprintDescription: "标识守护程序将在启动时重新检查的确切工作区和启动配置。",
         validation: {
           ...en.teams.runs.form.validation,
+          workspaces_loading: "正在加载工作区。",
           supervisor_required: "请选择监督者角色。",
           supervisor_unavailable: "此团队需要一个工作流之外的角色才能在监督下运行。",
           native_delegation_unenforced:

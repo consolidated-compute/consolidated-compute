@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from "expo-router";
+import { Redirect, useLocalSearchParams } from "expo-router";
 import { HostRouteBootstrapBoundary } from "@/components/host-route-bootstrap-boundary";
 import { NewWorkspaceScreen } from "@/screens/new-workspace-screen";
 
@@ -9,19 +9,24 @@ export default function NewWorkspaceRoute() {
     name?: string;
     projectId?: string;
     draftId?: string;
+    assignmentId?: string;
   }>();
   const serverId = typeof params.serverId === "string" ? params.serverId : "";
   const sourceDirectory = typeof params.dir === "string" ? params.dir : undefined;
   const displayName = typeof params.name === "string" ? params.name : undefined;
   const projectId = typeof params.projectId === "string" ? params.projectId : undefined;
   const draftId = typeof params.draftId === "string" ? params.draftId : undefined;
+  const assignmentId = typeof params.assignmentId === "string" ? params.assignmentId : undefined;
   const screenKey = JSON.stringify([
     serverId,
     sourceDirectory ?? null,
     displayName ?? null,
     projectId ?? null,
     draftId ?? null,
+    assignmentId ?? null,
   ]);
+
+  if (assignmentId && !serverId) return <Redirect href="/assignments" />;
 
   return (
     <HostRouteBootstrapBoundary>
@@ -32,6 +37,7 @@ export default function NewWorkspaceRoute() {
         displayName={displayName}
         projectId={projectId}
         draftId={draftId}
+        assignmentId={assignmentId}
       />
     </HostRouteBootstrapBoundary>
   );
