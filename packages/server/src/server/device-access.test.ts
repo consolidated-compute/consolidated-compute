@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, test } from "vitest";
@@ -23,6 +23,138 @@ function fixture() {
 }
 const token = `cc_device_${"a".repeat(43)}`;
 const otherToken = `cc_device_${"b".repeat(43)}`;
+test("authentication activation is explicit and survives a reopened store", () => {
+  const { home, store } = fixture();
+  expect(store.isDeviceAuthenticationEnabled()).toBe(false);
+  const invitation = store.createLocalInvitation({
+    label: "Owner",
+    permissions: ["access.manage"],
+  });
+  const admitted = store.enroll({ code: invitation.code, token });
+  expect(store.isDeviceAuthenticationEnabled()).toBe(false);
+  store.enableDeviceAuthentication({ token });
+  const activated = readFileSync(path.join(home, "device-authentication.json"), "utf8");
+  store.enableDeviceAuthentication({ token });
+  expect(readFileSync(path.join(home, "device-authentication.json"), "utf8")).toBe(activated);
+  expect(activated).not.toContain(token);
+  const reopened = new DeviceAccessStore({ home });
+  expect(reopened.isDeviceAuthenticationEnabled()).toBe(true);
+  expect(reopened.authenticate(token)).toEqual(admitted);
+});
+
+test("activation requires an enrolled, non-revoked access-management credential", () => {
+  const { store } = fixture();
+  expectFailure(
+    () => store.enableDeviceAuthentication({ token }),
+    "activation_credential_required",
+  );
+  const invitation = store.createLocalInvitation({
+    label: "Viewer",
+    permissions: ["workspace.read"],
+  });
+  const admitted = store.enroll({ code: invitation.code, token });
+  expectFailure(
+    () => store.enableDeviceAuthentication({ token }),
+    "activation_credential_required",
+  );
+  store.setPrincipalPermissions({
+    principalId: admitted.principalId,
+    permissions: ["access.manage"],
+  });
+  store.revokeCredential(admitted.credentialId);
+  expectFailure(
+    () => store.enableDeviceAuthentication({ token }),
+    "activation_credential_required",
+  );
+  expect(store.isDeviceAuthenticationEnabled()).toBe(false);
+});
+
+test("loss of the activated credential registry never restores anonymous mode or creates an empty registry", () => {
+  const { home, store } = fixture();
+  const invitation = store.createLocalInvitation({
+    label: "Owner",
+    permissions: ["access.manage"],
+  });
+  store.enroll({ code: invitation.code, token });
+  store.enableDeviceAuthentication({ token });
+  rmSync(path.join(home, "device-access.json"));
+  const reopened = new DeviceAccessStore({ home });
+  expect(reopened.isDeviceAuthenticationEnabled()).toBe(true);
+  expectFailure(() => reopened.authenticate(null), "credential_storage_missing");
+  expectFailure(() => reopened.authenticate(token), "credential_storage_missing");
+  expectFailure(
+    () => reopened.createLocalInvitation({ label: "Replacement", permissions: [] }),
+    "credential_storage_missing",
+  );
+  expectFailure(
+    () => reopened.enroll({ code: invitation.code, token }),
+    "credential_storage_missing",
+  );
+});
+
+test("corrupt activation records fail closed and cannot be overwritten by activation", () => {
+  const { home, store } = fixture();
+  const invitation = store.createLocalInvitation({
+    label: "Owner",
+    permissions: ["access.manage"],
+  });
+  store.enroll({ code: invitation.code, token });
+  const file = path.join(home, "device-authentication.json");
+  for (const contents of ["not json", '{"enabled":false}', '{"enabled":true,"enabledAt":-1}']) {
+    writeFileSync(file, contents);
+    expectFailure(() => store.isDeviceAuthenticationEnabled(), "authentication_state_invalid");
+    expectFailure(
+      () => store.enableDeviceAuthentication({ token }),
+      "authentication_state_invalid",
+    );
+    expect(readFileSync(file, "utf8")).toBe(contents);
+  }
+});
+
+test("revoking the last enrolled credential does not disable device authentication", () => {
+  const { home, store } = fixture();
+  const invitation = store.createLocalInvitation({
+    label: "Owner",
+    permissions: ["access.manage"],
+  });
+  const admitted = store.enroll({ code: invitation.code, token });
+  store.enableDeviceAuthentication({ token });
+  store.revokePrincipal(admitted.principalId);
+  const reopened = new DeviceAccessStore({ home });
+  expect(reopened.isDeviceAuthenticationEnabled()).toBe(true);
+  expect(reopened.authenticate(token)).toBeNull();
+  expect(reopened.authenticate(null)).toBeNull();
+});
+
+test("unreadable activation state is not treated as an absent opt-in", () => {
+  const { home, store } = fixture();
+  mkdirSync(path.join(home, "device-authentication.json"));
+  expectFailure(() => store.isDeviceAuthenticationEnabled(), "authentication_state_unreadable");
+  expectFailure(
+    () => store.enableDeviceAuthentication({ token }),
+    "authentication_state_unreadable",
+  );
+});
+
+test("corrupt credential storage preserves activation and blocks enrollment", () => {
+  const { home, store } = fixture();
+  const invitation = store.createLocalInvitation({
+    label: "Owner",
+    permissions: ["access.manage"],
+  });
+  store.enroll({ code: invitation.code, token });
+  store.enableDeviceAuthentication({ token });
+  const file = path.join(home, "device-access.json");
+  writeFileSync(file, "invalid json");
+  const reopened = new DeviceAccessStore({ home });
+  expect(reopened.isDeviceAuthenticationEnabled()).toBe(true);
+  expect(() => reopened.authenticate(token)).toThrow("Invalid device access storage");
+  expect(() => reopened.createLocalInvitation({ label: "Replacement", permissions: [] })).toThrow(
+    "Invalid device access storage",
+  );
+  expect(readFileSync(file, "utf8")).toBe("invalid json");
+});
+
 afterEach(() => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
 });

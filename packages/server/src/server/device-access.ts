@@ -8,6 +8,10 @@ const permissionsSchema = z.array(DaemonPermissionSchema).max(32);
 const labelSchema = z.string().trim().min(1).max(120);
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
 const credentialTokenSchema = z.string().regex(/^cc_device_[A-Za-z0-9_-]{43}$/);
+const authenticationStateSchema = z.object({
+  enabled: z.literal(true),
+  enabledAt: z.number().int().nonnegative(),
+});
 const principalSchema = z.object({
   id: z.string().uuid(),
   label: labelSchema,
@@ -62,6 +66,11 @@ const deviceAccessErrorMessages = {
   invitation_limit_reached: "Too many pending device invitations",
   credential_not_found: "Unknown device credential",
   principal_not_found: "Unknown device principal",
+  activation_credential_required:
+    "Device authentication requires an enrolled access-management credential",
+  credential_storage_missing: "Activated device credential storage is missing",
+  authentication_state_invalid: "Invalid device authentication state",
+  authentication_state_unreadable: "Cannot read device authentication state",
 } as const;
 
 export type DeviceAccessErrorCode = keyof typeof deviceAccessErrorMessages;
@@ -91,11 +100,42 @@ function digest(secret: string): string {
  */
 export class DeviceAccessStore {
   private readonly file: string;
+  private readonly authenticationFile: string;
   private readonly now: () => number;
 
   constructor(input: { home: string; now?: () => number }) {
     this.file = path.join(input.home, "device-access.json");
+    this.authenticationFile = path.join(input.home, "device-authentication.json");
     this.now = input.now ?? Date.now;
+  }
+
+  // This is a trusted local activation primitive, not a remotely callable
+  // enrollment operation. Transport activation must be coordinated at bootstrap.
+  enableDeviceAuthentication({ token }: { token: string }): void {
+    const enabled = this.isDeviceAuthenticationEnabled();
+    const admission = this.authenticate(token);
+    if (!admission?.permissions.includes("access.manage")) {
+      throw new DeviceAccessError("activation_credential_required");
+    }
+    if (enabled) return;
+    const state = authenticationStateSchema.parse({ enabled: true, enabledAt: this.now() });
+    writeDeviceRecord(this.authenticationFile, JSON.stringify(state));
+  }
+
+  isDeviceAuthenticationEnabled(): boolean {
+    let contents: string;
+    try {
+      contents = readFileSync(this.authenticationFile, "utf8");
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+      throw new DeviceAccessError("authentication_state_unreadable");
+    }
+    try {
+      authenticationStateSchema.parse(JSON.parse(contents));
+    } catch {
+      throw new DeviceAccessError("authentication_state_invalid");
+    }
+    return true;
   }
 
   createLocalInvitation(input: { label: string; permissions: DaemonPermission[] }): {
@@ -227,8 +267,12 @@ export class DeviceAccessStore {
     try {
       contents = readFileSync(this.file, "utf8");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        if (this.isDeviceAuthenticationEnabled()) {
+          throw new DeviceAccessError("credential_storage_missing");
+        }
         return { principals: [], credentials: [], invitations: [] };
+      }
       throw new Error("Cannot read device access storage", { cause: error });
     }
     try {
@@ -240,13 +284,17 @@ export class DeviceAccessStore {
 
   private write(state: Registry): void {
     const data = JSON.stringify(registrySchema.parse(state));
-    mkdirSync(path.dirname(this.file), { recursive: true });
-    const temp = `${this.file}.${randomUUID()}.tmp`;
-    try {
-      writeFileSync(temp, data, { flag: "wx", mode: 0o600 });
-      renameSync(temp, this.file);
-    } finally {
-      rmSync(temp, { force: true });
-    }
+    writeDeviceRecord(this.file, data);
+  }
+}
+
+function writeDeviceRecord(file: string, data: string): void {
+  mkdirSync(path.dirname(file), { recursive: true });
+  const temp = `${file}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temp, data, { flag: "wx", mode: 0o600 });
+    renameSync(temp, file);
+  } finally {
+    rmSync(temp, { force: true });
   }
 }
