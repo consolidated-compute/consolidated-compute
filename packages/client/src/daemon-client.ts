@@ -408,6 +408,54 @@ export type DaemonEventHandler = (event: DaemonEvent) => void;
 export type BrowserAutomationExecuteRequestMessage = BrowserAutomationExecuteRequest;
 export type BrowserAutomationExecuteResponseMessage = BrowserAutomationExecuteResponse;
 
+export class DeviceCredentialConfigurationError extends Error {
+  constructor(
+    readonly code:
+      | "invalid_credential"
+      | "conflicting_authentication"
+      | "relay_encryption_required"
+      | "relay_key_required"
+      | "device_authentication_unavailable",
+  ) {
+    super(`Invalid device authentication configuration: ${code}`);
+    this.name = "DeviceCredentialConfigurationError";
+  }
+}
+
+interface ConnectionAuthentication {
+  headers: Record<string, string>;
+  protocols: string[] | undefined;
+  deviceCredential: string | undefined;
+  shouldUseRelayE2ee: boolean;
+}
+
+function resolveConnectionAuthentication(config: DaemonClientConfig): ConnectionAuthentication {
+  const relay = isRelayClientWebSocketUrl(config.url);
+  const shouldUseRelayE2ee = config.e2ee?.enabled === true && relay;
+  const deviceCredential = config.deviceCredential;
+  if (deviceCredential !== undefined) {
+    if (!/^cc_device_[A-Za-z0-9_-]{43}$/.test(deviceCredential)) {
+      throw new DeviceCredentialConfigurationError("invalid_credential");
+    }
+    if (config.password !== undefined || config.authHeader !== undefined) {
+      throw new DeviceCredentialConfigurationError("conflicting_authentication");
+    }
+    if (relay && !shouldUseRelayE2ee) {
+      throw new DeviceCredentialConfigurationError("relay_encryption_required");
+    }
+    if (relay && !config.e2ee?.daemonPublicKeyB64) {
+      throw new DeviceCredentialConfigurationError("relay_key_required");
+    }
+  }
+  const headers: Record<string, string> = {};
+  let bearer = normalizePassword(config.password);
+  if (deviceCredential !== undefined && !shouldUseRelayE2ee) bearer = deviceCredential;
+  if (bearer) headers.Authorization = `Bearer ${bearer}`;
+  else if (config.authHeader) headers.Authorization = config.authHeader;
+  const protocols = bearer ? [`paseo.bearer.${bearer}`] : undefined;
+  return { headers, protocols, deviceCredential, shouldUseRelayE2ee };
+}
+
 export interface DaemonClientConfig {
   url: string;
   clientId: string;
@@ -415,6 +463,7 @@ export interface DaemonClientConfig {
   appVersion?: string;
   runtimeGeneration?: number | null;
   password?: string;
+  deviceCredential?: string;
   authHeader?: string;
   suppressSendErrors?: boolean;
   transportFactory?: DaemonTransportFactory;
@@ -1223,6 +1272,7 @@ export class DaemonClient {
   private livenessHeartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private lastLivenessRttMs: number | null = null;
   private consecutiveLivenessFailures = 0;
+  private helloDeviceCredential: string | undefined;
 
   constructor(private config: DaemonClientConfig) {
     this.logger = config.logger ?? consoleLogger;
@@ -1309,15 +1359,6 @@ export class DaemonClient {
       return;
     }
 
-    const headers: Record<string, string> = {};
-    const password = normalizePassword(this.config.password);
-    if (password) {
-      headers.Authorization = `Bearer ${password}`;
-    } else if (this.config.authHeader) {
-      headers.Authorization = this.config.authHeader;
-    }
-    const protocols = password ? [`paseo.bearer.${password}`] : undefined;
-
     try {
       // Reconnect can overlap with browser close/error delivery ordering.
       // Always dispose previous transport before constructing the next one.
@@ -1325,8 +1366,11 @@ export class DaemonClient {
       const baseTransportFactory =
         this.config.transportFactory ??
         createWebSocketTransportFactory(this.config.webSocketFactory ?? defaultWebSocketFactory);
-      const shouldUseRelayE2ee =
-        this.config.e2ee?.enabled === true && isRelayClientWebSocketUrl(this.config.url);
+      const { headers, protocols, deviceCredential, shouldUseRelayE2ee } =
+        resolveConnectionAuthentication(this.config);
+      // Snapshot this attempt's credential so later config mutations cannot
+      // put a different secret in the hello after transport setup.
+      this.helloDeviceCredential = deviceCredential;
 
       let transportFactory = baseTransportFactory;
       if (shouldUseRelayE2ee) {
@@ -1441,6 +1485,10 @@ export class DaemonClient {
       this.resetConnectTimeout();
       const message = error instanceof Error ? error.message : "Failed to connect";
       this.lastErrorValue = message;
+      if (error instanceof DeviceCredentialConfigurationError) {
+        this.shouldReconnect = false;
+        this.rejectConnect(error);
+      }
       this.scheduleReconnect({
         reason: message,
         event: "CONNECT_FAILED",
@@ -6057,6 +6105,7 @@ export class DaemonClient {
     try {
       this.sendJsonMessage("hello", "hello", {
         type: "hello",
+        ...(this.helloDeviceCredential ? { deviceCredential: this.helloDeviceCredential } : {}),
         clientId: this.config.clientId,
         clientType: this.config.clientType ?? "cli",
         protocolVersion: 1,
@@ -6488,12 +6537,28 @@ export class DaemonClient {
     });
   }
 
+  private acceptDeviceAuthentication(serverInfo: ServerInfoStatusPayload): boolean {
+    if (!this.helloDeviceCredential || serverInfo.features?.deviceAuthentication === true)
+      return true;
+    const error = new DeviceCredentialConfigurationError("device_authentication_unavailable");
+    this.shouldReconnect = false;
+    this.rejectConnect(error);
+    this.disposeTransport(1008, "Device authentication unavailable");
+    this.scheduleReconnect({
+      reason: error.message,
+      event: "DEVICE_AUTHENTICATION_UNAVAILABLE",
+      reasonCode: "authentication_failed",
+    });
+    return false;
+  }
+
   private handleSessionMessage(msg: SessionOutboundMessage): void {
     const consumerMessage = normalizeProviderSnapshotUpdateMessage(msg);
 
     if (consumerMessage.type === "status") {
       const serverInfo = parseServerInfoStatusPayload(consumerMessage.payload);
       if (serverInfo) {
+        if (!this.acceptDeviceAuthentication(serverInfo)) return;
         this.lastServerInfoMessage = serverInfo;
         if (this.connectionState.status === "connecting") {
           this.resetConnectTimeout();

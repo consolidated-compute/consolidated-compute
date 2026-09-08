@@ -3615,6 +3615,8 @@ export const ServerInfoStatusPayloadSchema = z
         agentProfiles: z.boolean().optional(),
         // COMPAT(agentProfileProviderOptions): added in v0.6.2, remove gate after 2027-02-28.
         agentProfileProviderOptions: z.boolean().optional(),
+        // Runtime authentication mode, not merely implementation availability.
+        deviceAuthentication: z.boolean().optional(),
         // COMPAT(teams): added in v0.6.0, remove gate after 2027-02-26.
         teams: z.boolean().optional(),
         // COMPAT(teamSecurity): added in v0.6.2, remove gate after 2027-02-28.
