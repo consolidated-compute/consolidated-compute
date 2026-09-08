@@ -1,4 +1,7 @@
+import { hostSecurity } from "./host-security";
+
 export const en = {
+  hostSecurity: hostSecurity["en"],
   common: {
     back: "Back",
     loading: "Loading...",

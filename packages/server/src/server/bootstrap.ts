@@ -1,4 +1,6 @@
 import express from "express";
+import { completeSecuritySetup, SecuritySetupInputSchema } from "./security-setup.js";
+import { SecuritySetupError } from "@getpaseo/protocol/daemon-security";
 import { createServer as createHTTPServer, type IncomingMessage, type ServerResponse } from "http";
 import { constants, existsSync, unlinkSync } from "fs";
 import { open, rm } from "fs/promises";
@@ -791,6 +793,38 @@ export async function createPaseoDaemon(
   );
 
   app.use(express.json());
+
+  app.post("/api/security/setup", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    if (deviceAccess.isDeviceAuthenticationEnabled()) {
+      res.status(409).json({ code: "device_authentication_enabled" });
+      return;
+    }
+    const protection = resolveTeamSupervisedControlPlaneProtection(config);
+    if (protection !== "passwordless") {
+      res.status(409).json({
+        code: protection === "environment_password" ? "launcher_override" : "already_configured",
+      });
+      return;
+    }
+    const parsed = SecuritySetupInputSchema.safeParse(req.body);
+    if (!parsed.success || parsed.data.serverId !== serverId) {
+      res.status(400).json({ code: "request_invalid" });
+      return;
+    }
+    try {
+      completeSecuritySetup({
+        home: config.paseoHome,
+        code: parsed.data.code,
+        password: parsed.data.password,
+      });
+      res.json({ restartRequired: true });
+    } catch (error) {
+      res
+        .status(409)
+        .json({ code: error instanceof SecuritySetupError ? error.code : "storage_unavailable" });
+    }
+  });
 
   // Serve static files from public directory
   app.use("/public", express.static(staticDir));

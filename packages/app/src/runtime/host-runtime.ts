@@ -2,6 +2,7 @@ import { useSyncExternalStore, useMemo } from "react";
 import { useSyncExternalStoreWithSelector } from "use-sync-external-store/shim/with-selector";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { HostDeviceCredentialError, resolveHostAuthentication } from "@/types/host-authentication";
+import { SecuritySetupError } from "@getpaseo/protocol/daemon-security";
 import equal from "fast-deep-equal/es6";
 import {
   DaemonClient,
@@ -1918,13 +1919,22 @@ export class HostRuntimeStore {
   private async applyPersistedHost(
     serverId: string,
     apply: (host: HostProfile) => HostProfile,
+    awaitConnection = false,
   ): Promise<void> {
     const updatedAt = new Date().toISOString();
     const next = this.hosts.map((host) =>
       host.serverId === serverId ? { ...apply(host), updatedAt } : host,
     );
     await this.persistHosts(next);
-    this.setHostsAndSync(next);
+    let update = Promise.resolve();
+    this.setHostsAndSync(next, {
+      onHostUpdate: awaitConnection
+        ? (id, promise) => {
+            if (id === serverId) update = promise;
+          }
+        : undefined,
+    });
+    await update;
   }
 
   async removeHost(serverId: string): Promise<void> {
@@ -1947,6 +1957,29 @@ export class HostRuntimeStore {
         throw new HostDeviceCredentialError("host_not_found");
       }
       return this.applyPersistedHost(serverId, (host) => ({ ...host, deviceCredential }));
+    });
+  }
+
+  async saveSetupPassword(serverId: string, connectionId: string, password: string): Promise<void> {
+    await this.serializeHostMutation(() => {
+      const host = this.hosts.find((entry) => entry.serverId === serverId);
+      if (!host || !host.connections.some((c) => c.id === connectionId && c.type === "directTcp")) {
+        throw new SecuritySetupError("host_mismatch");
+      }
+      if (host.deviceCredential !== undefined)
+        throw new SecuritySetupError("device_authentication_enabled");
+      return this.applyPersistedHost(
+        serverId,
+        (current) => ({
+          ...current,
+          connections: current.connections.map((connection) =>
+            connection.id === connectionId && connection.type === "directTcp"
+              ? { ...connection, password }
+              : connection,
+          ),
+        }),
+        true,
+      );
     });
   }
 
@@ -2036,6 +2069,7 @@ export class HostRuntimeStore {
   private setHostsAndSync(
     hosts: HostProfile[],
     options?: {
+      onHostUpdate?: (serverId: string, update: Promise<void>) => void;
       initialConnectionByServerId?: Map<
         string,
         { connectionId: string; existingClient: DaemonClient }
@@ -2061,6 +2095,7 @@ export class HostRuntimeStore {
   syncHosts(
     hosts: HostProfile[],
     options?: {
+      onHostUpdate?: (serverId: string, update: Promise<void>) => void;
       initialConnectionByServerId?: Map<
         string,
         { connectionId: string; existingClient: DaemonClient }
@@ -2089,7 +2124,8 @@ export class HostRuntimeStore {
       const initialConnection = options?.initialConnectionByServerId?.get(host.serverId);
       const existing = this.controllers.get(host.serverId);
       if (existing) {
-        void existing.updateHost(host);
+        const update = existing.updateHost(host);
+        options?.onHostUpdate?.(host.serverId, update);
         if (initialConnection) {
           void existing.activateConnection(initialConnection).catch(() => {
             void initialConnection.existingClient.close().catch(() => undefined);
@@ -2132,7 +2168,7 @@ export class HostRuntimeStore {
         this.syncDirectoryConnection(snapshot.serverId);
         this.emit(snapshot.serverId);
       });
-      void controller
+      const startup = controller
         .start(
           initialConnection
             ? {
@@ -2144,6 +2180,7 @@ export class HostRuntimeStore {
           const message = error instanceof Error ? error.message : String(error);
           controller.markStartupError(message);
         });
+      options?.onHostUpdate?.(host.serverId, startup);
       this.emit(host.serverId);
     }
   }

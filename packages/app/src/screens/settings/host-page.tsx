@@ -22,6 +22,7 @@ import {
   DEFAULT_TERMINAL_PROFILES,
 } from "@getpaseo/protocol/terminal-profiles";
 import { AgentProfilesSection } from "@/agent-profiles";
+import { HostSecuritySetup } from "@/hosts/security-setup";
 import { AgentSkillsSection } from "@/agent-skills";
 import { AdaptiveModalSheet, type SheetHeader } from "@/components/adaptive-modal-sheet";
 import { SettingsTextAreaCard } from "@/components/settings-textarea";
@@ -369,6 +370,7 @@ export function HostSettingsPage({
       </View>
 
       <HostStatusBadges serverId={serverId} />
+      <HostSecuritySetup key={serverId} serverId={serverId} />
 
       <HostAppearanceSection host={host} />
 

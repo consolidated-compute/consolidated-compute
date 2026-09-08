@@ -1,7 +1,10 @@
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
+import { hostSecurity } from "./host-security";
+
 export const zhCN: TranslationResources = {
+  hostSecurity: hostSecurity["zh-CN"],
   common: {
     back: "返回",
     loading: "加载中...",

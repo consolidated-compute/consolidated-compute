@@ -30,17 +30,21 @@ npm run build:app-deps
 
 Run the following commands from that checkout. With no `PASEO_HOME` override, repo dev commands use `.dev/paseo-home`, separate from a packaged app's `~/.paseo` home. Keep production port `6767` separate from the dev daemon on `6768`. If either dev port below is already in use, follow the development guide rather than stopping someone else's daemon.
 
-## Set up daemon authentication before starting
+## Set up host security
 
-For supervised Teams, set a password in this dev home's configuration:
+Ordinary pairing does not require a password by default. CC supervised Teams require a saved host password; device enrollment does not replace that requirement.
+
+For supervised Teams, connect first, open the host's settings and choose **Set up host security**. Electron approves setup for its managed local host through the desktop app. In a browser, first generate a private, five-minute setup code on the daemon host using the same checkout and home:
 
 ```bash
-npm run cli -- daemon set-password
+npm run cli -- daemon setup-code
 ```
 
-Enter it at the prompt; the CLI stores a bcrypt hash. Do not launch the daemon with `PASEO_PASSWORD` set, even if you also saved a password. Supervised admission rejects that configuration because a same-user provider process may read the daemon's startup environment. Remove an inherited `PASEO_PASSWORD` from the shell or service configuration before starting the daemon.
+Enter the code and a new password in the form. Setup requires a direct HTTPS or loopback connection, not a relay-only or SSH-only connection. The daemon stores a bcrypt hash, and the app remembers the password in its local connection registry, not an OS keychain. If saving or reconnecting fails, keep the form open and retry before restarting. Setup cannot replace an existing password or modify device-authenticated access; use `npm run cli -- daemon set-password` locally to change an existing password.
 
-The password takes effect at startup. If this home already has a running daemon, arrange a safe restart after its active work ends; do not restart another operator's daemon. Keep the password out of shell history, launch URLs, role instructions, and agent terminals. The [configuration reference](https://github.com/consolidated-compute/consolidated-compute/blob/main/public-docs/configuration.md#password-authentication) describes the stored-password setting.
+Do not launch the daemon with `PASEO_PASSWORD` set, even if you also saved a password. Supervised admission rejects that configuration because a same-user provider process may read the daemon's startup environment. Remove an inherited `PASEO_PASSWORD` from the shell or service configuration before starting the daemon.
+
+The form asks you to confirm a restart before security takes effect. Finish active work first; restarting interrupts agents and Team Runs. Do not restart another operator's daemon. Keep the password and setup code out of shell history, launch URLs, role instructions, and agent terminals. The [configuration reference](https://github.com/consolidated-compute/consolidated-compute/blob/main/public-docs/configuration.md#password-authentication) describes the stored-password setting.
 
 ## Start the daemon and browser app
 

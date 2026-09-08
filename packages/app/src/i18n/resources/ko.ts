@@ -1,7 +1,10 @@
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
+import { hostSecurity } from "./host-security";
+
 export const ko: TranslationResources = {
+  hostSecurity: hostSecurity["ko"],
   common: {
     back: "뒤로",
     loading: "불러오는 중...",

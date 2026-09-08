@@ -1742,6 +1742,7 @@ export class VoiceAssistantWebSocketServer {
       desktopManaged: this.daemonRuntimeConfig?.desktopManaged === true,
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
       features: {
+        daemonSecuritySetup: true,
         deviceAuthentication: this.deviceAccess?.isDeviceAuthenticationEnabled() === true,
         // COMPAT(directorySync): added in v0.3.x, remove gate after 2027-02-12.
         directorySync: true,

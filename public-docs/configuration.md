@@ -160,7 +160,7 @@ Legacy fields `log.level` and `log.format` are still supported and map to the ne
 
 You can require a password to connect to the daemon. When set, all HTTP and WebSocket clients must authenticate. Only the `/api/health` liveness endpoint is exempt, so that process supervisors and load balancers can probe without credentials.
 
-The easiest way to set a password is with the CLI:
+For first-time setup in CC, use the [host security form](https://github.com/consolidated-compute/consolidated-compute/blob/main/public-docs/index.md#set-up-host-security). To set or change a password from the daemon host's terminal:
 
 ```bash
 paseo daemon set-password

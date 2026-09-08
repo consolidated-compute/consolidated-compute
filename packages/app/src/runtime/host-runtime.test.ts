@@ -3333,6 +3333,107 @@ describe("HostRuntimeStore", () => {
     }
   });
 
+  it("awaited credential persistence reports storage failures and permits retry", async () => {
+    const memory = createMemoryHostRuntimeStorage();
+    let fail = false;
+    const store = new HostRuntimeStore({
+      storage: {
+        ...memory,
+        async setItem(key, value) {
+          if (fail) throw new Error("storage unavailable");
+          await memory.setItem(key, value);
+        },
+      },
+      deps: {
+        createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
+        connectToDaemon: async ({ host }) => ({
+          client: makeConnectedProbeClient(5) as unknown as DaemonClient,
+          serverId: host.serverId,
+          hostname: null,
+        }),
+        getClientId: async () => "cid_security_storage",
+      },
+    });
+    try {
+      const input = {
+        serverId: "security-host",
+        endpoint: "localhost:12345",
+        password: "saved-password",
+      };
+      await store.upsertDirectConnection({ serverId: input.serverId, endpoint: input.endpoint });
+      fail = true;
+      const save = () =>
+        store.saveSetupPassword(input.serverId, `direct:${input.endpoint}`, input.password);
+      await expect(save()).rejects.toThrow("storage unavailable");
+      fail = false;
+      await save();
+      expect(await memory.getItem("@paseo:daemon-registry")).toContain("saved-password");
+      await store.saveDeviceCredential(input.serverId, `cc_device_${"a".repeat(43)}`);
+      await expect(save()).rejects.toMatchObject({ code: "device_authentication_enabled" });
+      await store.removeHost(input.serverId);
+      await expect(save()).rejects.toMatchObject({ code: "host_mismatch" });
+      expect(store.getHosts()).toEqual([]);
+    } finally {
+      store.syncHosts([]);
+    }
+  });
+
+  it("setup password save waits for the replacement client before allowing restart", async () => {
+    const started = createDeferred<void>();
+    const finish = createDeferred<void>();
+    class DelayedClient extends FakeDaemonClient {
+      override async connect() {
+        started.resolve();
+        await finish.promise;
+        await super.connect();
+      }
+    }
+    const replacement = new DelayedClient();
+    const initial = makeConnectedProbeClient(5);
+    const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
+      deps: {
+        createClient: () => replacement as unknown as DaemonClient,
+        connectToDaemon: async ({ host }) => ({
+          client: initial as unknown as DaemonClient,
+          serverId: host.serverId,
+          hostname: null,
+        }),
+        getClientId: async () => "setup-wait",
+      },
+    });
+    const online = createDeferred<void>();
+    const unsubscribe = store.subscribe("setup-wait", () => {
+      if (store.getSnapshot("setup-wait")?.connectionStatus === "online") online.resolve();
+    });
+    try {
+      await store.upsertDirectConnection({
+        serverId: "setup-wait",
+        endpoint: "localhost:12345",
+        existingClient: initial as unknown as DaemonClient,
+      });
+      await online.promise;
+      let saved = false;
+      const saving = store
+        .saveSetupPassword("setup-wait", "direct:localhost:12345", "a-secure-password")
+        .then(() => {
+          saved = true;
+          return;
+        });
+      await started.promise;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(saved).toBe(false);
+      finish.resolve();
+      await saving;
+      expect(store.getClient("setup-wait")).toBe(replacement);
+      expect(store.getSnapshot("setup-wait")?.connectionStatus).toBe("online");
+    } finally {
+      finish.resolve();
+      unsubscribe();
+      store.syncHosts([]);
+    }
+  });
+
   it("upsertDirectConnection stores SSL and password settings", async () => {
     const store = new HostRuntimeStore({
       storage: createMemoryHostRuntimeStorage(),

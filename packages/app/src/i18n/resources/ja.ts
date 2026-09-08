@@ -1,7 +1,10 @@
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
+import { hostSecurity } from "./host-security";
+
 export const ja: TranslationResources = {
+  hostSecurity: hostSecurity["ja"],
   common: {
     back: "戻る",
     loading: "読み込み中...",
