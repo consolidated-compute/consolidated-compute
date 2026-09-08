@@ -1,4 +1,5 @@
-import { WebSocket, WebSocketServer } from "ws";
+import { WebSocket, WebSocketServer, type ServerOptions } from "ws";
+import type { Duplex } from "node:stream";
 import { defaultForgeRegistry } from "../services/forge-registry.js";
 import type { IncomingMessage, Server as HTTPServer } from "http";
 import { join } from "path";
@@ -556,6 +557,7 @@ function requireWebSocketServices(params: {
 export class VoiceAssistantWebSocketServer {
   private readonly logger: pino.Logger;
   private readonly wss: WebSocketServer;
+  private closeEnrollmentTransport: (() => void) | null = null;
   private readonly pendingConnections: Map<WebSocketLike, PendingConnection> = new Map();
   private readonly sessions: Map<WebSocketLike, SessionConnection> = new Map();
   private readonly socketIdentities: Map<WebSocketLike, WebSocketConnectionIdentity> = new Map();
@@ -844,8 +846,8 @@ export class VoiceAssistantWebSocketServer {
     auth: DaemonAuthConfig | undefined,
   ): WebSocketServer {
     const password = auth?.password;
-    const wss = new WebSocketServer({
-      server,
+    const options: ServerOptions = {
+      noServer: true,
       path: "/ws",
       handleProtocols: (protocols) => selectWebSocketProtocol(protocols, password),
       verifyClient: ({ req }, callback) => {
@@ -856,10 +858,24 @@ export class VoiceAssistantWebSocketServer {
           callback,
         );
       },
-    });
-    wss.on("connection", (ws, request) => {
-      void this.attachAuthenticatedSocket(ws, request, password);
-    });
+    };
+    const wss = new WebSocketServer(options);
+    const enrollment = new WebSocketServer({ ...options, maxPayload: 2048 });
+    // Route before ws constructs its receiver, including bytes already present
+    // in the upgrade head. Normal sessions retain their existing payload limit.
+    const upgrade = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+      const protocols = request.headers["sec-websocket-protocol"]?.split(",").map((p) => p.trim());
+      const target = protocols?.includes(DEVICE_ENROLLMENT_PROTOCOL) ? enrollment : wss;
+      target.handleUpgrade(request, socket, head, (ws) => {
+        void this.attachAuthenticatedSocket(ws, request, password);
+      });
+    };
+    server.on("upgrade", upgrade);
+    this.closeEnrollmentTransport = () => {
+      server.off("upgrade", upgrade);
+      for (const socket of enrollment.clients) socket.terminate();
+      enrollment.close();
+    };
     return wss;
   }
 
@@ -1222,6 +1238,8 @@ export class VoiceAssistantWebSocketServer {
       this.unregisterBrowserToolsClient(clientId);
     }
     this.wss.close();
+    this.closeEnrollmentTransport?.();
+    this.closeEnrollmentTransport = null;
   }
 
   private sendToClient(ws: WebSocketLike, message: WSOutboundMessage): void {

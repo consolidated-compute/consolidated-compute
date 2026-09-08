@@ -8,6 +8,44 @@ import { createTestPaseoDaemon } from "./test-utils/paseo-daemon.js";
 const protocol = "paseo.device-enrollment.v1";
 const token = `cc_device_${"a".repeat(43)}`;
 
+test.each([[2049], [1024, 1025]])(
+  "rejects oversized enrollment fragments %j before the final fragment",
+  async (...sizes) => {
+    const host = await createTestPaseoDaemon();
+    const socket = new WebSocket(`ws://127.0.0.1:${host.port}/ws`, protocol);
+    try {
+      const [closed] = await Promise.all([
+        once(socket, "close"),
+        once(socket, "open").then(() => {
+          for (const size of sizes) socket.send("a".repeat(size), { fin: false });
+          return;
+        }),
+      ]);
+      expect(closed[0]).toBe(1009);
+    } finally {
+      socket.terminate();
+      await host.close();
+    }
+  },
+);
+
+test("ordinary WebSocket sessions retain payload support above the enrollment limit", async () => {
+  const host = await createTestPaseoDaemon();
+  const socket = new WebSocket(`ws://127.0.0.1:${host.port}/ws`);
+  try {
+    const [response] = await Promise.all([
+      once(socket, "message"),
+      once(socket, "open").then(() =>
+        socket.send(JSON.stringify({ type: "ping", padding: "a".repeat(4096) })),
+      ),
+    ]);
+    expect(JSON.parse(response[0].toString())).toEqual({ type: "pong" });
+  } finally {
+    socket.terminate();
+    await host.close();
+  }
+});
+
 async function exchange(
   port: number,
   message: unknown,

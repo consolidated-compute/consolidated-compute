@@ -13,7 +13,7 @@ export function attachDeviceEnrollmentSocket(ws: WebSocket, store: DeviceAccessS
   const deadline = setTimeout(() => ws.terminate(), 10_000);
   deadline.unref();
   ws.once("close", () => clearTimeout(deadline));
-  ws.on("error", () => ws.terminate());
+  ws.on("error", () => ws.close());
   ws.once("message", (data, isBinary) => {
     let bytes: Buffer;
     if (Buffer.isBuffer(data)) bytes = data;
