@@ -2,7 +2,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, test } from "vitest";
-import { DeviceAccessStore } from "./device-access.js";
+import {
+  DeviceAccessStore,
+  DeviceAccessError,
+  type DeviceAccessErrorCode,
+} from "./device-access.js";
 
 const homes: string[] = [];
 function fixture() {
@@ -21,6 +25,51 @@ const token = `cc_device_${"a".repeat(43)}`;
 const otherToken = `cc_device_${"b".repeat(43)}`;
 afterEach(() => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
+});
+
+function expectFailure(action: () => unknown, code: DeviceAccessErrorCode) {
+  let failure: unknown;
+  try {
+    action();
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toBeInstanceOf(DeviceAccessError);
+  expect(failure).toMatchObject({ code });
+}
+
+test("enrollment failures expose stable codes without consuming or reviving credentials", () => {
+  const { store, advance } = fixture();
+  const first = store.createLocalInvitation({ label: "Laptop", permissions: ["workspace.read"] });
+  expectFailure(() => store.enroll({ code: first.code, token: "short" }), "credential_invalid");
+  expectFailure(() => store.enroll({ code: "unknown", token }), "invitation_invalid");
+  const admitted = store.enroll({ code: first.code, token });
+  expectFailure(() => store.enroll({ code: first.code, token: otherToken }), "invitation_consumed");
+  const second = store.createLocalInvitation({ label: "Phone", permissions: [] });
+  expectFailure(() => store.enroll({ code: second.code, token }), "credential_already_enrolled");
+  store.revokeCredential(admitted.credentialId);
+  expectFailure(() => store.enroll({ code: first.code, token }), "credential_revoked");
+  advance(300_000);
+  expectFailure(() => store.enroll({ code: second.code, token: otherToken }), "invitation_expired");
+  expect(store.authenticate(token)).toBeNull();
+  expect(store.authenticate(otherToken)).toBeNull();
+});
+
+test("management failures expose stable not-found and invitation-limit codes", () => {
+  const { store } = fixture();
+  expectFailure(() => store.revokeCredential("missing"), "credential_not_found");
+  expectFailure(() => store.revokePrincipal("missing"), "principal_not_found");
+  expectFailure(
+    () => store.setPrincipalPermissions({ principalId: "missing", permissions: [] }),
+    "principal_not_found",
+  );
+  for (let index = 0; index < 100; index++) {
+    store.createLocalInvitation({ label: "Laptop", permissions: [] });
+  }
+  expectFailure(
+    () => store.createLocalInvitation({ label: "Phone", permissions: [] }),
+    "invitation_limit_reached",
+  );
 });
 
 test("local approval creates a distinct principal and credential without storing secrets", () => {

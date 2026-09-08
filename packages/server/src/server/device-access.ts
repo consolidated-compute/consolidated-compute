@@ -52,6 +52,27 @@ const registrySchema = z
   });
 type Registry = z.infer<typeof registrySchema>;
 
+const deviceAccessErrorMessages = {
+  credential_invalid: "Invalid device credential",
+  invitation_invalid: "Invalid device invitation",
+  invitation_expired: "Device invitation expired",
+  invitation_consumed: "Device invitation already consumed",
+  credential_revoked: "Device credential revoked",
+  credential_already_enrolled: "Device credential already enrolled",
+  invitation_limit_reached: "Too many pending device invitations",
+  credential_not_found: "Unknown device credential",
+  principal_not_found: "Unknown device principal",
+} as const;
+
+export type DeviceAccessErrorCode = keyof typeof deviceAccessErrorMessages;
+
+export class DeviceAccessError extends Error {
+  constructor(public readonly code: DeviceAccessErrorCode) {
+    super(deviceAccessErrorMessages[code]);
+    this.name = "DeviceAccessError";
+  }
+}
+
 export interface DeviceAdmission {
   principalId: string;
   credentialId: string;
@@ -90,7 +111,7 @@ export class DeviceAccessStore {
       (i) => i.credentialId !== null || i.expiresAt > this.now(),
     );
     if (state.invitations.filter((i) => i.credentialId === null).length >= 100) {
-      throw new Error("Too many pending device invitations");
+      throw new DeviceAccessError("invitation_limit_reached");
     }
     state.invitations.push({
       digest: digest(code),
@@ -107,22 +128,24 @@ export class DeviceAccessStore {
   // Retrying the same code/token recovers a lost response without storing or
   // returning the plaintext credential on the daemon.
   enroll({ code, token }: { code: string; token: string }): DeviceAdmission {
-    credentialTokenSchema.parse(token);
+    if (!credentialTokenSchema.safeParse(token).success) {
+      throw new DeviceAccessError("credential_invalid");
+    }
     const state = this.read();
     const invitation = state.invitations.find((i) => i.digest === digest(code));
-    if (!invitation) throw new Error("Invalid device invitation");
+    if (!invitation) throw new DeviceAccessError("invitation_invalid");
     const tokenDigest = digest(token);
     if (invitation.credentialId !== null) {
       const credential = state.credentials.find((c) => c.id === invitation.credentialId);
       if (!credential || credential.digest !== tokenDigest)
-        throw new Error("Device invitation already consumed");
+        throw new DeviceAccessError("invitation_consumed");
       const admission = this.admission(state, credential);
-      if (!admission) throw new Error("Device credential revoked");
+      if (!admission) throw new DeviceAccessError("credential_revoked");
       return admission;
     }
-    if (invitation.expiresAt <= this.now()) throw new Error("Device invitation expired");
+    if (invitation.expiresAt <= this.now()) throw new DeviceAccessError("invitation_expired");
     if (state.credentials.some((c) => c.digest === tokenDigest))
-      throw new Error("Device credential already enrolled");
+      throw new DeviceAccessError("credential_already_enrolled");
     const now = this.now();
     const principal = {
       id: randomUUID(),
@@ -159,7 +182,7 @@ export class DeviceAccessStore {
   revokeCredential(id: string): void {
     const state = this.read();
     const credential = state.credentials.find((c) => c.id === id);
-    if (!credential) throw new Error("Unknown device credential");
+    if (!credential) throw new DeviceAccessError("credential_not_found");
     credential.revokedAt ??= this.now();
     this.write(state);
   }
@@ -167,7 +190,7 @@ export class DeviceAccessStore {
   revokePrincipal(id: string): void {
     const state = this.read();
     const principal = state.principals.find((p) => p.id === id);
-    if (!principal) throw new Error("Unknown device principal");
+    if (!principal) throw new DeviceAccessError("principal_not_found");
     principal.revokedAt ??= this.now();
     this.write(state);
   }
@@ -181,7 +204,7 @@ export class DeviceAccessStore {
   }): void {
     const state = this.read();
     const principal = state.principals.find((p) => p.id === principalId);
-    if (!principal) throw new Error("Unknown device principal");
+    if (!principal) throw new DeviceAccessError("principal_not_found");
     principal.permissions = [...new Set(permissionsSchema.parse(permissions))];
     this.write(state);
   }
