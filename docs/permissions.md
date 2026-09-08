@@ -15,6 +15,16 @@ A principal is the durable identity the daemon authorizes. A credential proves t
 
 A pairing invitation is neither. It is an expiring, single-use exchange that creates a principal and credential with the permissions selected by its issuer.
 
+## Device enrollment rollout
+
+The device credential store is a staged foundation, not an enabled authentication mode. Current relay pairing exchanges connection information; direct clients still use the existing daemon-password policy. Do not remove the supervised Team password requirement based on the presence of device records.
+
+Before enabling device authentication, integrate admission across direct HTTP, WebSocket, and relay connections. Revalidate open sessions when a credential is revoked or its principal's grants change; checking only the handshake leaves existing connections authorized. Persist authentication-mode selection separately so a missing credential file cannot restore anonymous access. Bootstrap approval must come from a trusted local path, never from an anonymous socket requesting owner authority.
+
+One daemon process owns device-store mutations. Future CLI and desktop adapters must route changes through that owner rather than opening concurrent file writers. Clients retain their generated credential before redeeming an invitation so a lost enrollment response can be retried without storing plaintext credentials on the daemon.
+
+Device credentials identify approved clients. They do not isolate provider processes running as the same OS user, which may read client storage or modify daemon files. Credential storage and provider isolation need separate threat models.
+
 ## Permissions
 
 | Permission          | Authority                                                                                                 |
