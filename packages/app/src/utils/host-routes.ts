@@ -485,6 +485,7 @@ interface NewWorkspaceRouteOptions {
   displayName?: string;
   projectId?: string;
   draftId?: string;
+  assignmentId?: string;
 }
 
 function buildNewWorkspaceSearch(options: NewWorkspaceRouteOptions): string {
@@ -504,6 +505,10 @@ function buildNewWorkspaceSearch(options: NewWorkspaceRouteOptions): string {
   }
   if (options.draftId) {
     params.set("draftId", options.draftId);
+  }
+  if (options.assignmentId) {
+    if (!serverId) throw new Error("Assignment Workspace setup requires a serverId");
+    params.set("assignmentId", options.assignmentId);
   }
   return params.toString();
 }

@@ -34,6 +34,7 @@ import { confirmDialog } from "@/utils/confirm-dialog";
 import {
   buildAssignmentRoute,
   buildAssignmentsRoute,
+  buildNewWorkspaceRoute,
   buildTeamRunRoute,
 } from "@/utils/host-routes";
 import { toErrorMessage } from "@/utils/error-messages";
@@ -489,6 +490,12 @@ function AssignmentDetail({
   const error = currentKey && actionError?.key === currentKey ? actionError.message : null;
   const edit = useCallback(() => assignment && onEdit(assignment), [assignment, onEdit]);
   const run = useCallback(() => assignment && onRun(assignment), [assignment, onRun]);
+  const createWorkspace = useCallback(() => {
+    if (!assignment) return;
+    router.push(
+      buildNewWorkspaceRoute({ serverId: assignment.serverId, assignmentId: assignment.id }),
+    );
+  }, [assignment]);
   const openWorkItem = useCallback(async () => {
     if (!assignment?.workItem) return;
     setActionError(null);
@@ -560,6 +567,16 @@ function AssignmentDetail({
           <Text style={styles.detailHost}>{assignment.serverName}</Text>
         </View>
         <View style={styles.detailActions}>
+          <Button
+            variant="outline"
+            size="sm"
+            leftIcon={Plus}
+            onPress={createWorkspace}
+            disabled={!editable}
+            testID={`assignment-create-workspace-${testIdentity}`}
+          >
+            {t("assignments.actions.createWorkspace")}
+          </Button>
           <Button
             variant="default"
             size="sm"

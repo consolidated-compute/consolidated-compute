@@ -306,7 +306,16 @@ export const ja: TranslationResources = {
     loadMore: "さらに読み込む",
     refresh: "更新",
   },
-  assignments: en.assignments,
+  assignments: {
+    ...en.assignments,
+    workspaceCreated:
+      "ワークスペースを作成しました。起動設定を確認するには、チームを実行を選択してください。",
+    actions: {
+      ...en.assignments.actions,
+      createWorkspace: "ワークスペースを作成",
+      backToAssignment: "アサインメントに戻る",
+    },
+  },
   teams: {
     ...en.teams,
     title: "チーム",

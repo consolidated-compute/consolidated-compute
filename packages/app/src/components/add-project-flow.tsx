@@ -331,6 +331,7 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
   const availableHosts = useMemo<AddProjectHost[]>(
     () =>
       hosts.flatMap((host) => {
+        if (request.assignmentId && host.serverId !== request.preferredHostId) return [];
         if (connectionStatuses.get(host.serverId) !== "online") return [];
         const canAddProject =
           projectAddByHost.get(host.serverId) === true &&
@@ -356,6 +357,8 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
       localServerId,
       projectAddByHost,
       stableProjectIdentityByHost,
+      request.assignmentId,
+      request.preferredHostId,
     ],
   );
   const [state, setState] = useState(() =>
@@ -456,10 +459,11 @@ export function AddProjectFlow({ request, onClose }: AddProjectFlowProps) {
           projectId: project.projectId,
           sourceDirectory: project.projectRootPath,
           displayName: project.projectDisplayName,
+          assignmentId: request.assignmentId,
         }),
       );
     },
-    [onClose],
+    [onClose, request.assignmentId],
   );
 
   const openAddedProject = useCallback(

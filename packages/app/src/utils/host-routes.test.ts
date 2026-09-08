@@ -256,6 +256,15 @@ describe("global routes", () => {
     expect(buildNewWorkspaceRoute({ serverId: "local" })).toBe("/new?serverId=local");
   });
 
+  it("keeps an Assignment return target scoped to its host", () => {
+    expect(buildNewWorkspaceRoute({ serverId: "host a", assignmentId: "asgn/1" })).toBe(
+      "/new?serverId=host+a&assignmentId=asgn%2F1",
+    );
+    expect(() => buildNewWorkspaceRoute({ assignmentId: "asgn_1" })).toThrow(
+      "Assignment Workspace setup requires a serverId",
+    );
+  });
+
   it("buildNewWorkspaceRoute accepts initial project context", () => {
     expect(
       buildNewWorkspaceRoute({

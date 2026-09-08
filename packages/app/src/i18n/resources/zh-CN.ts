@@ -303,7 +303,15 @@ export const zhCN: TranslationResources = {
     loadMore: "加载更多",
     refresh: "刷新",
   },
-  assignments: en.assignments,
+  assignments: {
+    ...en.assignments,
+    workspaceCreated: "工作区已创建。准备好检查启动设置后，请选择运行团队。",
+    actions: {
+      ...en.assignments.actions,
+      createWorkspace: "创建工作区",
+      backToAssignment: "返回任务",
+    },
+  },
   teams: {
     ...en.teams,
     title: "团队",

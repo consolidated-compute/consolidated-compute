@@ -303,7 +303,16 @@ export const ar: TranslationResources = {
     loadMore: "تحميل المزيد",
     refresh: "تحديث",
   },
-  assignments: en.assignments,
+  assignments: {
+    ...en.assignments,
+    workspaceCreated:
+      "تم إنشاء مساحة العمل. اختر تشغيل الفريق عندما تكون مستعدًا لمراجعة إعدادات التشغيل.",
+    actions: {
+      ...en.assignments.actions,
+      createWorkspace: "إنشاء مساحة عمل",
+      backToAssignment: "العودة إلى التكليف",
+    },
+  },
   teams: {
     ...en.teams,
     title: "الفرق",

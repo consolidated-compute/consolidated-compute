@@ -306,7 +306,16 @@ export const ptBR: TranslationResources = {
     loadMore: "Carregar mais",
     refresh: "Atualizar",
   },
-  assignments: en.assignments,
+  assignments: {
+    ...en.assignments,
+    workspaceCreated:
+      "Espaço de trabalho criado. Selecione Executar equipe para revisar as configurações de início.",
+    actions: {
+      ...en.assignments.actions,
+      createWorkspace: "Criar espaço de trabalho",
+      backToAssignment: "Voltar à atribuição",
+    },
+  },
   teams: {
     ...en.teams,
     title: "Equipes",

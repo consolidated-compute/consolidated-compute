@@ -305,7 +305,16 @@ export const ru: TranslationResources = {
     loadMore: "Загрузить ещё",
     refresh: "Обновить",
   },
-  assignments: en.assignments,
+  assignments: {
+    ...en.assignments,
+    workspaceCreated:
+      "Рабочее пространство создано. Выберите запуск команды, когда будете готовы проверить параметры запуска.",
+    actions: {
+      ...en.assignments.actions,
+      createWorkspace: "Создать рабочее пространство",
+      backToAssignment: "Вернуться к заданию",
+    },
+  },
   teams: {
     ...en.teams,
     title: "Команды",

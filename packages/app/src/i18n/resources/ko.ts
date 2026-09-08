@@ -304,7 +304,15 @@ export const ko: TranslationResources = {
     loadMore: "더 불러오기",
     refresh: "새로 고침",
   },
-  assignments: en.assignments,
+  assignments: {
+    ...en.assignments,
+    workspaceCreated: "워크스페이스를 만들었습니다. 시작 설정을 검토하려면 팀 실행을 선택하세요.",
+    actions: {
+      ...en.assignments.actions,
+      createWorkspace: "워크스페이스 만들기",
+      backToAssignment: "할당으로 돌아가기",
+    },
+  },
   teams: {
     ...en.teams,
     title: "팀",

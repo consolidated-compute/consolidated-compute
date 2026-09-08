@@ -302,6 +302,8 @@ export const en = {
     refresh: "Refresh",
   },
   assignments: {
+    workspaceCreated:
+      "Workspace created. Select Run Team when you are ready to review its launch settings.",
     title: "Assignments",
     newAssignment: "New Assignment",
     selectAssignment: "Select an Assignment to inspect its execution history",
@@ -326,6 +328,8 @@ export const en = {
     },
     actions: {
       create: "Create Assignment",
+      createWorkspace: "Create Workspace",
+      backToAssignment: "Back to Assignment",
       save: "Save",
       edit: "Edit",
       run: "Run Team",

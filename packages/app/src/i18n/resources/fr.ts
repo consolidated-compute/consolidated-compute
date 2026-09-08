@@ -307,7 +307,16 @@ export const fr: TranslationResources = {
     loadMore: "Charger plus",
     refresh: "Actualiser",
   },
-  assignments: en.assignments,
+  assignments: {
+    ...en.assignments,
+    workspaceCreated:
+      "Espace de travail créé. Sélectionnez Exécuter l’équipe pour vérifier les paramètres de lancement.",
+    actions: {
+      ...en.assignments.actions,
+      createWorkspace: "Créer un espace de travail",
+      backToAssignment: "Retour à l’affectation",
+    },
+  },
   teams: {
     ...en.teams,
     title: "Équipes",
