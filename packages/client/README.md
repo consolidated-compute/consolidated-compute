@@ -32,7 +32,7 @@ Read the [SDK documentation](https://paseo.sh/docs/sdk) for agents, workspaces, 
 
 The client needs a WebSocket implementation. Modern browsers and Node.js 22 provide one globally.
 
-Use a WebSocket URL ending in `/ws`, such as `ws://127.0.0.1:6767/ws`. Pass `password` when the daemon requires authentication.
+Use a WebSocket URL ending in `/ws`, such as `ws://127.0.0.1:6767/ws`. Pass `password` for a daemon-password connection, or `deviceCredential` for an already-enrolled device. See [daemon permissions](../../docs/permissions.md#device-enrollment-rollout) for enrollment status and relay requirements.
 
 ## Stability
 
