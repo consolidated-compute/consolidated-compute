@@ -1,4 +1,6 @@
 import { Command, Option } from "commander";
+import { issueSecuritySetupCode } from "@getpaseo/server";
+import { resolveLocalPaseoHome } from "./local-daemon.js";
 import { startCommand } from "./start.js";
 import { runStatusCommand } from "./status.js";
 import { runStopCommand } from "./stop.js";
@@ -20,6 +22,16 @@ export function createDaemonCommand(): Command {
 
   daemon.addCommand(startCommand());
   daemon.addCommand(pairCommand());
+  daemon
+    .command("setup-code")
+    .description("Create a single-use code for initial host security setup in CC")
+    .option("--home <path>", "Paseo home directory")
+    .action((options: { home?: string }) => {
+      const code = issueSecuritySetupCode(resolveLocalPaseoHome(options.home));
+      process.stdout.write(
+        `Enter this code in CC's Set up host security form:\n${code}\nExpires in five minutes. Keep it private.\n`,
+      );
+    });
 
   addJsonAndDaemonHostOptions(
     daemon.command("reload").description("Reload config.json without restarting the daemon"),

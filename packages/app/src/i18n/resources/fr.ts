@@ -1,7 +1,10 @@
 import { en, type TranslationResources } from "./en";
 import { pluginSettings } from "./plugin-settings";
 
+import { hostSecurity } from "./host-security";
+
 export const fr: TranslationResources = {
+  hostSecurity: hostSecurity["fr"],
   common: {
     back: "Dos",
     loading: "Chargement...",

@@ -1,9 +1,9 @@
 import { type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { app, ipcMain, powerMonitor } from "electron";
+import { app, BrowserWindow, ipcMain, powerMonitor } from "electron";
 import log from "electron-log/main";
-import { resolvePaseoHome, spawnProcess } from "@getpaseo/server";
+import { resolvePaseoHome, spawnProcess, completeLocalSecuritySetup } from "@getpaseo/server";
 import {
   copyAttachmentFileToManagedStorage,
   deleteManagedAttachmentFile,
@@ -526,6 +526,22 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
       runningUnderARM64Translation: isRunningUnderARM64Translation(),
     }),
     desktop_daemon_status: () => resolveDesktopDaemonStatus(),
+    setup_desktop_daemon_security: async (args) => {
+      const status = await resolveDesktopDaemonStatus();
+      if (
+        !status.desktopManaged ||
+        status.serverId !== args?.serverId ||
+        status.status !== "running"
+      ) {
+        throw new Error("Select this desktop's running local host to configure security.");
+      }
+      if (process.env.PASEO_PASSWORD)
+        throw new Error("Remove PASEO_PASSWORD from the host launcher first.");
+      if (typeof args?.password !== "string") throw new Error("A password is required.");
+      const home = getPaseoHome();
+      completeLocalSecuritySetup(home, args.password);
+      return { restartRequired: true };
+    },
     start_desktop_daemon: () => startDaemon(),
     stop_desktop_daemon: (args) => stopDesktopDaemon(parseDesktopDaemonStopReason(args)),
     restart_desktop_daemon: () => restartDaemon(),
@@ -580,14 +596,17 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
 export function registerDaemonManager(): void {
   const handlers = createDaemonCommandHandlers();
 
-  ipcMain.handle(
-    "paseo:invoke",
-    async (_event, command: string, args?: Record<string, unknown>) => {
-      const handler = handlers[command];
-      if (!handler) {
-        throw new Error(`Unknown desktop command: ${command}`);
-      }
-      return await handler(args);
-    },
-  );
+  ipcMain.handle("paseo:invoke", async (event, command: string, args?: Record<string, unknown>) => {
+    if (
+      command === "setup_desktop_daemon_security" &&
+      (!BrowserWindow.fromWebContents(event.sender) || event.senderFrame !== event.sender.mainFrame)
+    ) {
+      throw new Error("Security setup requires the desktop app's main frame.");
+    }
+    const handler = handlers[command];
+    if (!handler) {
+      throw new Error(`Unknown desktop command: ${command}`);
+    }
+    return await handler(args);
+  });
 }

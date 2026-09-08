@@ -1712,6 +1712,7 @@ export class HostRuntimeStore {
     password?: string;
     label?: string;
     existingClient?: DaemonClient;
+    awaitPersistence?: boolean;
   }): Promise<HostProfile> {
     const endpoint = normalizeHostPort(input.endpoint);
     const password = input.password?.trim();
@@ -1726,6 +1727,7 @@ export class HostRuntimeStore {
         ...(password ? { password } : {}),
       },
       existingClient: input.existingClient,
+      awaitPersistence: input.awaitPersistence,
     });
   }
 
@@ -1967,6 +1969,7 @@ export class HostRuntimeStore {
     label?: string;
     connection: HostConnection;
     existingClient?: DaemonClient;
+    awaitPersistence?: boolean;
   }): Promise<HostProfile> {
     const now = new Date().toISOString();
     const next = upsertHostConnectionInProfiles({
@@ -1989,9 +1992,13 @@ export class HostRuntimeStore {
           ])
         : undefined,
     });
-    void this.persistHosts().catch((error) =>
-      console.error("[HostRuntime] Failed to persist host registry", error),
-    );
+    if (input.awaitPersistence) {
+      await this.persistHosts();
+    } else {
+      void this.persistHosts().catch((error) =>
+        console.error("[HostRuntime] Failed to persist host registry", error),
+      );
+    }
     const profile = next.find((daemon) => daemon.serverId === input.serverId);
     if (!profile) {
       throw new Error(`Host ${input.serverId} was not inserted`);

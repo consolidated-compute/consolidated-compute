@@ -3180,6 +3180,43 @@ describe("HostRuntimeStore", () => {
     }
   });
 
+  it("awaited credential persistence reports storage failures and permits retry", async () => {
+    const memory = createMemoryHostRuntimeStorage();
+    let fail = true;
+    const store = new HostRuntimeStore({
+      storage: {
+        ...memory,
+        async setItem(key, value) {
+          if (fail) throw new Error("storage unavailable");
+          await memory.setItem(key, value);
+        },
+      },
+      deps: {
+        createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
+        connectToDaemon: async ({ host }) => ({
+          client: makeConnectedProbeClient(5) as unknown as DaemonClient,
+          serverId: host.serverId,
+          hostname: null,
+        }),
+        getClientId: async () => "cid_security_storage",
+      },
+    });
+    try {
+      const input = {
+        serverId: "security-host",
+        endpoint: "localhost:12345",
+        password: "saved-password",
+        awaitPersistence: true,
+      };
+      await expect(store.upsertDirectConnection(input)).rejects.toThrow("storage unavailable");
+      fail = false;
+      await store.upsertDirectConnection(input);
+      expect(await memory.getItem("@paseo:daemon-registry")).toContain("saved-password");
+    } finally {
+      store.syncHosts([]);
+    }
+  });
+
   it("upsertDirectConnection stores SSL and password settings", async () => {
     const store = new HostRuntimeStore({
       deps: {
