@@ -274,6 +274,9 @@ export const fr: TranslationResources = {
     },
   },
   githubWork: {
+    linkedAssignments: "Affectations liées",
+    noLinkedAssignments: "Aucune affectation liée sur cet hôte",
+    openAssignment: "Ouvrir",
     title: "Travail GitHub",
     host: "Hôte",
     selectHost: "Sélectionner un hôte",

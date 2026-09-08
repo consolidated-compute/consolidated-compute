@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { rename, unlink, writeFile } from "node:fs/promises";
 import { expect, test } from "../support/fixtures";
 import { getServerId } from "../support/helpers/server-id";
 import { connectAssignmentsClient } from "../support/helpers/assignments";
@@ -72,6 +73,147 @@ async function selectHost(page: Page): Promise<void> {
   await page.getByTestId(`github-work-host-${getServerId()}`).click();
   await expect(page.getByTestId("github-work-repository-R_browser")).toBeVisible();
 }
+
+async function previewFirstIssue(page: Page): Promise<void> {
+  await page.goto("/github-work");
+  await selectHost(page);
+  await page.getByTestId("github-work-repository-R_browser").click();
+  await page.getByTestId("github-work-item-I_browser_1").click();
+  await expect(page.getByTestId("github-work-linked-assignments")).toBeVisible();
+}
+
+const ISSUE_REFERENCE = {
+  sourceId: "github",
+  sourceLabel: "GitHub",
+  resourceType: "issue",
+  resourceId: "github.com:R_browser:I_browser_1",
+  identifier: "#1",
+  title: "Browse without a Workspace 1",
+  url: "https://github.com/fixture/browser/issues/1",
+};
+
+test("reopens linked Assignments and refreshes remote changes without creating duplicates", async ({
+  page,
+}, testInfo) => {
+  const client = await connectAssignmentsClient();
+  try {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await previewFirstIssue(page);
+    const links = page.getByTestId("github-work-linked-assignments");
+    await expect(links).toContainText("No linked Assignments on this host");
+    const { assignment } = await client.createAssignment({
+      title: "Existing implementation",
+      objective: "Keep this authored objective and its history",
+      workItem: { ...ISSUE_REFERENCE, url: "https://github.com/old-owner/old-name/issues/1" },
+    });
+    const { assignment: prior } = await client.createAssignment({
+      title: "Earlier investigation",
+      objective: "Retain the completed investigation",
+      workItem: { ...ISSUE_REFERENCE, resourceId: "fixture/browser:issue:1" },
+    });
+    await client.completeAssignment({ assignmentId: prior.id, expectedRevision: prior.revision });
+    const { assignment: unrelated } = await client.createAssignment({
+      title: "Different repository with reused URL",
+      objective: "Do not confuse stable identities",
+      workItem: { ...ISSUE_REFERENCE, resourceId: "github.com:R_different:I_different" },
+    });
+    // No manual refresh: another client's creation and lifecycle changes must arrive.
+    const currentRow = links.getByTestId(`github-work-assignment-${assignment.id}`);
+    await expect(currentRow).toContainText(assignment.title);
+    await expect(links.getByTestId(`github-work-assignment-${prior.id}`)).toContainText(
+      "Completed",
+    );
+    await expect(links.getByTestId(`github-work-assignment-${unrelated.id}`)).toHaveCount(0);
+    await expect(page.getByTestId("github-work-create-assignment")).toBeEnabled();
+    await testInfo.attach("linked-assignments-desktop", {
+      body: await page.screenshot({ path: testInfo.outputPath("linked-assignments-desktop.png") }),
+      contentType: "image/png",
+    });
+    await currentRow.getByRole("button").click();
+    await expect(page).toHaveURL(new RegExp(`/assignments/${getServerId()}/${assignment.id}$`));
+    await expect(
+      page.getByTestId(`assignment-detail-${getServerId()}-${assignment.id}`),
+    ).toContainText(assignment.objective);
+    expect((await client.getAssignment(assignment.id)).assignment).toEqual(assignment);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await previewFirstIssue(page);
+    await expect(links.getByTestId(`github-work-assignment-${prior.id}`)).toContainText(
+      "Completed",
+    );
+    await links
+      .getByTestId(`github-work-assignment-${prior.id}`)
+      .getByRole("button")
+      .click({ trial: true });
+    await testInfo.attach("linked-assignments-compact", {
+      body: await page.screenshot({ path: testInfo.outputPath("linked-assignments-compact.png") }),
+      contentType: "image/png",
+    });
+    await links.getByTestId(`github-work-assignment-${prior.id}`).getByRole("button").click();
+    await expect(page).toHaveURL(new RegExp(`/assignments/${getServerId()}/${prior.id}$`));
+    expect(
+      (await client.listAssignments()).assignments
+        .filter((entry) => entry.workItem?.resourceId === ISSUE_REFERENCE.resourceId)
+        .map((entry) => entry.id),
+    ).toEqual([assignment.id]);
+  } finally {
+    await client.close();
+  }
+});
+
+test("linked Assignment loading reports storage errors and recovers without hiding healthy records", async ({
+  page,
+}) => {
+  const testHome = process.env.E2E_PASEO_HOME;
+  if (!testHome) throw new Error("Missing isolated worker home");
+  const records = path.join(testHome, "assignments", "records");
+  const savedRecords = path.join(testHome, "assignments", "records-saved");
+  const corruptRecord = path.join(records, "broken.json");
+  const client = await connectAssignmentsClient();
+  try {
+    await client.createAssignment({
+      title: "Healthy record beside corrupt sibling",
+      objective: "Keep readable Assignments available",
+      workItem: {
+        ...ISSUE_REFERENCE,
+        resourceType: "change_request",
+        resourceId: "github.com:R_browser:PR_browser_1",
+        url: "https://github.com/fixture/browser/pull/1",
+      },
+    });
+  } finally {
+    await client.close();
+  }
+  await rename(records, savedRecords);
+  let blocked = false;
+  try {
+    await writeFile(records, "The collection path is not a directory");
+    blocked = true;
+    await page.goto("/github-work");
+    await selectHost(page);
+    await page.getByTestId("github-work-repository-R_browser").click();
+    await page.getByTestId("github-work-pull-requests").click();
+    await page.getByTestId("github-work-item-PR_browser_1").click();
+    const links = page.getByTestId("github-work-linked-assignments");
+    await expect(links.getByRole("alert")).toContainText("Could not load Assignments");
+    await expect(links).not.toContainText("No linked Assignments on this host");
+  } finally {
+    if (blocked) await unlink(records);
+    await rename(savedRecords, records);
+  }
+  const links = page.getByTestId("github-work-linked-assignments");
+  await links.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(links.getByRole("alert")).toHaveCount(0);
+  await writeFile(corruptRecord, "not JSON");
+  try {
+    await links.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(links).toContainText("broken.json");
+    await expect(links).toContainText("Healthy record beside corrupt sibling");
+    await expect(links).not.toContainText("No linked Assignments on this host");
+  } finally {
+    await unlink(corruptRecord);
+  }
+});
 
 test("browse repository work and create an Assignment without a Workspace", async ({
   page,

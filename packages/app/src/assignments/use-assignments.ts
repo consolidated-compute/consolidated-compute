@@ -101,6 +101,24 @@ export function useAssignments(): UseAssignmentsResult {
   };
 }
 
+export function useAssignmentList(serverId: string) {
+  const client = useHostRuntimeClient(serverId);
+  const connected = useHostRuntimeIsConnected(serverId);
+  return useFetchQuery<AssignmentListData>({
+    queryKey: assignmentListQueryKey(serverId),
+    dataShape: "list",
+    staleTimeMs: 0,
+    retry: false,
+    refetchInterval: ASSIGNMENT_LIST_REFRESH_INTERVAL_MS,
+    enabled: Boolean(client && connected),
+    queryFn: async () => {
+      if (!client) throw new Error("Host is offline");
+      const payload = await client.listAssignments();
+      return { assignments: payload.assignments, issues: payload.issues ?? [] };
+    },
+  });
+}
+
 export function useAssignment(
   serverId: string,
   assignmentId: string,

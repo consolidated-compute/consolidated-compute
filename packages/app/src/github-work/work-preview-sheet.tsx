@@ -3,10 +3,12 @@ import { Linking, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
 import { ExternalLink } from "lucide-react-native";
+import type { AssignmentDto } from "@getpaseo/protocol/assignment/types";
 import { AdaptiveModalSheet } from "@/components/adaptive-modal-sheet";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { toErrorMessage } from "@/utils/error-messages";
+import { LinkedAssignments } from "./linked-assignments";
 import {
   repositoryWorkToAssignmentReference,
   type Repository,
@@ -16,21 +18,25 @@ import {
 const SNAP_POINTS = ["90%"];
 
 interface WorkPreviewSheetProps {
+  serverId: string;
   item: RepositoryWorkItem;
   repository: Repository;
   hostLabel: string;
   canCreate: boolean;
   onClose: () => void;
   onCreate: () => void;
+  onOpenAssignment: (serverId: string, assignment: AssignmentDto) => void;
 }
 
 export function WorkPreviewSheet({
+  serverId,
   item,
   repository,
   hostLabel,
   canCreate,
   onClose,
   onCreate,
+  onOpenAssignment,
 }: WorkPreviewSheetProps): ReactElement {
   const { t } = useTranslation();
   const header = useMemo(
@@ -116,6 +122,15 @@ export function WorkPreviewSheet({
         ) : null}
         {!canCreate ? <Text style={styles.meta}>{t("githubWork.updateAssignments")}</Text> : null}
         {!reference ? <Alert variant="error" title={t("githubWork.invalidWorkItem")} /> : null}
+        {canCreate ? (
+          <LinkedAssignments
+            key={serverId}
+            serverId={serverId}
+            hostLabel={hostLabel}
+            item={item}
+            onOpen={onOpenAssignment}
+          />
+        ) : null}
         {item.bodyTruncated ? (
           <Text style={styles.meta}>{t("githubWork.bodyTruncated")}</Text>
         ) : null}

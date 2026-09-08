@@ -270,6 +270,9 @@ export const zhCN: TranslationResources = {
     },
   },
   githubWork: {
+    linkedAssignments: "关联的任务",
+    noLinkedAssignments: "此主机上没有关联的任务",
+    openAssignment: "打开",
     title: "GitHub 工作",
     host: "主机",
     selectHost: "选择主机",

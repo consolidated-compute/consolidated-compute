@@ -225,12 +225,14 @@ function BrowserSelection({
     <>
       {available && state.selection?.kind === "preview" && state.repository ? (
         <WorkPreviewSheet
+          serverId={serverId}
           item={state.selection.item}
           repository={state.repository}
           hostLabel={state.host?.label ?? serverId}
           canCreate={assignmentsSupported}
           onClose={closeSelection}
           onCreate={createAssignment}
+          onOpenAssignment={saved}
         />
       ) : null}
       {state.selection?.kind === "create" && reference ? (

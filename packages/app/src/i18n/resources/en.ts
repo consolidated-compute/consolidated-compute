@@ -268,6 +268,9 @@ export const en = {
     },
   },
   githubWork: {
+    linkedAssignments: "Linked Assignments",
+    noLinkedAssignments: "No linked Assignments on this host",
+    openAssignment: "Open",
     title: "GitHub Work",
     host: "Host",
     selectHost: "Select a host",

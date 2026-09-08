@@ -273,6 +273,9 @@ export const es: TranslationResources = {
     },
   },
   githubWork: {
+    linkedAssignments: "Asignaciones vinculadas",
+    noLinkedAssignments: "No hay asignaciones vinculadas en este host",
+    openAssignment: "Abrir",
     title: "Trabajo de GitHub",
     host: "Host",
     selectHost: "Selecciona un host",

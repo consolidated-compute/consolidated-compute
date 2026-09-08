@@ -273,6 +273,9 @@ export const ja: TranslationResources = {
     },
   },
   githubWork: {
+    linkedAssignments: "リンクされたアサインメント",
+    noLinkedAssignments: "このホストにリンクされたアサインメントはありません",
+    openAssignment: "開く",
     title: "GitHub の作業",
     host: "ホスト",
     selectHost: "ホストを選択",
