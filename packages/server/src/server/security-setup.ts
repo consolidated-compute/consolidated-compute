@@ -1,8 +1,9 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { writePrivateFileAtomicSync } from "./private-files.js";
 import path from "node:path";
 import { z } from "zod";
-import { DaemonSetupPasswordSchema } from "@getpaseo/protocol/daemon-security";
+import { DaemonSetupPasswordSchema, SecuritySetupError } from "@getpaseo/protocol/daemon-security";
 import { hashDaemonPassword, isBearerTokenValid } from "./auth.js";
 import { loadPersistedConfig, savePersistedConfig } from "./persisted-config.js";
 
@@ -27,29 +28,20 @@ function digest(code: string): Buffer {
   return createHash("sha256").update(code).digest();
 }
 
-// Trusted local callers can retry after a lost IPC response without issuing
-// another code. This is deliberately not exposed over HTTP.
-export function completeLocalSecuritySetup(home: string, password: string): void {
-  const saved = loadPersistedConfig(home).daemon?.auth?.password;
-  if (saved) {
-    if (isBearerTokenValid({ password: saved, token: password })) return;
-    throw new Error("This host already has a saved password.");
-  }
-  completeSecuritySetup({ home, code: issueSecuritySetupCode(home), password });
-}
-
 // Only local CLI/desktop code may issue this capability. Never expose issuance
 // over the passwordless control plane or log the plaintext capability.
 export function issueSecuritySetupCode(home: string, now = Date.now()): string {
-  if (loadPersistedConfig(home).daemon?.auth?.password) {
-    throw new Error("This host already has a saved password.");
-  }
+  // Issuance may be retried after a lost save response; redemption still cannot
+  // replace an existing password. CLI/desktop write only this challenge file.
   const code = randomBytes(24).toString("hex");
-  writeFileSync(
-    challengePath(home),
-    JSON.stringify({ digest: digest(code).toString("hex"), expiresAt: now + CODE_LIFETIME_MS }),
-    { mode: 0o600 },
-  );
+  try {
+    writePrivateFileAtomicSync(
+      challengePath(home),
+      JSON.stringify({ digest: digest(code).toString("hex"), expiresAt: now + CODE_LIFETIME_MS }),
+    );
+  } catch {
+    throw new SecuritySetupError("storage_unavailable");
+  }
   return code;
 }
 
@@ -59,30 +51,36 @@ export function completeSecuritySetup(input: {
   password: string;
   now?: number;
 }): void {
-  const password = SecuritySetupInputSchema.shape.password.parse(input.password);
+  const parsedPassword = DaemonSetupPasswordSchema.safeParse(input.password);
+  if (!parsedPassword.success) throw new SecuritySetupError("password_invalid");
+  const password = parsedPassword.data;
   const persisted = loadPersistedConfig(input.home);
   let challenge: z.infer<typeof challengeSchema>;
   try {
     challenge = challengeSchema.parse(JSON.parse(readFileSync(challengePath(input.home), "utf8")));
   } catch {
-    throw new Error("Request a new setup code on the daemon host.");
+    throw new SecuritySetupError("code_required");
   }
   if (
     challenge.expiresAt <= (input.now ?? Date.now()) ||
     !timingSafeEqual(digest(input.code), Buffer.from(challenge.digest, "hex"))
   ) {
-    throw new Error("Setup code is invalid or expired. Request a new code on the daemon host.");
+    throw new SecuritySetupError("code_invalid_or_expired");
   }
   if (persisted.daemon?.auth?.password) {
     // A lost response may be retried with the same capability and password,
     // but this endpoint never replaces an existing credential.
     if (isBearerTokenValid({ password: persisted.daemon.auth.password, token: password })) return;
-    throw new Error("This host already has a saved password.");
+    throw new SecuritySetupError("already_configured");
   }
   // Synchronous read/validate/write: two requests cannot both claim this home.
   // The saved password is the consumed marker, even if the process exits next.
-  savePersistedConfig(input.home, {
-    ...persisted,
-    daemon: { ...persisted.daemon, auth: { password: hashDaemonPassword(password) } },
-  });
+  try {
+    savePersistedConfig(input.home, {
+      ...persisted,
+      daemon: { ...persisted.daemon, auth: { password: hashDaemonPassword(password) } },
+    });
+  } catch {
+    throw new SecuritySetupError("storage_unavailable");
+  }
 }

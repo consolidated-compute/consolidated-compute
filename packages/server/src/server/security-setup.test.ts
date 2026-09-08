@@ -2,11 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, test } from "vitest";
-import {
-  completeSecuritySetup,
-  completeLocalSecuritySetup,
-  issueSecuritySetupCode,
-} from "./security-setup.js";
+import { completeSecuritySetup, issueSecuritySetupCode } from "./security-setup.js";
 import { isBearerTokenValid } from "./auth.js";
 import { loadPersistedConfig, savePersistedConfig } from "./persisted-config.js";
 
@@ -20,13 +16,20 @@ afterEach(() => {
   for (const dir of homes.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-test("trusted desktop setup can retry without changing an existing password", () => {
+test("local approval can be renewed after a lost save response without replacing the password", () => {
   const dir = home();
-  completeLocalSecuritySetup(dir, "local-setup-password");
+  completeSecuritySetup({
+    home: dir,
+    code: issueSecuritySetupCode(dir),
+    password: "local-setup-password",
+  });
   const saved = loadPersistedConfig(dir);
-  completeLocalSecuritySetup(dir, "local-setup-password");
+  const code = issueSecuritySetupCode(dir);
+  completeSecuritySetup({ home: dir, code, password: "local-setup-password" });
   expect(loadPersistedConfig(dir)).toEqual(saved);
-  expect(() => completeLocalSecuritySetup(dir, "another-password")).toThrow("already");
+  expect(() => completeSecuritySetup({ home: dir, code, password: "another-password" })).toThrow(
+    "already",
+  );
 });
 
 test("a local single-use code saves only a password hash and preserves other settings", () => {
@@ -49,7 +52,6 @@ test("a local single-use code saves only a password hash and preserves other set
   expect(() =>
     completeSecuritySetup({ home: dir, code, password: "another-secure-password", now: 2001 }),
   ).toThrow("already");
-  expect(() => issueSecuritySetupCode(dir)).toThrow("already");
 });
 
 test("invalid, expired and replaced codes cannot configure the host", () => {

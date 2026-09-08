@@ -80,6 +80,7 @@ import {
   isBearerTokenValid,
   type DaemonAuthConfig,
 } from "./auth.js";
+import type { DeviceAccessStore } from "./device-access.js";
 import {
   WebSocketRuntimeMetricsWindow,
   type WebSocketRuntimeCounters,
@@ -622,6 +623,10 @@ export class VoiceAssistantWebSocketServer {
   private readonly teamRepository: TeamRepository | null;
   private readonly teamRunService: TeamRunService | null;
   private readonly assignmentRepository: AssignmentRepository | null;
+  private readonly directDeviceTokens = new WeakMap<WebSocketLike, string | null>();
+  private readonly deniedDeviceSockets = new WeakSet<WebSocketLike>();
+  private readonly devicePrincipals = new Set<string>();
+  private readonly unsubscribeDeviceAccess: (() => void) | undefined;
 
   constructor(
     server: HTTPServer,
@@ -672,8 +677,12 @@ export class VoiceAssistantWebSocketServer {
     teamRepository?: TeamRepository,
     teamRunService?: TeamRunService,
     assignmentRepository?: AssignmentRepository,
+    private readonly deviceAccess?: DeviceAccessStore,
   ) {
     this.logger = logger.child({ module: "websocket-server" });
+    this.unsubscribeDeviceAccess = deviceAccess?.onAccessChanged(() =>
+      this.invalidateDeviceSessions(),
+    );
     this.workspaceSetupRuntime = workspaceSetupRuntime;
     this.advertiseDaemonStatusRpc = wsConfig.daemonStatusRpc !== false;
     this.advertiseRelayConfig = wsConfig.relayConfig !== false;
@@ -931,6 +940,21 @@ export class VoiceAssistantWebSocketServer {
     request: IncomingMessage,
     password: string | undefined,
   ): Promise<void> {
+    if (this.deviceAccess) {
+      let enabled: boolean;
+      try {
+        enabled = this.deviceAccess.isDeviceAuthenticationEnabled();
+      } catch {
+        ws.close(WS_CLOSE_DAEMON_AUTH_FAILED, "Device authentication unavailable");
+        return;
+      }
+      if (enabled) {
+        const protocol = extractWsBearerProtocol(request.headers["sec-websocket-protocol"]);
+        this.directDeviceTokens.set(ws, extractWsBearerToken(protocol));
+        await this.attachSocket(ws, request);
+        return;
+      }
+    }
     if (password) {
       const requestMetadata = extractSocketRequestMetadata(request);
       const protocol = extractWsBearerProtocol(request.headers["sec-websocket-protocol"]);
@@ -958,6 +982,58 @@ export class VoiceAssistantWebSocketServer {
       return;
     }
     this.sendMessageToSockets(this.sessions.keys(), message);
+  }
+
+  private denyDeviceSocket(ws: WebSocketLike): void {
+    this.directDeviceTokens.delete(ws);
+    this.deniedDeviceSockets.add(ws);
+    this.clearPendingConnection(ws);
+    try {
+      ws.close(WS_CLOSE_DAEMON_AUTH_FAILED, "Device credential required or access changed");
+    } catch {
+      this.logger.warn("Failed to close rejected device socket");
+    }
+  }
+
+  private invalidateDeviceSessions(): void {
+    if (!this.deviceAccess?.isDeviceAuthenticationEnabled()) return;
+    for (const [ws, pending] of this.pendingConnections) {
+      if (pending.identity.transport !== "hub" && !this.pluginSocketIds.has(ws))
+        this.denyDeviceSocket(ws);
+    }
+    for (const connection of new Set(this.externalSessionsByKey.values())) {
+      if (connection.principalId !== "owner" && !this.devicePrincipals.has(connection.principalId))
+        continue;
+      connection.session.setPermissions([]);
+      for (const ws of connection.sockets) this.denyDeviceSocket(ws);
+      void this.cleanupConnection(connection, "Device authority changed").catch((error) => {
+        this.logger.warn({ err: error }, "Failed to clean up device session");
+      });
+    }
+  }
+
+  private admitDeviceHello(
+    ws: WebSocketLike,
+    message: WSHelloMessage,
+    pending: PendingConnection,
+  ): boolean {
+    if (pending.identity.transport === "hub" || this.pluginSocketIds.has(ws)) return true;
+    try {
+      if (!this.deviceAccess?.isDeviceAuthenticationEnabled()) return true;
+      const token = this.directDeviceTokens.get(ws) ?? message.deviceCredential ?? null;
+      const admission = this.deviceAccess.authenticate(token);
+      this.directDeviceTokens.delete(ws);
+      if (!admission) {
+        this.denyDeviceSocket(ws);
+        return false;
+      }
+      pending.admission = admission;
+      this.devicePrincipals.add(admission.principalId);
+      return true;
+    } catch {
+      this.denyDeviceSocket(ws);
+      return false;
+    }
   }
 
   public listSessions(): Session[] {
@@ -1054,6 +1130,7 @@ export class VoiceAssistantWebSocketServer {
   }
 
   public async close(): Promise<void> {
+    this.unsubscribeDeviceAccess?.();
     this.prepareForShutdown();
     this.unsubscribeSpeechReadiness?.();
     this.unsubscribeSpeechReadiness = null;
@@ -1170,6 +1247,7 @@ export class VoiceAssistantWebSocketServer {
   }
 
   private async sendBinaryToClientAndWait(ws: WebSocketLike, frame: Uint8Array): Promise<void> {
+    if (this.deniedDeviceSockets.has(ws)) throw new Error("Device access changed");
     try {
       const sent = await sendBoundedPhysicalFrameAndWait({
         socket: ws,
@@ -1192,6 +1270,7 @@ export class VoiceAssistantWebSocketServer {
     frameBytes: number,
     recordSent: () => void,
   ): void {
+    if (this.deniedDeviceSockets.has(ws)) return;
     try {
       const sent = sendBoundedPhysicalFrame({
         socket: ws,
@@ -1525,6 +1604,7 @@ export class VoiceAssistantWebSocketServer {
     pending: PendingConnection;
   }): void {
     const { ws, message, pending } = params;
+    if (!this.admitDeviceHello(ws, message, pending)) return;
 
     if (message.protocolVersion !== WS_PROTOCOL_VERSION) {
       this.clearPendingConnection(ws);
@@ -1663,6 +1743,7 @@ export class VoiceAssistantWebSocketServer {
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
       features: {
         daemonSecuritySetup: true,
+        deviceAuthentication: this.deviceAccess?.isDeviceAuthenticationEnabled() === true,
         // COMPAT(directorySync): added in v0.3.x, remove gate after 2027-02-12.
         directorySync: true,
         // COMPAT(workspaceLabels): added in v0.5.0, remove after 2027-08-14.
@@ -1892,6 +1973,7 @@ export class VoiceAssistantWebSocketServer {
       error?: Error;
     },
   ): Promise<void> {
+    this.directDeviceTokens.delete(ws);
     this.applicationSocketLease.release(ws);
     const identity = this.socketIdentities.get(ws);
     const identityFields = identity ? toConnectionLogFields(identity) : {};
@@ -2080,10 +2162,7 @@ export class VoiceAssistantWebSocketServer {
     const { ws, parsed, parsedMessage, pendingConnection, activeConnection, log } = args;
     this.incrementRuntimeCounter("validationFailed");
     if (pendingConnection) {
-      pendingConnection.connectionLogger.warn(
-        { error: parsedMessage.error.message },
-        "Rejected pending message before hello",
-      );
+      pendingConnection.connectionLogger.warn("Rejected pending message before hello");
       this.clearPendingConnection(ws);
       try {
         ws.close(WS_CLOSE_INVALID_HELLO, "Invalid hello");
@@ -2174,6 +2253,7 @@ export class VoiceAssistantWebSocketServer {
           ws,
           data: buffer,
           error,
+          source: "session",
           log: activeConnection.connectionLogger,
         });
       },
@@ -2215,6 +2295,7 @@ export class VoiceAssistantWebSocketServer {
     ws: WebSocketLike,
     data: Buffer | ArrayBuffer | Buffer[] | string,
   ): void {
+    if (this.deniedDeviceSockets.has(ws)) return;
     if (
       this.connectionLifecycle === "stopping" ||
       (this.connectionLifecycle === "starting" && !this.pluginSocketIds.has(ws))
@@ -2296,7 +2377,13 @@ export class VoiceAssistantWebSocketServer {
 
       if (message.type === "session") {
         void this.dispatchSessionMessage(ws, activeConnection, message).catch((error: unknown) => {
-          this.handleRawMessageError({ ws, data, error, log: activeConnection.connectionLogger });
+          this.handleRawMessageError({
+            ws,
+            data,
+            error,
+            source: "session",
+            log: activeConnection.connectionLogger,
+          });
         });
       }
     } catch (error) {
@@ -2357,34 +2444,31 @@ export class VoiceAssistantWebSocketServer {
     ws: WebSocketLike;
     data: Buffer | ArrayBuffer | Buffer[] | string;
     error: unknown;
+    source?: "session";
     log: pino.Logger;
   }): void {
     const { ws, data, error, log } = params;
-    const err = error instanceof Error ? error : new Error(String(error));
-    const { rawPayload, parsedPayload } = this.decodeRawMessagePayloadForError(data);
-
-    const trimmedRawPayload =
-      typeof rawPayload === "string" && rawPayload.length > 2000
-        ? `${rawPayload.slice(0, 2000)}... (truncated)`
-        : rawPayload;
-
-    log.error(
-      {
-        err,
-        rawPayload: trimmedRawPayload,
-        parsedPayload,
-      },
-      "Failed to parse/handle message",
-    );
-
+    // Pending frames can contain enrollment credentials, including malformed JSON.
+    // Do not log the payload or parser error, which may quote the secret.
     if (this.pendingConnections.has(ws)) {
+      log.warn("Failed to parse/handle pending handshake");
+      this.deniedDeviceSockets.add(ws);
       this.clearPendingConnection(ws);
       try {
         ws.close(WS_CLOSE_INVALID_HELLO, "Invalid hello");
       } catch {
-        // ignore close errors
+        log.warn("Failed to close invalid handshake");
       }
       return;
+    }
+    const err = error instanceof Error ? error : new Error(String(error));
+    const parsedPayload = this.decodeRawMessagePayloadForError(data);
+    // Only dispatched session failures are safe to log in full. A hello can
+    // fail after admission, and raw parser errors may quote credentials.
+    if (params.source === "session" && this.sessions.has(ws)) {
+      log.error({ err }, "Failed to parse/handle message");
+    } else {
+      log.error({ errorName: err.name }, "Failed to parse/handle message");
     }
 
     const requestInfo = extractRequestInfoFromUnknownWsInbound(parsedPayload);
@@ -2416,24 +2500,13 @@ export class VoiceAssistantWebSocketServer {
     );
   }
 
-  private decodeRawMessagePayloadForError(data: Buffer | ArrayBuffer | Buffer[] | string): {
-    rawPayload: string | null;
-    parsedPayload: unknown;
-  } {
-    let rawPayload: string | null = null;
-    let parsedPayload: unknown = null;
+  private decodeRawMessagePayloadForError(data: Buffer | ArrayBuffer | Buffer[] | string): unknown {
     try {
       const buffer = bufferFromWsData(data);
-      rawPayload = buffer.toString();
-      parsedPayload = JSON.parse(rawPayload);
-    } catch (payloadError) {
-      rawPayload = rawPayload ?? "<unreadable>";
-      parsedPayload = parsedPayload ?? rawPayload;
-      const payloadErr =
-        payloadError instanceof Error ? payloadError : new Error(String(payloadError));
-      this.logger.error({ err: payloadErr }, "Failed to decode raw payload");
+      return JSON.parse(buffer.toString());
+    } catch {
+      return null;
     }
-    return { rawPayload, parsedPayload };
   }
 
   private incrementRuntimeCounter(counter: keyof WebSocketRuntimeCounters): void {

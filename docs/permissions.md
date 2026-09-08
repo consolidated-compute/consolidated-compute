@@ -15,6 +15,24 @@ A principal is the durable identity the daemon authorizes. A credential proves t
 
 A pairing invitation is neither. It is an expiring, single-use exchange that creates a principal and credential with the permissions selected by its issuer.
 
+## Device enrollment rollout
+
+Device enrollment is not exposed in the client UI yet. Existing installations keep their daemon-password policy; relay pairing still exchanges connection information rather than enrolling a device. Do not remove the supervised Team password requirement based on the presence of device records.
+
+The daemon enforces an explicit device-authentication opt-in across protected HTTP, direct WebSocket, and decrypted relay sockets. Direct clients can send the credential as a bearer subprotocol; relay clients must put `deviceCredential` in the encrypted hello, never in headers sent to the relay. Missing or revoked credentials do not fall back to password or anonymous owner access. Hub and in-process plugin sessions retain their independent admission paths. Agent MCP retains its internal capabilities; a device credential does not grant the unscoped MCP catalog.
+
+The SDK accepts either `deviceCredential` or `password`; combining them is a configuration error. Header-capable transports can also use `authHeader` for independent proxy authentication; the device credential is never placed in that transport header. For relay URLs, supply `e2ee.enabled` and the daemon public key from the connection offer. The SDK carries the credential inside the encrypted channel and rejects device connections to a relay without encryption. It requires the daemon's runtime `deviceAuthentication` acknowledgement before releasing queued requests, so an older passwordless daemon cannot silently admit this client anonymously. It does not enroll or persist credentials for you.
+
+The app can retain an enrolled credential on its host profile and use it for connection probes and reconnects across transports. Saving completes before the runtime switches credentials. This uses the existing app-local host registry, not an OS keychain or a provider-isolated secret store. A saved device credential takes precedence over legacy connection passwords, including when damaged; there is no password fallback. Diagnostic exports redact it. Enrollment controls remain outstanding, so this is not completed device onboarding.
+
+Activation records the opt-in separately in `device-authentication.json`, after an enrolled credential has `access.manage`. Enrollment alone does not opt in. Losing `device-access.json` after activation is a storage failure, not permission to recreate an empty registry or admit anonymous clients. Revoking the final credential does not disable authentication. Bootstrap approval must come from a trusted local path, never from an anonymous socket requesting owner authority. Activation and recovery UI remain unimplemented; do not manually opt in a production host whose clients cannot reconnect with device credentials.
+
+Authority changes close user sockets and in-flight HTTP responses, including connections admitted before activation. Clients reconnect to obtain current grants; the daemon does not retain their plaintext credential after the handshake. In device mode, file downloads require both the device's `workspace.read` grant and the existing download capability. The app sends the device credential in an HTTP header, never a download URL, and refuses redirects. Downloads still require a reachable direct TCP endpoint; a relay or SSH connection alone is not an HTTP download tunnel. Browser downloads fetch the authorized body before handing it to the browser; native downloads stream to a local file. HTTP status requires `daemon.read`; new HTTP routes must declare their authority rather than inheriting a blanket allow. These checks do not revoke work already accepted before an authority change.
+
+One daemon process owns device-store mutations. Future CLI and desktop adapters must route changes through that owner rather than opening concurrent file writers. Clients retain their generated credential before redeeming an invitation so a lost enrollment response can be retried without storing plaintext credentials on the daemon.
+
+Device credentials identify approved clients. They do not isolate provider processes running as the same OS user, which may read client storage or modify daemon files. Credential storage and provider isolation need separate threat models.
+
 ## Permissions
 
 | Permission          | Authority                                                                                                 |

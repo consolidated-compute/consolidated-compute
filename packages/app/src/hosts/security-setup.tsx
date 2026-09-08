@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { useTranslation } from "react-i18next";
@@ -11,7 +11,8 @@ import { settingsStyles } from "@/styles/settings";
 import { SettingsSection } from "@/screens/settings/settings-section";
 import { useIsCompactFormFactor } from "@/constants/layout";
 import { confirmDialog } from "@/utils/confirm-dialog";
-import { openSecuritySetupForm, type SecuritySetupPort } from "./security-setup-model";
+import { type SecuritySetupPort } from "./security-setup-model";
+import { useSecuritySetupModel } from "./use-security-setup-model";
 import { createSecuritySetupPort } from "./security-setup-port";
 import { securitySetupUrl } from "./security-setup-endpoint";
 
@@ -21,7 +22,11 @@ export function HostSecuritySetup({ serverId }: { serverId: string }) {
   const host = useHosts().find((h) => h.serverId === serverId);
   const snapshot = useHostRuntimeSnapshot(serverId);
   const local = useLocalDaemonServerIdState();
-  const [port, setPort] = useState<SecuritySetupPort | null>(null);
+  const [opened, setOpened] = useState<{
+    serverId: string;
+    port: SecuritySetupPort;
+    needsCode: boolean;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const desktop = local.status === "resolved" && local.serverId === serverId;
   const connection = host?.connections.find((c) => c.id === snapshot?.activeConnectionId);
@@ -29,22 +34,22 @@ export function HostSecuritySetup({ serverId }: { serverId: string }) {
     if (connection?.type !== "directTcp") return;
     try {
       securitySetupUrl(connection);
-      setPort(createSecuritySetupPort(serverId, desktop, connection));
+      setOpened({
+        serverId,
+        port: createSecuritySetupPort(serverId, desktop, connection),
+        needsCode: !desktop,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Setup unavailable.");
     }
   }, [connection, desktop, serverId]);
-  if (port)
-    return (
-      <SecuritySetupForm
-        key={serverId}
-        port={port}
-        needsCode={local.status !== "resolved" || local.serverId !== serverId}
-      />
-    );
+  if (opened?.serverId === serverId)
+    return <SecuritySetupForm key={serverId} port={opened.port} needsCode={opened.needsCode} />;
   if (features?.teamSupervisionAdmission === "available") return null;
   if (!features?.teamSupervision) return null;
   const supported =
+    host?.deviceCredential === undefined &&
+    features.deviceAuthentication !== true &&
     features.daemonSecuritySetup === true &&
     features.teamSupervisionAdmission === "authentication_required" &&
     local.status === "resolved" &&
@@ -78,9 +83,7 @@ export function HostSecuritySetup({ serverId }: { serverId: string }) {
 
 function SecuritySetupForm({ port, needsCode }: { port: SecuritySetupPort; needsCode: boolean }) {
   const { t } = useTranslation();
-  const [model] = useState(() => openSecuritySetupForm(port, needsCode));
-  useEffect(() => () => model.close(), [model]);
-  const state = useSyncExternalStore(model.subscribe, model.getState, model.getState);
+  const { model, state } = useSecuritySetupModel(port, needsCode);
   const size = useIsCompactFormFactor() ? "md" : "sm";
   const busy = state.stage === "saving" || state.stage === "restarting";
   const restart = useCallback(async () => {

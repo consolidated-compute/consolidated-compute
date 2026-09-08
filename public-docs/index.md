@@ -32,13 +32,15 @@ Run the following commands from that checkout. With no `PASEO_HOME` override, re
 
 ## Set up host security
 
-After connecting, open the host's settings and choose **Set up host security**. Electron configures its managed local host directly. In a browser, first generate a private, five-minute setup code on the daemon host using the same checkout and home:
+Ordinary pairing does not require a password by default. CC supervised Teams require a saved host password; device enrollment does not replace that requirement.
+
+For supervised Teams, connect first, open the host's settings and choose **Set up host security**. Electron approves setup for its managed local host through the desktop app. In a browser, first generate a private, five-minute setup code on the daemon host using the same checkout and home:
 
 ```bash
 npm run cli -- daemon setup-code
 ```
 
-Enter the code and a new password in the form. Browser setup requires a direct HTTPS or loopback connection. The daemon stores a bcrypt hash, and the app remembers the password for this connection. Setup is for hosts without a saved password; use `npm run cli -- daemon set-password` locally to change an existing password.
+Enter the code and a new password in the form. Setup requires a direct HTTPS or loopback connection, not a relay-only or SSH-only connection. The daemon stores a bcrypt hash, and the app remembers the password in its local connection registry, not an OS keychain. If saving or reconnecting fails, keep the form open and retry before restarting. Setup cannot replace an existing password or modify device-authenticated access; use `npm run cli -- daemon set-password` locally to change an existing password.
 
 Do not launch the daemon with `PASEO_PASSWORD` set, even if you also saved a password. Supervised admission rejects that configuration because a same-user provider process may read the daemon's startup environment. Remove an inherited `PASEO_PASSWORD` from the shell or service configuration before starting the daemon.
 

@@ -5,6 +5,7 @@ import { invokeDesktopCommand } from "@/desktop/electron/invoke";
 import { restartDesktopDaemon } from "@/desktop/daemon/desktop-daemon";
 import type { SecuritySetupPort } from "./security-setup-model";
 import { securitySetupUrl } from "./security-setup-endpoint";
+import { SecuritySetupError, SecuritySetupFailureSchema } from "@getpaseo/protocol/daemon-security";
 
 export function createSecuritySetupPort(
   serverId: string,
@@ -15,37 +16,53 @@ export function createSecuritySetupPort(
   const endpoint = securitySetupUrl(connection);
   return {
     async save(code, password) {
+      const host = runtime.getHosts().find((entry) => entry.serverId === serverId);
+      if (
+        !host ||
+        !host.connections.some(
+          (c) =>
+            c.id === connection.id &&
+            c.type === "directTcp" &&
+            c.endpoint === connection.endpoint &&
+            c.useTls === connection.useTls,
+        )
+      )
+        throw new SecuritySetupError("host_mismatch");
+      if (host.deviceCredential !== undefined)
+        throw new SecuritySetupError("device_authentication_enabled");
       if (desktop) {
-        await invokeDesktopCommand("setup_desktop_daemon_security", { serverId, password });
-      } else {
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ serverId, code, password }),
-          signal: AbortSignal.timeout(15_000),
-          redirect: "error",
-          credentials: "omit",
-        });
-        const result: unknown = await response.json();
-        if (!response.ok)
-          throw new Error(
-            typeof result === "object" &&
-              result !== null &&
-              "error" in result &&
-              typeof result.error === "string"
-              ? result.error
-              : "Host security setup failed.",
-          );
+        const approval = await invokeDesktopCommand<{ code: string }>(
+          "create_desktop_daemon_security_code",
+          { serverId },
+        );
+        code = approval.code;
       }
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serverId, code, password }),
+        signal: AbortSignal.timeout(15_000),
+        redirect: "error",
+        credentials: "omit",
+      });
+      const result: unknown = await response.json();
+      if (!response.ok) {
+        const failure = SecuritySetupFailureSchema.safeParse(result);
+        throw new SecuritySetupError(failure.success ? failure.data.code : "request_failed");
+      }
+      if (
+        typeof result !== "object" ||
+        result === null ||
+        !("restartRequired" in result) ||
+        result.restartRequired !== true
+      )
+        throw new SecuritySetupError("request_failed");
     },
     async remember(password) {
-      await runtime.upsertDirectConnection({
-        serverId,
-        endpoint: connection.endpoint,
-        useTls: connection.useTls,
-        password,
-        awaitPersistence: true,
-      });
+      await runtime.saveSetupPassword(serverId, connection.id, password);
+      if (runtime.getSnapshot(serverId)?.connectionStatus !== "online") {
+        throw new SecuritySetupError("request_failed");
+      }
     },
     async restart() {
       const startedAt = Date.now();

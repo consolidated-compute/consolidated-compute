@@ -1,6 +1,8 @@
 import { useSyncExternalStore, useMemo } from "react";
 import { useSyncExternalStoreWithSelector } from "use-sync-external-store/shim/with-selector";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { HostDeviceCredentialError, resolveHostAuthentication } from "@/types/host-authentication";
+import { SecuritySetupError } from "@getpaseo/protocol/daemon-security";
 import equal from "fast-deep-equal/es6";
 import {
   DaemonClient,
@@ -507,6 +509,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
       const desktopTransportFactory = createDesktopDaemonTransportFactory();
       const webSocketConfig = { webSocketFactory: createAppWebSocketFactory() };
       const base = {
+        ...resolveHostAuthentication(host, connection),
         suppressSendErrors: true,
         clientId,
         clientType: "mobile",
@@ -532,7 +535,6 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
         return new DaemonClient({
           ...base,
           transportFactory: desktopTransportFactory,
-          ...(connection.daemonPassword ? { password: connection.daemonPassword } : {}),
           url: buildDesktopDaemonTransportUrl({
             transportType: "ssh",
             host: connection.host,
@@ -548,7 +550,6 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
           url: buildDaemonWebSocketUrl(connection.endpoint, {
             useTls: connection.useTls ?? false,
           }),
-          ...(connection.password ? { password: connection.password } : {}),
         });
       }
       return new DaemonClient({
@@ -567,6 +568,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
     },
     connectToDaemon: ({ host, connection, timeoutMs }) =>
       connectToDaemon(connection, {
+        deviceCredential: host.deviceCredential,
         ...(host.serverId ? { serverId: host.serverId } : {}),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
         capabilities: appCapabilities,
@@ -596,7 +598,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
 export class HostRuntimeController {
   private host: HostProfile;
   private deps: HostRuntimeControllerDeps;
-  private onReconcileServerId: ((oldId: string, newId: string) => void) | null;
+  private onReconcileServerId: ((oldId: string, newId: string) => void | Promise<void>) | null;
   private connectionMachineState: HostRuntimeConnectionMachineState;
   private connectionEpoch = 0;
   private snapshot: HostRuntimeSnapshot;
@@ -619,7 +621,7 @@ export class HostRuntimeController {
   constructor(input: {
     host: HostProfile;
     deps?: HostRuntimeControllerDeps;
-    onReconcileServerId?: (oldId: string, newId: string) => void;
+    onReconcileServerId?: (oldId: string, newId: string) => void | Promise<void>;
   }) {
     this.host = input.host;
     this.deps = input.deps ?? createDefaultDeps();
@@ -704,6 +706,7 @@ export class HostRuntimeController {
 
   async updateHost(host: HostProfile): Promise<void> {
     const activeConnectionId = this.snapshot.activeConnectionId;
+    const authenticationChanged = this.host.deviceCredential !== host.deviceCredential;
     const previousActiveConnection = findConnectionById(this.host, activeConnectionId);
     this.host = host;
     this.trackConnectionFirstSeen();
@@ -712,7 +715,7 @@ export class HostRuntimeController {
       activeConnectionId &&
       previousActiveConnection &&
       nextActiveConnection &&
-      !equal(previousActiveConnection, nextActiveConnection)
+      (authenticationChanged || !equal(previousActiveConnection, nextActiveConnection))
     ) {
       this.connectionLastProbedAt.delete(activeConnectionId);
       await this.switchToConnection({ connectionId: activeConnectionId });
@@ -985,18 +988,17 @@ export class HostRuntimeController {
                 host: this.host,
                 connection,
               });
+              connectedClient = client;
+              shouldCloseClient = true;
               if (serverId !== this.host.serverId) {
                 if (isPlaceholderServerId(this.host.serverId) && this.onReconcileServerId) {
-                  this.onReconcileServerId(this.host.serverId, serverId);
+                  await this.onReconcileServerId(this.host.serverId, serverId);
                 } else {
-                  await client.close().catch(() => undefined);
                   throw new Error(
                     `Connection resolved to ${serverId}, expected ${this.host.serverId}.`,
                   );
                 }
               }
-              connectedClient = client;
-              shouldCloseClient = true;
             }
 
             if (!this.isCurrentProbeRequest(requestVersion)) {
@@ -1390,7 +1392,7 @@ export class HostRuntimeStore {
   private hostListVersion = 0;
   private hostRegistryLoaded = false;
   private hosts: HostProfile[] = [];
-  private hostAppearanceMutationTail: Promise<void> = Promise.resolve();
+  private hostProfileMutationTail: Promise<void> = Promise.resolve();
   private hostRegistryStatus: HostRegistryStatus = "loading";
   private deps: HostRuntimeControllerDeps;
   private lastConnectionStatusByServer = new Map<string, HostRuntimeConnectionStatus>();
@@ -1450,7 +1452,7 @@ export class HostRuntimeStore {
 
   private async runBoot(): Promise<void> {
     const override = readConfiguredLocalDaemonOverride();
-    await this.loadFromStorage();
+    await this.serializeHostMutation(() => this.loadFromStorage());
     this.markHostRegistryLoaded();
 
     let isE2E: string | null = null;
@@ -1520,7 +1522,7 @@ export class HostRuntimeStore {
       this.hostRegistryStatus = "ready";
       this.emitHostList();
       if (shouldPersistHosts) {
-        void this.persistHosts().catch((error) =>
+        await this.persistHosts().catch((error) =>
           console.error("[HostRuntime] Failed to persist host registry", error),
         );
       }
@@ -1631,7 +1633,11 @@ export class HostRuntimeStore {
     }
   }
 
-  reconcileServerId(oldServerId: string, newServerId: string): void {
+  reconcileServerId(oldServerId: string, newServerId: string): Promise<void> {
+    return this.serializeHostMutation(() => this.applyReconciledServerId(oldServerId, newServerId));
+  }
+
+  private async applyReconciledServerId(oldServerId: string, newServerId: string): Promise<void> {
     if (oldServerId === newServerId) {
       return;
     }
@@ -1642,6 +1648,17 @@ export class HostRuntimeStore {
     if (this.controllers.has(newServerId)) {
       return;
     }
+
+    const next = this.hosts.map((host) =>
+      host.serverId === oldServerId
+        ? {
+            ...host,
+            serverId: newServerId,
+            updatedAt: new Date().toISOString(),
+          }
+        : host,
+    );
+    await this.persistHosts(next);
 
     rekeyMap(this.controllers, oldServerId, newServerId);
     rekeyMap(this.lastConnectionStatusByServer, oldServerId, newServerId);
@@ -1693,16 +1710,9 @@ export class HostRuntimeStore {
       this.serverListeners.set(newServerId, merged);
     }
 
-    this.hosts = this.hosts.map((host) =>
-      host.serverId === oldServerId
-        ? { ...host, serverId: newServerId, updatedAt: new Date().toISOString() }
-        : host,
-    );
+    this.hosts = next;
     this.emitHostList();
     this.emit(newServerId);
-    void this.persistHosts().catch((error) =>
-      console.error("[HostRuntime] Failed to persist host registry", error),
-    );
   }
 
   async upsertDirectConnection(input: {
@@ -1712,7 +1722,6 @@ export class HostRuntimeStore {
     password?: string;
     label?: string;
     existingClient?: DaemonClient;
-    awaitPersistence?: boolean;
   }): Promise<HostProfile> {
     const endpoint = normalizeHostPort(input.endpoint);
     const password = input.password?.trim();
@@ -1727,7 +1736,6 @@ export class HostRuntimeStore {
         ...(password ? { password } : {}),
       },
       existingClient: input.existingClient,
-      awaitPersistence: input.awaitPersistence,
     });
   }
 
@@ -1874,70 +1882,115 @@ export class HostRuntimeStore {
     });
   }
 
-  private async updateHost(
-    serverId: string,
-    apply: (host: HostProfile) => HostProfile,
-  ): Promise<void> {
-    const updatedAt = new Date().toISOString();
-    const next = this.hosts.map((host) =>
-      host.serverId === serverId ? { ...apply(host), updatedAt } : host,
-    );
-    this.setHostsAndSync(next);
-    await this.persistHosts();
-  }
-
   async renameHost(serverId: string, label: string): Promise<void> {
-    await this.updateHost(serverId, (host) => ({ ...host, label }));
+    await this.updatePersistedHost(serverId, (host) => ({ ...host, label }));
   }
 
   async setHostColor(serverId: string, color: HostColor): Promise<void> {
-    await this.updateHostAppearance(serverId, (host) => ({
+    await this.updatePersistedHost(serverId, (host) => ({
       ...host,
       appearance: { ...host.appearance, color },
     }));
   }
 
   async setHostBadgeDisplay(serverId: string, badgeDisplay: HostBadgeDisplay): Promise<void> {
-    await this.updateHostAppearance(serverId, (host) => ({
+    await this.updatePersistedHost(serverId, (host) => ({
       ...host,
       appearance: { ...host.appearance, badgeDisplay },
     }));
   }
 
-  private updateHostAppearance(
+  private updatePersistedHost(
     serverId: string,
     apply: (host: HostProfile) => HostProfile,
   ): Promise<void> {
-    const update = this.hostAppearanceMutationTail.then(() =>
-      this.applyHostAppearance(serverId, apply),
+    return this.serializeHostMutation(() => this.applyPersistedHost(serverId, apply));
+  }
+
+  private serializeHostMutation<T>(mutation: () => Promise<T>): Promise<T> {
+    const update = this.hostProfileMutationTail.then(mutation);
+    this.hostProfileMutationTail = update.then(
+      () => undefined,
+      () => undefined,
     );
-    this.hostAppearanceMutationTail = update.catch(() => undefined);
     return update;
   }
 
-  private async applyHostAppearance(
+  private async applyPersistedHost(
     serverId: string,
     apply: (host: HostProfile) => HostProfile,
+    awaitConnection = false,
   ): Promise<void> {
     const updatedAt = new Date().toISOString();
     const next = this.hosts.map((host) =>
       host.serverId === serverId ? { ...apply(host), updatedAt } : host,
     );
     await this.persistHosts(next);
-    this.setHostsAndSync(next);
+    let update = Promise.resolve();
+    this.setHostsAndSync(next, {
+      onHostUpdate: awaitConnection
+        ? (id, promise) => {
+            if (id === serverId) update = promise;
+          }
+        : undefined,
+    });
+    await update;
   }
 
   async removeHost(serverId: string): Promise<void> {
+    await this.serializeHostMutation(() => this.applyRemoveHost(serverId));
+  }
+
+  private async applyRemoveHost(serverId: string): Promise<void> {
     await this.revokePushNotifications({ client: this.getClient(serverId), serverId });
     const remaining = this.hosts.filter((daemon) => daemon.serverId !== serverId);
+    await this.persistHosts(remaining);
     this.setHostsAndSync(remaining);
-    await this.persistHosts();
+  }
+
+  async saveDeviceCredential(serverId: string, deviceCredential: string): Promise<void> {
+    if (!/^cc_device_[A-Za-z0-9_-]{43}$/.test(deviceCredential)) {
+      throw new HostDeviceCredentialError("invalid_credential");
+    }
+    await this.serializeHostMutation(() => {
+      if (!this.hosts.some((host) => host.serverId === serverId)) {
+        throw new HostDeviceCredentialError("host_not_found");
+      }
+      return this.applyPersistedHost(serverId, (host) => ({ ...host, deviceCredential }));
+    });
+  }
+
+  async saveSetupPassword(serverId: string, connectionId: string, password: string): Promise<void> {
+    await this.serializeHostMutation(() => {
+      const host = this.hosts.find((entry) => entry.serverId === serverId);
+      if (!host || !host.connections.some((c) => c.id === connectionId && c.type === "directTcp")) {
+        throw new SecuritySetupError("host_mismatch");
+      }
+      if (host.deviceCredential !== undefined)
+        throw new SecuritySetupError("device_authentication_enabled");
+      return this.applyPersistedHost(
+        serverId,
+        (current) => ({
+          ...current,
+          connections: current.connections.map((connection) =>
+            connection.id === connectionId && connection.type === "directTcp"
+              ? { ...connection, password }
+              : connection,
+          ),
+        }),
+        true,
+      );
+    });
   }
 
   async removeConnection(serverId: string, connectionId: string): Promise<void> {
+    await this.serializeHostMutation(() => this.applyRemoveConnection(serverId, connectionId));
+  }
+
+  private async applyRemoveConnection(serverId: string, connectionId: string): Promise<void> {
     const host = this.hosts.find((candidate) => candidate.serverId === serverId);
     if (host?.connections.length === 1 && host.connections[0]?.id === connectionId) {
-      await this.removeHost(serverId);
+      await this.applyRemoveHost(serverId);
       return;
     }
     const now = new Date().toISOString();
@@ -1960,8 +2013,8 @@ export class HostRuntimeStore {
         } satisfies HostProfile;
       })
       .filter((entry): entry is HostProfile => entry !== null);
+    await this.persistHosts(next);
     this.setHostsAndSync(next);
-    await this.persistHosts();
   }
 
   private async upsertHostConnection(input: {
@@ -1969,7 +2022,20 @@ export class HostRuntimeStore {
     label?: string;
     connection: HostConnection;
     existingClient?: DaemonClient;
-    awaitPersistence?: boolean;
+  }): Promise<HostProfile> {
+    try {
+      return await this.serializeHostMutation(() => this.applyHostConnection(input));
+    } catch (error) {
+      await input.existingClient?.close().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async applyHostConnection(input: {
+    serverId: string;
+    label?: string;
+    connection: HostConnection;
+    existingClient?: DaemonClient;
   }): Promise<HostProfile> {
     const now = new Date().toISOString();
     const next = upsertHostConnectionInProfiles({
@@ -1979,6 +2045,7 @@ export class HostRuntimeStore {
       connection: input.connection,
       now,
     });
+    await this.persistHosts(next);
     this.setHostsAndSync(next, {
       initialConnectionByServerId: input.existingClient
         ? new Map([
@@ -1992,13 +2059,6 @@ export class HostRuntimeStore {
           ])
         : undefined,
     });
-    if (input.awaitPersistence) {
-      await this.persistHosts();
-    } else {
-      void this.persistHosts().catch((error) =>
-        console.error("[HostRuntime] Failed to persist host registry", error),
-      );
-    }
     const profile = next.find((daemon) => daemon.serverId === input.serverId);
     if (!profile) {
       throw new Error(`Host ${input.serverId} was not inserted`);
@@ -2009,6 +2069,7 @@ export class HostRuntimeStore {
   private setHostsAndSync(
     hosts: HostProfile[],
     options?: {
+      onHostUpdate?: (serverId: string, update: Promise<void>) => void;
       initialConnectionByServerId?: Map<
         string,
         { connectionId: string; existingClient: DaemonClient }
@@ -2034,6 +2095,7 @@ export class HostRuntimeStore {
   syncHosts(
     hosts: HostProfile[],
     options?: {
+      onHostUpdate?: (serverId: string, update: Promise<void>) => void;
       initialConnectionByServerId?: Map<
         string,
         { connectionId: string; existingClient: DaemonClient }
@@ -2062,7 +2124,8 @@ export class HostRuntimeStore {
       const initialConnection = options?.initialConnectionByServerId?.get(host.serverId);
       const existing = this.controllers.get(host.serverId);
       if (existing) {
-        void existing.updateHost(host);
+        const update = existing.updateHost(host);
+        options?.onHostUpdate?.(host.serverId, update);
         if (initialConnection) {
           void existing.activateConnection(initialConnection).catch(() => {
             void initialConnection.existingClient.close().catch(() => undefined);
@@ -2105,7 +2168,7 @@ export class HostRuntimeStore {
         this.syncDirectoryConnection(snapshot.serverId);
         this.emit(snapshot.serverId);
       });
-      void controller
+      const startup = controller
         .start(
           initialConnection
             ? {
@@ -2117,6 +2180,7 @@ export class HostRuntimeStore {
           const message = error instanceof Error ? error.message : String(error);
           controller.markStartupError(message);
         });
+      options?.onHostUpdate?.(host.serverId, startup);
       this.emit(host.serverId);
     }
   }

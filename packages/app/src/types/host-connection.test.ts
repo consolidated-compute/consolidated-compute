@@ -10,6 +10,69 @@ import {
   type HostProfile,
 } from "./host-connection";
 
+it("excludes foreign endpoints when an exact credentialed host also matches", () => {
+  const incoming: HostConnection = {
+    id: "direct:shared:6767",
+    type: "directTcp",
+    endpoint: "shared:6767",
+  };
+  const own: HostConnection = { id: "direct:own:6767", type: "directTcp", endpoint: "own:6767" };
+  const foreign: HostConnection = { id: "ssh:foreign", type: "remoteSsh", host: "foreign" };
+  const deviceCredential = `cc_device_${"a".repeat(43)}`;
+  const next = upsertHostConnectionInProfiles({
+    profiles: [
+      { ...makeHost("owner"), deviceCredential, connections: [own] },
+      { ...makeHost("foreign"), connections: [incoming, foreign] },
+    ],
+    serverId: "owner",
+    connection: incoming,
+  });
+  expect(next).toHaveLength(1);
+  expect(next[0].deviceCredential).toBe(deviceCredential);
+  expect(next[0].connections).toEqual([own, incoming]);
+});
+
+it.each([`cc_device_${"a".repeat(43)}`, "damaged", ""])(
+  "retains saved device authentication (%s)",
+  (deviceCredential) => {
+    const host = normalizeStoredHostProfile({
+      serverId: "device-host",
+      deviceCredential,
+      connections: [{ type: "directTcp", endpoint: "localhost:6767" }],
+    });
+    expect(host?.deviceCredential).toBe(deviceCredential);
+    expect(normalizeStoredHostProfile(JSON.parse(JSON.stringify(host)))?.deviceCredential).toBe(
+      deviceCredential,
+    );
+  },
+);
+
+it("retains a credential for the same host but never transfers it by endpoint matching", () => {
+  const connection: HostConnection = {
+    id: "direct:localhost:6767",
+    type: "directTcp",
+    endpoint: "localhost:6767",
+  };
+  const original: HostProfile = {
+    ...makeHost("original"),
+    connections: [connection],
+    deviceCredential: `cc_device_${"a".repeat(43)}`,
+  };
+  const same = upsertHostConnectionInProfiles({
+    profiles: [original],
+    serverId: "original",
+    connection,
+    label: "renamed",
+  });
+  expect(same[0].deviceCredential).toBe(original.deviceCredential);
+  const different = upsertHostConnectionInProfiles({
+    profiles: [original],
+    serverId: "replacement",
+    connection,
+  });
+  expect(different[0].deviceCredential).toBeUndefined();
+});
+
 function makeHost(serverId: string): HostProfile {
   return {
     serverId,

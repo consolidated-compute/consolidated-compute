@@ -58,3 +58,35 @@ test("sets up browser host security and reconnects only after confirmed restart"
     await daemon.close();
   }
 });
+
+test("explains the environment-password override without offering ineffective setup", async ({
+  page,
+}) => {
+  const password = "isolated-environment-password";
+  const daemon = await startIsolatedHostDaemon("security-override-browser", {
+    environment: { NODE_ENV: "development", PASEO_PASSWORD: password },
+  });
+  try {
+    await seedSavedSettingsHosts(page, [
+      {
+        serverId: daemon.serverId,
+        label: "Override host",
+        endpoint: `127.0.0.1:${daemon.port}`,
+        password,
+      },
+    ]);
+    await gotoAppShell(page);
+    await openSettings(page);
+    await openSettingsHostSection(page, daemon.serverId, "host");
+    await expect(
+      page.getByText(
+        "Remove PASEO_PASSWORD from the host launcher and restart safely before setup.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(page.getByTestId("host-security-open")).toHaveCount(0);
+    expect((await fetch(`http://127.0.0.1:${daemon.port}/api/status`)).status).toBe(401);
+  } finally {
+    await daemon.close();
+  }
+});

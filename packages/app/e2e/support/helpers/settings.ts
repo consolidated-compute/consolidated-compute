@@ -16,6 +16,7 @@ interface SavedSettingsHostInput {
   serverId: string;
   label: string;
   endpoint: string;
+  password?: string;
 }
 
 const SECTION_LABELS = {
@@ -126,6 +127,7 @@ export async function seedSavedSettingsHosts(
       serverId: host.serverId,
       label: host.label,
       endpoint: host.endpoint,
+      password: host.password,
       nowIso,
     }),
   );

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { app, BrowserWindow, ipcMain, powerMonitor } from "electron";
 import log from "electron-log/main";
-import { resolvePaseoHome, spawnProcess, completeLocalSecuritySetup } from "@getpaseo/server";
+import { resolvePaseoHome, spawnProcess, issueSecuritySetupCode } from "@getpaseo/server";
 import {
   copyAttachmentFileToManagedStorage,
   deleteManagedAttachmentFile,
@@ -526,7 +526,7 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
       runningUnderARM64Translation: isRunningUnderARM64Translation(),
     }),
     desktop_daemon_status: () => resolveDesktopDaemonStatus(),
-    setup_desktop_daemon_security: async (args) => {
+    create_desktop_daemon_security_code: async (args) => {
       const status = await resolveDesktopDaemonStatus();
       if (
         !status.desktopManaged ||
@@ -537,10 +537,8 @@ export function createDaemonCommandHandlers(): Record<string, DesktopCommandHand
       }
       if (process.env.PASEO_PASSWORD)
         throw new Error("Remove PASEO_PASSWORD from the host launcher first.");
-      if (typeof args?.password !== "string") throw new Error("A password is required.");
       const home = getPaseoHome();
-      completeLocalSecuritySetup(home, args.password);
-      return { restartRequired: true };
+      return { code: issueSecuritySetupCode(home) };
     },
     start_desktop_daemon: () => startDaemon(),
     stop_desktop_daemon: (args) => stopDesktopDaemon(parseDesktopDaemonStopReason(args)),
@@ -598,7 +596,7 @@ export function registerDaemonManager(): void {
 
   ipcMain.handle("paseo:invoke", async (event, command: string, args?: Record<string, unknown>) => {
     if (
-      command === "setup_desktop_daemon_security" &&
+      command === "create_desktop_daemon_security_code" &&
       (!BrowserWindow.fromWebContents(event.sender) || event.senderFrame !== event.sender.mainFrame)
     ) {
       throw new Error("Security setup requires the desktop app's main frame.");

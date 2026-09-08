@@ -24,6 +24,7 @@ import type {
   WorkspaceCreateRequest,
 } from "@getpaseo/protocol/messages";
 import { DaemonClient } from "./daemon-client.js";
+export { DeviceCredentialConfigurationError } from "./daemon-client.js";
 import type {
   DeleteTeamInput,
   FetchAgentsEntry,
@@ -82,6 +83,7 @@ export interface PaseoClientConfig {
   appVersion?: string;
   runtimeGeneration?: number | null;
   password?: string;
+  deviceCredential?: string;
   authHeader?: string;
   suppressSendErrors?: boolean;
   logger?: PaseoLogger;

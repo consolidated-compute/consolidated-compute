@@ -374,6 +374,13 @@ function makeOffer(input?: Partial<ConnectionOffer>): ConnectionOffer {
   };
 }
 
+function summarizeRegistry(hosts: HostProfile[]) {
+  return hosts.map((host) => ({
+    label: host.label,
+    connections: host.connections.map((connection) => connection.id),
+  }));
+}
+
 function encodeOfferUrl(payload: unknown): string {
   const encoded = Buffer.from(JSON.stringify(payload), "utf8")
     .toString("base64")
@@ -543,6 +550,35 @@ class BrowserClientLifecycle {
 }
 
 describe("HostRuntimeController", () => {
+  it("replaces an active client when the host device credential changes", async () => {
+    const host = makeHost({
+      connections: [{ id: "direct:lan:6767", type: "directTcp", endpoint: "lan:6767" }],
+      preferredConnectionId: "direct:lan:6767",
+    });
+    const createdClients: FakeDaemonClient[] = [];
+    const credentials: Array<string | undefined> = [];
+    const deps = makeDeps({ "direct:lan:6767": 5 }, createdClients);
+    const controller = new HostRuntimeController({
+      host,
+      deps: {
+        ...deps,
+        createClient: (input) => {
+          credentials.push(input.host.deviceCredential);
+          return deps.createClient(input);
+        },
+      },
+    });
+    try {
+      await controller.activateConnection({ connectionId: "direct:lan:6767" });
+      const deviceCredential = `cc_device_${"a".repeat(43)}`;
+      await controller.updateHost({ ...host, deviceCredential });
+      expect(credentials).toEqual([undefined, deviceCredential]);
+      expect(createdClients[0].isDisposed()).toBe(true);
+      expect(controller.getSnapshot().client).toBe(createdClients[1]);
+    } finally {
+      await controller.stop();
+    }
+  });
   it("replaces the active relay client when re-pairing changes the daemon public key", async () => {
     const oldRelay: HostConnection = {
       id: "relay:wss:relay.paseo.sh:443",
@@ -1435,6 +1471,124 @@ describe("HostRuntimeController", () => {
 });
 
 describe("HostRuntimeStore", () => {
+  it("serializes every registry mutation behind a pending credential save", async () => {
+    const host = makeHost({ serverId: "srv_device" });
+    const storage = createMemoryHostRuntimeStorage({
+      "@paseo:daemon-registry": JSON.stringify([host]),
+      "@paseo:e2e": "1",
+    });
+    const store = createAppearanceStore(storage);
+    const writeStarted = createDeferred<void>();
+    const finishWrite = createDeferred<void>();
+    const writes: HostProfile[][] = [];
+    try {
+      await store.boot();
+      const originalHosts = store.getHosts();
+      const setItem = storage.setItem.bind(storage);
+      storage.setItem = async (key, value) => {
+        writes.push(JSON.parse(value));
+        writeStarted.resolve();
+        await finishWrite.promise;
+        await setItem(key, value);
+      };
+      const saving = store.saveDeviceCredential(host.serverId, `cc_device_${"a".repeat(43)}`);
+      await writeStarted.promise;
+      const rename = store.renameHost(host.serverId, "Renamed");
+      const removeConnection = store.removeConnection(host.serverId, host.connections[1].id);
+      const upsert = store.upsertDirectConnection({
+        serverId: host.serverId,
+        endpoint: "new:6767",
+      });
+      const remove = store.removeHost(host.serverId);
+      await Promise.resolve();
+      expect(writes).toHaveLength(1);
+      expect(store.getHosts()).toEqual(originalHosts);
+      finishWrite.resolve();
+      await Promise.all([saving, rename, removeConnection, upsert, remove]);
+      expect(writes.map(summarizeRegistry)).toEqual([
+        [{ label: host.label, connections: host.connections.map((connection) => connection.id) }],
+        [{ label: "Renamed", connections: host.connections.map((connection) => connection.id) }],
+        [{ label: "Renamed", connections: [host.connections[0].id] }],
+        [{ label: "Renamed", connections: [host.connections[0].id, "direct:new:6767"] }],
+        [],
+      ]);
+      expect(store.getHosts()).toEqual([]);
+      expect(JSON.parse((await storage.getItem("@paseo:daemon-registry")) ?? "null")).toEqual([]);
+    } finally {
+      finishWrite.resolve();
+      store.syncHosts([]);
+    }
+  });
+  it("saves device credentials before publishing and restores them on boot", async () => {
+    const host = makeHost({ serverId: "srv_device" });
+    const storage = createMemoryHostRuntimeStorage({
+      "@paseo:daemon-registry": JSON.stringify([host]),
+      "@paseo:e2e": "1",
+    });
+    const store = createAppearanceStore(storage);
+    const restored = createAppearanceStore(storage);
+    const deviceCredential = `cc_device_${"a".repeat(43)}`;
+    const writeStarted = createDeferred<void>();
+    const finishWrite = createDeferred<void>();
+    try {
+      const loaded = onceHostListMatches(store, () => store.isHostRegistryLoaded());
+      store.boot();
+      await loaded;
+      const setItem = storage.setItem.bind(storage);
+      storage.setItem = async (key, value) => {
+        writeStarted.resolve();
+        await finishWrite.promise;
+        await setItem(key, value);
+      };
+      const saving = store.saveDeviceCredential(host.serverId, deviceCredential);
+      await writeStarted.promise;
+      expect(store.getHosts()[0].deviceCredential).toBeUndefined();
+      finishWrite.resolve();
+      await saving;
+      expect(store.getHosts()[0].deviceCredential).toBe(deviceCredential);
+      expect(
+        JSON.parse((await storage.getItem("@paseo:daemon-registry")) ?? "[]")[0].deviceCredential,
+      ).toBe(deviceCredential);
+      const reloaded = onceHostListMatches(restored, () => restored.isHostRegistryLoaded());
+      restored.boot();
+      await reloaded;
+      expect(restored.getHosts()[0].deviceCredential).toBe(deviceCredential);
+    } finally {
+      finishWrite.resolve();
+      store.syncHosts([]);
+      restored.syncHosts([]);
+    }
+  });
+
+  it("keeps device credentials unchanged when saving fails and rejects invalid targets", async () => {
+    const host = makeHost({ serverId: "srv_device" });
+    const storage = createMemoryHostRuntimeStorage({
+      "@paseo:daemon-registry": JSON.stringify([host]),
+      "@paseo:e2e": "1",
+    });
+    const store = createAppearanceStore(storage);
+    const deviceCredential = `cc_device_${"a".repeat(43)}`;
+    try {
+      const loaded = onceHostListMatches(store, () => store.isHostRegistryLoaded());
+      store.boot();
+      await loaded;
+      await expect(store.saveDeviceCredential(host.serverId, "invalid")).rejects.toMatchObject({
+        code: "invalid_credential",
+      });
+      await expect(store.saveDeviceCredential("missing", deviceCredential)).rejects.toMatchObject({
+        code: "host_not_found",
+      });
+      storage.setItem = async () => {
+        throw new Error("disk full");
+      };
+      await expect(store.saveDeviceCredential(host.serverId, deviceCredential)).rejects.toThrow(
+        "disk full",
+      );
+      expect(store.getHosts()[0].deviceCredential).toBeUndefined();
+    } finally {
+      store.syncHosts([]);
+    }
+  });
   it("revokes push notifications before removing a host", async () => {
     const host = makeHost({ connections: [makeHost().connections[0]!] });
     const revocation = createDeferred<void>();
@@ -3115,6 +3269,7 @@ describe("HostRuntimeStore", () => {
 
   it("renameHost updates label in memory", async () => {
     const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
       deps: {
         createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
         connectToDaemon: async ({ host }) => ({
@@ -3135,9 +3290,7 @@ describe("HostRuntimeStore", () => {
     });
     expect(store.getHosts().find((h) => h.serverId === "srv_rename")?.label).toBe("old name");
 
-    // persistHosts may throw in test env (no AsyncStorage/window), but the
-    // in-memory state should still be updated by setHostsAndSync.
-    await store.renameHost("srv_rename", "new name").catch(() => undefined);
+    await store.renameHost("srv_rename", "new name");
 
     const renamed = store.getHosts().find((h) => h.serverId === "srv_rename");
     expect(renamed?.label).toBe("new name");
@@ -3182,7 +3335,7 @@ describe("HostRuntimeStore", () => {
 
   it("awaited credential persistence reports storage failures and permits retry", async () => {
     const memory = createMemoryHostRuntimeStorage();
-    let fail = true;
+    let fail = false;
     const store = new HostRuntimeStore({
       storage: {
         ...memory,
@@ -3206,19 +3359,84 @@ describe("HostRuntimeStore", () => {
         serverId: "security-host",
         endpoint: "localhost:12345",
         password: "saved-password",
-        awaitPersistence: true,
       };
-      await expect(store.upsertDirectConnection(input)).rejects.toThrow("storage unavailable");
+      await store.upsertDirectConnection({ serverId: input.serverId, endpoint: input.endpoint });
+      fail = true;
+      const save = () =>
+        store.saveSetupPassword(input.serverId, `direct:${input.endpoint}`, input.password);
+      await expect(save()).rejects.toThrow("storage unavailable");
       fail = false;
-      await store.upsertDirectConnection(input);
+      await save();
       expect(await memory.getItem("@paseo:daemon-registry")).toContain("saved-password");
+      await store.saveDeviceCredential(input.serverId, `cc_device_${"a".repeat(43)}`);
+      await expect(save()).rejects.toMatchObject({ code: "device_authentication_enabled" });
+      await store.removeHost(input.serverId);
+      await expect(save()).rejects.toMatchObject({ code: "host_mismatch" });
+      expect(store.getHosts()).toEqual([]);
     } finally {
+      store.syncHosts([]);
+    }
+  });
+
+  it("setup password save waits for the replacement client before allowing restart", async () => {
+    const started = createDeferred<void>();
+    const finish = createDeferred<void>();
+    class DelayedClient extends FakeDaemonClient {
+      override async connect() {
+        started.resolve();
+        await finish.promise;
+        await super.connect();
+      }
+    }
+    const replacement = new DelayedClient();
+    const initial = makeConnectedProbeClient(5);
+    const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
+      deps: {
+        createClient: () => replacement as unknown as DaemonClient,
+        connectToDaemon: async ({ host }) => ({
+          client: initial as unknown as DaemonClient,
+          serverId: host.serverId,
+          hostname: null,
+        }),
+        getClientId: async () => "setup-wait",
+      },
+    });
+    const online = createDeferred<void>();
+    const unsubscribe = store.subscribe("setup-wait", () => {
+      if (store.getSnapshot("setup-wait")?.connectionStatus === "online") online.resolve();
+    });
+    try {
+      await store.upsertDirectConnection({
+        serverId: "setup-wait",
+        endpoint: "localhost:12345",
+        existingClient: initial as unknown as DaemonClient,
+      });
+      await online.promise;
+      let saved = false;
+      const saving = store
+        .saveSetupPassword("setup-wait", "direct:localhost:12345", "a-secure-password")
+        .then(() => {
+          saved = true;
+          return;
+        });
+      await started.promise;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(saved).toBe(false);
+      finish.resolve();
+      await saving;
+      expect(store.getClient("setup-wait")).toBe(replacement);
+      expect(store.getSnapshot("setup-wait")?.connectionStatus).toBe("online");
+    } finally {
+      finish.resolve();
+      unsubscribe();
       store.syncHosts([]);
     }
   });
 
   it("upsertDirectConnection stores SSL and password settings", async () => {
     const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
       deps: {
         createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
         connectToDaemon: async ({ host }) => ({
@@ -3261,6 +3479,7 @@ describe("HostRuntimeStore", () => {
     const probeClient = makeConnectedProbeClient(5);
     const seenProbeHosts: string[] = [];
     const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
       deps: {
         createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
         connectToDaemon: async ({ host, connection: probedConnection }) => {
@@ -3300,6 +3519,7 @@ describe("HostRuntimeStore", () => {
       endpoint: "lan:6767",
     };
     const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
       deps: {
         createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
         connectToDaemon: async () => ({
@@ -3333,6 +3553,7 @@ describe("HostRuntimeStore", () => {
 
   it("uses the advertised hostname when adding a relay host from a pairing offer", async () => {
     const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
       deps: {
         createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
         connectToDaemon: async ({ host }) => ({
@@ -3354,6 +3575,7 @@ describe("HostRuntimeStore", () => {
 
   it("stores relay TLS from a pairing offer", async () => {
     const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
       deps: {
         createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
         connectToDaemon: async ({ host }) => ({
@@ -3391,6 +3613,7 @@ describe("HostRuntimeStore", () => {
 
   it("uses TLS for old pairing URLs that omit relay TLS on port 443", async () => {
     const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage(),
       deps: {
         createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
         connectToDaemon: async ({ host }) => ({

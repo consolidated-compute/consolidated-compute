@@ -1,5 +1,6 @@
 import express from "express";
 import { completeSecuritySetup, SecuritySetupInputSchema } from "./security-setup.js";
+import { SecuritySetupError } from "@getpaseo/protocol/daemon-security";
 import { createServer as createHTTPServer, type IncomingMessage, type ServerResponse } from "http";
 import { constants, existsSync, unlinkSync } from "fs";
 import { open, rm } from "fs/promises";
@@ -117,7 +118,12 @@ export async function fanOutReconciledWorkspaceUpdates(input: {
   );
 }
 
-import { VoiceAssistantWebSocketServer } from "./websocket-server.js";
+import {
+  VoiceAssistantWebSocketServer,
+  type WebSocketLike,
+  type ExternalSocketMetadata,
+} from "./websocket-server.js";
+import { DeviceAccessStore } from "./device-access.js";
 import { WorkspaceSetupRuntime } from "./workspace-setup-runtime.js";
 import { createWorkspaceLabelService } from "./workspace-labels/index.js";
 import { createGitHubService } from "../services/github-service.js";
@@ -464,6 +470,8 @@ export interface PaseoDaemonConfig {
 
 export interface PaseoDaemon {
   config: PaseoDaemonConfig;
+  deviceAccess: DeviceAccessStore;
+  attachRelaySocket: (ws: WebSocketLike, metadata?: ExternalSocketMetadata) => Promise<void>;
   agentManager: AgentManager;
   agentStorage: AgentStorage;
   terminalManager: TerminalManager;
@@ -586,6 +594,8 @@ export async function createPaseoDaemon(
 ): Promise<PaseoDaemon> {
   configureGitProcessPolicy(config.git ?? resolveGitProcessPolicy({ env: process.env }));
   const logger = rootLogger.child({ module: "bootstrap" });
+  const deviceAccess = new DeviceAccessStore({ home: config.paseoHome });
+  deviceAccess.isDeviceAuthenticationEnabled();
   const obsoleteTimelineDirectory = path.join(config.paseoHome, "agent-timelines");
   await rm(obsoleteTimelineDirectory, { recursive: true, force: true }).catch((error) => {
     logger.warn(
@@ -773,24 +783,33 @@ export async function createPaseoDaemon(
   mountWebUi(app, config, logger);
 
   app.use(
-    createRequireBearerMiddleware(config.auth, (context) => {
-      logger.warn(context, "Rejected HTTP request with invalid daemon password");
-    }),
+    createRequireBearerMiddleware(
+      config.auth,
+      (context) => {
+        logger.warn(context, "Rejected HTTP request with invalid daemon password");
+      },
+      deviceAccess,
+    ),
   );
 
   app.use(express.json());
 
   app.post("/api/security/setup", (req, res) => {
     res.setHeader("Cache-Control", "no-store");
-    if (resolveTeamSupervisedControlPlaneProtection(config) !== "passwordless") {
+    if (deviceAccess.isDeviceAuthenticationEnabled()) {
+      res.status(409).json({ code: "device_authentication_enabled" });
+      return;
+    }
+    const protection = resolveTeamSupervisedControlPlaneProtection(config);
+    if (protection !== "passwordless") {
       res.status(409).json({
-        error: "Initial setup requires a host without a password or PASEO_PASSWORD override.",
+        code: protection === "environment_password" ? "launcher_override" : "already_configured",
       });
       return;
     }
     const parsed = SecuritySetupInputSchema.safeParse(req.body);
     if (!parsed.success || parsed.data.serverId !== serverId) {
-      res.status(400).json({ error: "Invalid security setup request." });
+      res.status(400).json({ code: "request_invalid" });
       return;
     }
     try {
@@ -803,7 +822,7 @@ export async function createPaseoDaemon(
     } catch (error) {
       res
         .status(409)
-        .json({ error: error instanceof Error ? error.message : "Security setup failed." });
+        .json({ code: error instanceof SecuritySetupError ? error.code : "storage_unavailable" });
     }
   });
 
@@ -1517,7 +1536,9 @@ export async function createPaseoDaemon(
       // capability, while external identity-less callers need the daemon password.
       if (
         !(await isAgentMcpRequestAuthorized({
-          password: config.auth?.password,
+          password: deviceAccess.isDeviceAuthenticationEnabled()
+            ? undefined
+            : config.auth?.password,
           capabilityToken: callerAgentId
             ? createAgentMcpCapabilityToken(agentMcpAuthToken, callerAgentId)
             : agentMcpAuthToken,
@@ -1527,6 +1548,7 @@ export async function createPaseoDaemon(
         res.status(401).json({ error: "Unauthorized" });
         return;
       }
+      if (res.destroyed) return;
       if (config.mcpDebug) {
         logger.debug(
           {
@@ -1749,6 +1771,7 @@ export async function createPaseoDaemon(
               teamRepository,
               teamRunService,
               assignmentRepository,
+              deviceAccess,
             );
             pluginRuntime.bindPaseoSessionHost(wsServer);
             await pluginRuntime.start();
@@ -1762,10 +1785,7 @@ export async function createPaseoDaemon(
                 publicUseTls: relayPublicUseTls,
               },
               logger,
-              attachSocket: async (ws, metadata) => {
-                if (!wsServer) throw new Error("WebSocket server is not ready");
-                await wsServer.attachExternalSocket(ws, metadata);
-              },
+              attachSocket: attachRelaySocket,
               serverId,
               daemonKeyPair: daemonKeyPair.keyPair,
             });
@@ -1847,8 +1867,18 @@ export async function createPaseoDaemon(
     }
   };
 
+  async function attachRelaySocket(
+    ws: WebSocketLike,
+    metadata?: ExternalSocketMetadata,
+  ): Promise<void> {
+    if (!wsServer) throw new Error("WebSocket server is not ready");
+    await wsServer.attachExternalSocket(ws, { ...metadata, transport: "relay" });
+  }
+
   return {
     config,
+    deviceAccess,
+    attachRelaySocket,
     agentManager,
     agentStorage,
     terminalManager,

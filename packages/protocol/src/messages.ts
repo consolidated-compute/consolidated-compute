@@ -3471,6 +3471,7 @@ export const ServerInfoStatusPayloadSchema = z
     // COMPAT(providersSnapshot): added in v0.1.48, remove gating when all clients use snapshot
     features: z
       .object({
+        // COMPAT(daemonSecuritySetup): added in v0.7.2, remove after 2027-03-09 once the daemon floor supports guided setup.
         daemonSecuritySetup: z.boolean().optional(),
         providersSnapshot: z.boolean().optional(),
         // COMPAT(providersSnapshotCwd): added in v0.3.2, remove gate after 2027-02-10.
@@ -3616,6 +3617,8 @@ export const ServerInfoStatusPayloadSchema = z
         agentProfiles: z.boolean().optional(),
         // COMPAT(agentProfileProviderOptions): added in v0.6.2, remove gate after 2027-02-28.
         agentProfileProviderOptions: z.boolean().optional(),
+        // Runtime authentication mode, not merely implementation availability.
+        deviceAuthentication: z.boolean().optional(),
         // COMPAT(teams): added in v0.6.0, remove gate after 2027-02-26.
         teams: z.boolean().optional(),
         // COMPAT(teamSecurity): added in v0.6.2, remove gate after 2027-02-28.
@@ -7138,6 +7141,8 @@ export const WSPongMessageSchema = z.object({
 
 export const WSHelloMessageSchema = z.object({
   type: z.literal("hello"),
+  // Relay credentials belong inside the encrypted hello, not relay HTTP headers.
+  deviceCredential: z.string().max(128).optional(),
   clientId: z.string().min(1),
   clientType: z.enum(["mobile", "browser", "cli", "mcp", "hub"]),
   protocolVersion: z.number().int(),
