@@ -3,11 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { AgentProfile } from "@getpaseo/protocol/messages";
-import type { TeamRunDto } from "@getpaseo/protocol/team/types";
+import type { TeamRunDto, TeamSecurityFactDto } from "@getpaseo/protocol/team/types";
 import { expect, test } from "vitest";
 
-import { createTestAgentClients } from "../test-utils/fake-agent-client.js";
-import { DaemonClient, createTestPaseoDaemon } from "../test-utils/index.js";
+import type { AgentSessionConfig } from "../agent/agent-sdk-types.js";
+import { createTestAgentClient } from "../test-utils/fake-agent-client.js";
+import { DaemonClient, createTestPaseoDaemon, type TestPaseoDaemon } from "../test-utils/index.js";
 
 const PASSWORD_HASH = "$2b$12$GMhF7pN4QnMlHOQXOqjd1OitKWPSmAO3FwB0PHzKtcZR/sAMryz76";
 const PASSWORD = "shared-secret";
@@ -32,41 +33,82 @@ const builderProviderOptions = {
   features: { multi_agent_v2: false, network_proxy: false },
 } as const;
 
-const profiles = [
+interface ProofScenario {
+  provider: "codex" | "claude";
+  model: string;
+  coordinatorModeId: string;
+  coordinatorOptions: NonNullable<AgentProfile["providerOptions"]>;
+  builderOptions: NonNullable<AgentProfile["providerOptions"]>;
+  delegationEnabledOptions: NonNullable<AgentProfile["providerOptions"]>;
+  coordinatorFilesystemStatus: TeamSecurityFactDto["status"];
+  coordinatorToolStatus: TeamSecurityFactDto["status"];
+}
+
+// These catalogs and responses are deterministic adapters, not real-provider
+// enforcement evidence. #127 still requires a separate real Claude run.
+const scenarios: ProofScenario[] = [
   {
-    id: "team-supervisor",
-    name: "Team Supervisor",
     provider: "codex",
     model: "gpt-5.4-mini",
-    modeId: "full-access",
-    providerOptions: readOnlyProviderOptions,
+    coordinatorModeId: "full-access",
+    coordinatorOptions: readOnlyProviderOptions,
+    builderOptions: builderProviderOptions,
+    delegationEnabledOptions: {
+      ...builderProviderOptions,
+      features: { multi_agent_v2: true, network_proxy: false },
+    },
+    coordinatorFilesystemStatus: "enforced",
+    coordinatorToolStatus: "unavailable",
   },
   {
-    id: "architect",
-    name: "Architect",
-    provider: "codex",
-    model: "gpt-5.4-mini",
-    modeId: "full-access",
-    providerOptions: readOnlyProviderOptions,
+    provider: "claude",
+    model: "haiku",
+    coordinatorModeId: "default",
+    coordinatorOptions: { disallowedTools: ["Task", "Agent", "Workflow", "Write", "Edit", "Bash"] },
+    builderOptions: { disallowedTools: ["Task", "Agent", "Workflow"] },
+    delegationEnabledOptions: { disallowedTools: ["Task", "Agent"] },
+    coordinatorFilesystemStatus: "unavailable",
+    coordinatorToolStatus: "policy_only",
   },
-  {
-    id: "codex-builder",
-    name: "Codex Builder",
-    provider: "codex",
-    model: "gpt-5.4-mini",
-    modeId: "default",
-    featureValues: { test_feature: true },
-    providerOptions: builderProviderOptions,
-  },
-  {
-    id: "security-review",
-    name: "Security Review",
-    provider: "codex",
-    model: "gpt-5.4-mini",
-    modeId: "full-access",
-    providerOptions: readOnlyProviderOptions,
-  },
-] satisfies AgentProfile[];
+];
+
+function createProfiles(scenario: ProofScenario): AgentProfile[] {
+  return [
+    {
+      id: "team-supervisor",
+      name: "Team Supervisor",
+      provider: scenario.provider,
+      model: scenario.model,
+      modeId: scenario.coordinatorModeId,
+      providerOptions: scenario.coordinatorOptions,
+    },
+    {
+      id: "architect",
+      name: "Architect",
+      provider: scenario.provider,
+      model: scenario.model,
+      modeId: scenario.coordinatorModeId,
+      providerOptions: scenario.coordinatorOptions,
+    },
+    {
+      id: "team-builder",
+      name: "Team Builder",
+      provider: scenario.provider,
+      model: scenario.model,
+      modeId: "default",
+      featureValues: { test_feature: true },
+      providerOptions: scenario.builderOptions,
+    },
+    {
+      id: "security-review",
+      name: "Security Review",
+      provider: scenario.provider,
+      model: scenario.model,
+      modeId: scenario.coordinatorModeId,
+      providerOptions: scenario.coordinatorOptions,
+    },
+  ];
+}
 
 function requireAcceptedOutput(prompt: string, workItemId: string): string {
   const escapedId = workItemId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -87,9 +129,17 @@ function requireAcceptedOutput(prompt: string, workItemId: string): string {
   return artifactId;
 }
 
-function createProofAgentClients() {
+function createProofAgentClients(scenario: ProofScenario) {
   const supervisorPrompts: string[] = [];
-  const resolveAssistantText = ({ prompt }: { prompt: string }): string | undefined => {
+  const observedTurns: { config: AgentSessionConfig; prompt: string }[] = [];
+  const resolveAssistantText = ({
+    prompt,
+    config,
+  }: {
+    prompt: string;
+    config: Readonly<AgentSessionConfig>;
+  }): string | undefined => {
+    observedTurns.push({ config: structuredClone(config), prompt });
     if (prompt.includes("Revision parent attempt:")) return "REVISED_IMPLEMENT_ARTIFACT";
     if (!prompt.includes("## Decision rules") || !prompt.includes("TeamSupervisorAction")) {
       return undefined;
@@ -165,9 +215,12 @@ function createProofAgentClients() {
   };
 
   return {
-    agentClients: createTestAgentClients({ resolveAssistantText }),
+    agentClients: {
+      [scenario.provider]: createTestAgentClient(scenario.provider, { resolveAssistantText }),
+    },
     resolveAssistantText,
     supervisorPrompts,
+    observedTurns,
   };
 }
 
@@ -210,7 +263,7 @@ function requireOutputArtifactId(step: TeamRunDto["steps"][number]): string {
   return artifactId;
 }
 
-async function admitProofRun(client: DaemonClient, cwd: string) {
+async function admitProofRun(client: DaemonClient, cwd: string, scenario: ProofScenario) {
   expect(client.getLastServerInfoMessage()?.features).toMatchObject({
     assignments: true,
     teams: true,
@@ -245,7 +298,7 @@ async function admitProofRun(client: DaemonClient, cwd: string) {
         name: "Builder",
         instructions:
           'Create a file named "permission.txt" with the content "allowed". Respond with exactly: IMPLEMENT_ARTIFACT',
-        profileId: "codex-builder",
+        profileId: "team-builder",
       },
       {
         id: "reviewer",
@@ -267,13 +320,30 @@ async function admitProofRun(client: DaemonClient, cwd: string) {
       sourceId: "github",
       sourceLabel: "GitHub",
       resourceType: "issue",
-      resourceId: "consolidated-compute#96",
-      identifier: "#96",
-      title: "Prove a real supervised Plan to Implement to Review Team",
-      url: "https://github.com/consolidated-compute/consolidated-compute/issues/96",
+      resourceId: "consolidated-compute#127",
+      identifier: "#127",
+      title: "Validate a second harness through the Team contracts",
+      url: "https://github.com/consolidated-compute/consolidated-compute/issues/127",
     },
   });
-  const { run } = await client.startAssignmentTeamRun({
+  const { preview } = await client.previewTeamRun({
+    teamId: team.id,
+    expectedRevision: team.revision,
+    workspaceId: createdWorkspace.workspace.id,
+  });
+  const planner = preview.roles.find((role) => role.roleId === "planner");
+  expect(planner?.resolvedLaunch).toMatchObject({
+    provider: scenario.provider,
+    model: scenario.model,
+    securityPosture: {
+      source: { provider: scenario.provider },
+      filesystemWrite: { status: scenario.coordinatorFilesystemStatus },
+      networkAccess: { status: "unavailable" },
+      toolShell: { status: scenario.coordinatorToolStatus },
+      nativeDelegation: { status: "enforced" },
+    },
+  });
+  const admission = {
     teamId: team.id,
     expectedRevision: team.revision,
     idempotencyKey: "supervised-plan-implement-review",
@@ -281,8 +351,20 @@ async function admitProofRun(client: DaemonClient, cwd: string) {
     expectedAssignmentRevision: assignment.revision,
     workspaceId: createdWorkspace.workspace.id,
     supervision: { supervisorRoleId: "supervisor" },
-  });
-  return { assignmentId: assignment.id, runId: run.id };
+    expectedPreviewFingerprint: preview.fingerprint,
+  };
+  const unsafeProfiles = createProfiles(scenario);
+  const unsafeBuilder = unsafeProfiles.find((profile) => profile.id === "team-builder");
+  if (!unsafeBuilder) throw new Error("Proof has no Builder profile");
+  unsafeBuilder.providerOptions = scenario.delegationEnabledOptions;
+  await client.patchDaemonConfig({ agentProfiles: unsafeProfiles });
+  await expect(
+    client.startAssignmentTeamRun({ ...admission, expectedPreviewFingerprint: undefined }),
+  ).rejects.toThrow(/native delegation/i);
+  await expect(client.listTeamRuns({ teamId: team.id })).resolves.toMatchObject({ runs: [] });
+  await client.patchDaemonConfig({ agentProfiles: createProfiles(scenario) });
+  const { run } = await client.startAssignmentTeamRun(admission);
+  return { assignmentId: assignment.id, runId: run.id, admission, preview };
 }
 
 async function resolveBuilderPermission(client: DaemonClient, runId: string): Promise<void> {
@@ -297,10 +379,13 @@ async function resolveBuilderPermission(client: DaemonClient, runId: string): Pr
   const permission = permissionState.final?.pendingPermissions?.[0];
   if (!permission) throw new Error("Supervised Builder has no pending provider permission");
   expect(permissionStep.snapshot.resolvedLaunch).toMatchObject({
-    profileId: "codex-builder",
+    profileId: "team-builder",
     modeId: "default",
     featureValues: { test_feature: true },
   });
+  // Remove every live profile while the Builder is blocked. The Reviewer,
+  // revision attempt, and resumed supervisor must still use the admitted values.
+  await client.patchDaemonConfig({ agentProfiles: [] });
   await client.respondToPermissionAndWait(permissionStep.state.agentId, permission.id, {
     behavior: "allow",
   });
@@ -312,6 +397,8 @@ async function expectCompletedProof(input: {
   runId: string;
   assignmentId: string;
   supervisorPrompts: string[];
+  scenario: ProofScenario;
+  observedTurns: { config: AgentSessionConfig; prompt: string }[];
 }): Promise<void> {
   const completed = await input.daemon.daemon.teamRunService.waitForRun(input.runId);
   if (completed.state.status !== "succeeded") {
@@ -334,13 +421,17 @@ async function expectCompletedProof(input: {
     note: "Approved after reconnect and daemon restart.",
   });
   expect(persisted.supervision.supervisor.resolvedLaunch.providerOptions).toEqual(
-    readOnlyProviderOptions,
+    input.scenario.coordinatorOptions,
   );
   expect(
     persisted.supervision.workerTemplates.map(
       (template) => template.resolvedLaunch.providerOptions,
     ),
-  ).toEqual([readOnlyProviderOptions, builderProviderOptions, readOnlyProviderOptions]);
+  ).toEqual([
+    input.scenario.coordinatorOptions,
+    input.scenario.builderOptions,
+    input.scenario.coordinatorOptions,
+  ]);
 
   const workerSteps = persisted.steps.filter(
     (step) => step.snapshot.supervision?.kind === "worker",
@@ -395,6 +486,30 @@ async function expectCompletedProof(input: {
     "REVISED_IMPLEMENT_ARTIFACT",
   ]);
 
+  const workerTitles = new Set(
+    ["Planner", "Builder", "Reviewer"].map((role) => `Supervised Delivery Team: ${role}`),
+  );
+  const workerTurns = input.observedTurns.filter((turn) =>
+    workerTitles.has(turn.config.title ?? ""),
+  );
+  expect(workerTurns).toHaveLength(4);
+  for (const [index, step] of workerSteps.entries()) {
+    const turn = workerTurns[index];
+    if (!turn || !step.snapshot.inputArtifactIds)
+      throw new Error("Worker prompt or frozen inputs missing");
+    const observedInputs = [
+      ...turn.prompt.matchAll(
+        /^### Artifact ([^\n]+)\n[\s\S]*?<untrusted-assignment-artifact>\n([\s\S]*?)\n<\/untrusted-assignment-artifact>/gm,
+      ),
+    ].map((match) => ({ id: match[1], content: match[2] }));
+    const expectedInputs = step.snapshot.inputArtifactIds.map((id) => {
+      const artifact = artifactsById.get(id);
+      if (!artifact) throw new Error(`Frozen input Artifact ${id} is missing`);
+      return { id, content: artifact.content };
+    });
+    expect(observedInputs).toEqual(expectedInputs);
+  }
+
   const { events } = await input.client.listTeamRunSupervisionEvents({
     runId: input.runId,
     limit: 100,
@@ -437,101 +552,185 @@ async function expectCompletedProof(input: {
   ]);
 }
 
-test("proves a supervised Plan to Implement to Review Team through restart", async () => {
-  const paseoHomeRoot = await mkdtemp(join(tmpdir(), "paseo-supervised-proof-home-"));
-  const staticDir = await mkdtemp(join(tmpdir(), "paseo-supervised-proof-static-"));
-  const cwd = await mkdtemp(join(tmpdir(), "paseo-supervised-proof-workspace-"));
-  const proof = createProofAgentClients();
-  let daemon = await createTestPaseoDaemon({
-    paseoHomeRoot,
-    staticDir,
-    cleanup: false,
-    agentClients: proof.agentClients,
-    agentProfiles: profiles,
-    auth: { password: PASSWORD_HASH },
-  });
-  let client = new DaemonClient({
-    url: `ws://127.0.0.1:${daemon.port}/ws`,
-    password: PASSWORD,
-  });
+test.each(scenarios)(
+  "retains $provider supervised contracts through restart with a deterministic provider",
+  async (scenario) => {
+    const temporaryDirectories: string[] = [];
+    let daemon: TestPaseoDaemon | null = null;
+    let client: DaemonClient | null = null;
+    try {
+      const paseoHomeRoot = await trackedTemporaryDirectory(
+        temporaryDirectories,
+        "paseo-supervised-proof-home-",
+      );
+      const staticDir = await trackedTemporaryDirectory(
+        temporaryDirectories,
+        "paseo-supervised-proof-static-",
+      );
+      const cwd = await trackedTemporaryDirectory(
+        temporaryDirectories,
+        "paseo-supervised-proof-workspace-",
+      );
+      const proof = createProofAgentClients(scenario);
+      daemon = await createTestPaseoDaemon({
+        paseoHomeRoot,
+        staticDir,
+        cleanup: false,
+        agentClients: proof.agentClients,
+        agentProfiles: [],
+        auth: { password: PASSWORD_HASH },
+      });
+      client = new DaemonClient({
+        url: `ws://127.0.0.1:${daemon.port}/ws`,
+        password: PASSWORD,
+      });
+      await client.connect();
+      await client.patchDaemonConfig({ agentProfiles: createProfiles(scenario) });
+      const proofRun = await admitProofRun(client, cwd, scenario);
+      await resolveBuilderPermission(client, proofRun.runId);
 
-  try {
-    await client.connect();
-    const proofRun = await admitProofRun(client, cwd);
-    await resolveBuilderPermission(client, proofRun.runId);
-
-    const waiting = await daemon.daemon.teamRunService.waitForRun(proofRun.runId);
-    expect(waiting).toMatchObject({
-      state: { status: "running" },
-      supervision: {
-        phase: "awaiting_human",
-        humanRequest: {
-          detail: "Confirm the revised and reviewed delivery before completion.",
-          actions: [{ id: "continue" }, { id: "cancel" }],
+      const waiting = await daemon.daemon.teamRunService.waitForRun(proofRun.runId);
+      expect(waiting).toMatchObject({
+        state: { status: "running" },
+        supervision: {
+          phase: "awaiting_human",
+          humanRequest: {
+            detail: "Confirm the revised and reviewed delivery before completion.",
+            actions: [{ id: "continue" }, { id: "cancel" }],
+          },
         },
-      },
-    });
-    expect(proof.supervisorPrompts).toHaveLength(6);
+      });
+      expect(proof.supervisorPrompts).toHaveLength(6);
 
-    await client.close();
-    client = new DaemonClient({
-      url: `ws://127.0.0.1:${daemon.port}/ws`,
-      password: PASSWORD,
-    });
-    await client.connect();
-    await expect(client.getTeamRunSupervision(proofRun.runId)).resolves.toMatchObject({
-      supervision: { status: "awaiting_human" },
-    });
+      await client.close();
+      client = new DaemonClient({
+        url: `ws://127.0.0.1:${daemon.port}/ws`,
+        password: PASSWORD,
+      });
+      await client.connect();
+      await expect(client.getTeamRunSupervision(proofRun.runId)).resolves.toMatchObject({
+        supervision: { status: "awaiting_human" },
+      });
 
-    await client.close();
-    await daemon.close();
-    daemon = await createTestPaseoDaemon({
-      paseoHomeRoot,
-      staticDir,
-      cleanup: false,
-      agentClients: createTestAgentClients({
-        resolveAssistantText: proof.resolveAssistantText,
-      }),
-      agentProfiles: profiles,
-      auth: { password: PASSWORD_HASH },
-    });
-    client = new DaemonClient({
-      url: `ws://127.0.0.1:${daemon.port}/ws`,
-      password: PASSWORD,
-    });
-    await client.connect();
-    const { supervision: restartedState } = await client.getTeamRunSupervision(proofRun.runId);
-    expect(restartedState).toMatchObject({
-      status: "awaiting_human",
-      humanRequest: { detail: "Confirm the revised and reviewed delivery before completion." },
-    });
-    expect(restartedState.humanRequest).not.toHaveProperty("resolution");
-    expect(proof.supervisorPrompts).toHaveLength(6);
-    const humanRequest = restartedState.humanRequest;
-    if (!humanRequest) throw new Error("Restarted supervised run lost its human request");
-    await client.respondToTeamRunSupervisionHumanRequest({
-      runId: proofRun.runId,
-      humanRequestId: humanRequest.id,
-      expectedRevision: humanRequest.revision,
-      actionId: "continue",
-      note: "Approved after reconnect and daemon restart.",
-      idempotencyKey: "approve-supervised-plan-implement-review",
-    });
+      await client.close();
+      await daemon.close();
+      daemon = await createTestPaseoDaemon({
+        paseoHomeRoot,
+        staticDir,
+        cleanup: false,
+        agentClients: {
+          [scenario.provider]: createTestAgentClient(scenario.provider, {
+            resolveAssistantText: proof.resolveAssistantText,
+          }),
+        },
+        agentProfiles: [],
+        auth: { password: PASSWORD_HASH },
+      });
+      client = new DaemonClient({
+        url: `ws://127.0.0.1:${daemon.port}/ws`,
+        password: PASSWORD,
+      });
+      await client.connect();
+      const { supervision: restartedState } = await client.getTeamRunSupervision(proofRun.runId);
+      expect(restartedState).toMatchObject({
+        status: "awaiting_human",
+        humanRequest: { detail: "Confirm the revised and reviewed delivery before completion." },
+      });
+      expect(restartedState.humanRequest).not.toHaveProperty("resolution");
+      expect(proof.supervisorPrompts).toHaveLength(6);
+      const humanRequest = restartedState.humanRequest;
+      if (!humanRequest) throw new Error("Restarted supervised run lost its human request");
+      await client.respondToTeamRunSupervisionHumanRequest({
+        runId: proofRun.runId,
+        humanRequestId: humanRequest.id,
+        expectedRevision: humanRequest.revision,
+        actionId: "continue",
+        note: "Approved after reconnect and daemon restart.",
+        idempotencyKey: "approve-supervised-plan-implement-review",
+      });
 
-    await expectCompletedProof({
-      client,
-      daemon,
-      runId: proofRun.runId,
-      assignmentId: proofRun.assignmentId,
-      supervisorPrompts: proof.supervisorPrompts,
-    });
-  } finally {
-    await client.close().catch(() => undefined);
-    await daemon.close();
-    await Promise.all([
-      rm(paseoHomeRoot, { recursive: true, force: true }),
-      rm(staticDir, { recursive: true, force: true }),
-      rm(cwd, { recursive: true, force: true }),
-    ]);
-  }
-}, 30_000);
+      await expectCompletedProof({
+        client,
+        daemon,
+        runId: proofRun.runId,
+        assignmentId: proofRun.assignmentId,
+        supervisorPrompts: proof.supervisorPrompts,
+        scenario,
+        observedTurns: proof.observedTurns,
+      });
+
+      const { run: completed } = await client.getTeamRun(proofRun.runId);
+      for (const step of completed.steps.filter(
+        (candidate) => candidate.snapshot.supervision?.kind === "worker",
+      )) {
+        const previewRole = proofRun.preview.roles.find(
+          (role) => role.roleId === step.snapshot.roleId,
+        );
+        if (!previewRole) throw new Error(`Preview lost role ${step.snapshot.roleId}`);
+        expect(step.snapshot.resolvedLaunch).toEqual(previewRole.resolvedLaunch);
+      }
+      // Inspect actual prompt-boundary configs, including the supervisor reloaded
+      // after restart. This proves daemon propagation, not SDK enforcement.
+      const supervisorTurns = proof.observedTurns.filter((turn) =>
+        turn.prompt.includes("## Decision rules"),
+      );
+      expect(supervisorTurns).toHaveLength(7);
+      for (const turn of supervisorTurns) {
+        expect(turn.config).toMatchObject({
+          provider: scenario.provider,
+          model: scenario.model,
+        });
+        expect(turn.config.providerOptions).toEqual(scenario.coordinatorOptions);
+      }
+      const reviewerTurn = proof.observedTurns.find(
+        (turn) => turn.config.title === "Supervised Delivery Team: Reviewer",
+      );
+      expect(reviewerTurn?.config).toMatchObject({
+        provider: scenario.provider,
+        model: scenario.model,
+      });
+      expect(reviewerTurn?.config.providerOptions).toEqual(scenario.coordinatorOptions);
+      const builderTurns = proof.observedTurns.filter(
+        (turn) => turn.config.title === "Supervised Delivery Team: Builder",
+      );
+      expect(builderTurns).toHaveLength(2);
+      for (const turn of builderTurns) {
+        expect(turn.config).toMatchObject({
+          provider: scenario.provider,
+          model: scenario.model,
+        });
+        expect(turn.config.providerOptions).toEqual(scenario.builderOptions);
+      }
+      await expect(
+        client.startAssignmentTeamRun({
+          ...proofRun.admission,
+          idempotencyKey: "removed-profiles-block-future-run",
+        }),
+      ).rejects.toThrow(/profile/i);
+      const { run: retried } = await client.startAssignmentTeamRun(proofRun.admission);
+      expect(retried).toEqual(completed);
+      expect((await client.getTeamRun(proofRun.runId)).run).toEqual(completed);
+    } finally {
+      try {
+        await client?.close();
+      } finally {
+        try {
+          await daemon?.close();
+        } finally {
+          await Promise.all(
+            temporaryDirectories.map((directory) =>
+              rm(directory, { recursive: true, force: true }),
+            ),
+          );
+        }
+      }
+    }
+  },
+  30_000,
+);
+
+async function trackedTemporaryDirectory(directories: string[], prefix: string): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), prefix));
+  directories.push(directory);
+  return directory;
+}
