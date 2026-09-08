@@ -75,6 +75,19 @@ describe("test-daemon-connection connectToDaemon", () => {
     probe = new FakeDaemonProbe();
   });
 
+  it("uses the saved device credential for probes instead of a legacy password", async () => {
+    const { connectToDaemon } = await import("./test-daemon-connection");
+    const deviceCredential = `cc_device_${"a".repeat(43)}`;
+    const result = await connectToDaemon(
+      { id: "tcp", type: "directTcp", endpoint: "localhost:6767", password: "legacy" },
+      { serverId: "srv_probe_test", deviceCredential },
+      probe.deps,
+    );
+    await result.client.close();
+    expect(probe.createdConfigs()[0].deviceCredential).toBe(deviceCredential);
+    expect(probe.createdConfigs()[0].password).toBeUndefined();
+  });
+
   it("reuses the app clientId for direct connections", async () => {
     const { connectToDaemon } = await import("./test-daemon-connection");
     const first = await connectToDaemon(

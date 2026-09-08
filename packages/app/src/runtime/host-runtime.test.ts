@@ -543,6 +543,35 @@ class BrowserClientLifecycle {
 }
 
 describe("HostRuntimeController", () => {
+  it("replaces an active client when the host device credential changes", async () => {
+    const host = makeHost({
+      connections: [{ id: "direct:lan:6767", type: "directTcp", endpoint: "lan:6767" }],
+      preferredConnectionId: "direct:lan:6767",
+    });
+    const createdClients: FakeDaemonClient[] = [];
+    const credentials: Array<string | undefined> = [];
+    const deps = makeDeps({ "direct:lan:6767": 5 }, createdClients);
+    const controller = new HostRuntimeController({
+      host,
+      deps: {
+        ...deps,
+        createClient: (input) => {
+          credentials.push(input.host.deviceCredential);
+          return deps.createClient(input);
+        },
+      },
+    });
+    try {
+      await controller.activateConnection({ connectionId: "direct:lan:6767" });
+      const deviceCredential = `cc_device_${"a".repeat(43)}`;
+      await controller.updateHost({ ...host, deviceCredential });
+      expect(credentials).toEqual([undefined, deviceCredential]);
+      expect(createdClients[0].isDisposed()).toBe(true);
+      expect(controller.getSnapshot().client).toBe(createdClients[1]);
+    } finally {
+      await controller.stop();
+    }
+  });
   it("replaces the active relay client when re-pairing changes the daemon public key", async () => {
     const oldRelay: HostConnection = {
       id: "relay:wss:relay.paseo.sh:443",
@@ -1435,6 +1464,76 @@ describe("HostRuntimeController", () => {
 });
 
 describe("HostRuntimeStore", () => {
+  it("saves device credentials before publishing and restores them on boot", async () => {
+    const host = makeHost({ serverId: "srv_device" });
+    const storage = createMemoryHostRuntimeStorage({
+      "@paseo:daemon-registry": JSON.stringify([host]),
+      "@paseo:e2e": "1",
+    });
+    const store = createAppearanceStore(storage);
+    const restored = createAppearanceStore(storage);
+    const deviceCredential = `cc_device_${"a".repeat(43)}`;
+    const writeStarted = createDeferred<void>();
+    const finishWrite = createDeferred<void>();
+    try {
+      const loaded = onceHostListMatches(store, () => store.isHostRegistryLoaded());
+      store.boot();
+      await loaded;
+      const setItem = storage.setItem.bind(storage);
+      storage.setItem = async (key, value) => {
+        writeStarted.resolve();
+        await finishWrite.promise;
+        await setItem(key, value);
+      };
+      const saving = store.saveDeviceCredential(host.serverId, deviceCredential);
+      await writeStarted.promise;
+      expect(store.getHosts()[0].deviceCredential).toBeUndefined();
+      finishWrite.resolve();
+      await saving;
+      expect(store.getHosts()[0].deviceCredential).toBe(deviceCredential);
+      expect(
+        JSON.parse((await storage.getItem("@paseo:daemon-registry")) ?? "[]")[0].deviceCredential,
+      ).toBe(deviceCredential);
+      const reloaded = onceHostListMatches(restored, () => restored.isHostRegistryLoaded());
+      restored.boot();
+      await reloaded;
+      expect(restored.getHosts()[0].deviceCredential).toBe(deviceCredential);
+    } finally {
+      finishWrite.resolve();
+      store.syncHosts([]);
+      restored.syncHosts([]);
+    }
+  });
+
+  it("keeps device credentials unchanged when saving fails and rejects invalid targets", async () => {
+    const host = makeHost({ serverId: "srv_device" });
+    const storage = createMemoryHostRuntimeStorage({
+      "@paseo:daemon-registry": JSON.stringify([host]),
+      "@paseo:e2e": "1",
+    });
+    const store = createAppearanceStore(storage);
+    const deviceCredential = `cc_device_${"a".repeat(43)}`;
+    try {
+      const loaded = onceHostListMatches(store, () => store.isHostRegistryLoaded());
+      store.boot();
+      await loaded;
+      await expect(store.saveDeviceCredential(host.serverId, "invalid")).rejects.toMatchObject({
+        code: "invalid_credential",
+      });
+      await expect(store.saveDeviceCredential("missing", deviceCredential)).rejects.toMatchObject({
+        code: "host_not_found",
+      });
+      storage.setItem = async () => {
+        throw new Error("disk full");
+      };
+      await expect(store.saveDeviceCredential(host.serverId, deviceCredential)).rejects.toThrow(
+        "disk full",
+      );
+      expect(store.getHosts()[0].deviceCredential).toBeUndefined();
+    } finally {
+      store.syncHosts([]);
+    }
+  });
   it("revokes push notifications before removing a host", async () => {
     const host = makeHost({ connections: [makeHost().connections[0]!] });
     const revocation = createDeferred<void>();

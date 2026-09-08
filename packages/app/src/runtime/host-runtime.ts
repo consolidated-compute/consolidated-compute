@@ -1,6 +1,7 @@
 import { useSyncExternalStore, useMemo } from "react";
 import { useSyncExternalStoreWithSelector } from "use-sync-external-store/shim/with-selector";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { HostDeviceCredentialError, resolveHostAuthentication } from "@/types/host-authentication";
 import equal from "fast-deep-equal/es6";
 import {
   DaemonClient,
@@ -507,6 +508,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
       const desktopTransportFactory = createDesktopDaemonTransportFactory();
       const webSocketConfig = { webSocketFactory: createAppWebSocketFactory() };
       const base = {
+        ...resolveHostAuthentication(host, connection),
         suppressSendErrors: true,
         clientId,
         clientType: "mobile",
@@ -532,7 +534,6 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
         return new DaemonClient({
           ...base,
           transportFactory: desktopTransportFactory,
-          ...(connection.daemonPassword ? { password: connection.daemonPassword } : {}),
           url: buildDesktopDaemonTransportUrl({
             transportType: "ssh",
             host: connection.host,
@@ -548,7 +549,6 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
           url: buildDaemonWebSocketUrl(connection.endpoint, {
             useTls: connection.useTls ?? false,
           }),
-          ...(connection.password ? { password: connection.password } : {}),
         });
       }
       return new DaemonClient({
@@ -567,6 +567,7 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
     },
     connectToDaemon: ({ host, connection, timeoutMs }) =>
       connectToDaemon(connection, {
+        deviceCredential: host.deviceCredential,
         ...(host.serverId ? { serverId: host.serverId } : {}),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
         capabilities: appCapabilities,
@@ -704,6 +705,7 @@ export class HostRuntimeController {
 
   async updateHost(host: HostProfile): Promise<void> {
     const activeConnectionId = this.snapshot.activeConnectionId;
+    const authenticationChanged = this.host.deviceCredential !== host.deviceCredential;
     const previousActiveConnection = findConnectionById(this.host, activeConnectionId);
     this.host = host;
     this.trackConnectionFirstSeen();
@@ -712,7 +714,7 @@ export class HostRuntimeController {
       activeConnectionId &&
       previousActiveConnection &&
       nextActiveConnection &&
-      !equal(previousActiveConnection, nextActiveConnection)
+      (authenticationChanged || !equal(previousActiveConnection, nextActiveConnection))
     ) {
       this.connectionLastProbedAt.delete(activeConnectionId);
       await this.switchToConnection({ connectionId: activeConnectionId });
@@ -1390,7 +1392,7 @@ export class HostRuntimeStore {
   private hostListVersion = 0;
   private hostRegistryLoaded = false;
   private hosts: HostProfile[] = [];
-  private hostAppearanceMutationTail: Promise<void> = Promise.resolve();
+  private hostProfileMutationTail: Promise<void> = Promise.resolve();
   private hostRegistryStatus: HostRegistryStatus = "loading";
   private deps: HostRuntimeControllerDeps;
   private lastConnectionStatusByServer = new Map<string, HostRuntimeConnectionStatus>();
@@ -1889,31 +1891,31 @@ export class HostRuntimeStore {
   }
 
   async setHostColor(serverId: string, color: HostColor): Promise<void> {
-    await this.updateHostAppearance(serverId, (host) => ({
+    await this.updatePersistedHost(serverId, (host) => ({
       ...host,
       appearance: { ...host.appearance, color },
     }));
   }
 
   async setHostBadgeDisplay(serverId: string, badgeDisplay: HostBadgeDisplay): Promise<void> {
-    await this.updateHostAppearance(serverId, (host) => ({
+    await this.updatePersistedHost(serverId, (host) => ({
       ...host,
       appearance: { ...host.appearance, badgeDisplay },
     }));
   }
 
-  private updateHostAppearance(
+  private updatePersistedHost(
     serverId: string,
     apply: (host: HostProfile) => HostProfile,
   ): Promise<void> {
-    const update = this.hostAppearanceMutationTail.then(() =>
-      this.applyHostAppearance(serverId, apply),
+    const update = this.hostProfileMutationTail.then(() =>
+      this.applyPersistedHost(serverId, apply),
     );
-    this.hostAppearanceMutationTail = update.catch(() => undefined);
+    this.hostProfileMutationTail = update.catch(() => undefined);
     return update;
   }
 
-  private async applyHostAppearance(
+  private async applyPersistedHost(
     serverId: string,
     apply: (host: HostProfile) => HostProfile,
   ): Promise<void> {
@@ -1930,6 +1932,20 @@ export class HostRuntimeStore {
     const remaining = this.hosts.filter((daemon) => daemon.serverId !== serverId);
     this.setHostsAndSync(remaining);
     await this.persistHosts();
+  }
+
+  async saveDeviceCredential(serverId: string, deviceCredential: string): Promise<void> {
+    if (!/^cc_device_[A-Za-z0-9_-]{43}$/.test(deviceCredential)) {
+      throw new HostDeviceCredentialError("invalid_credential");
+    }
+    const update = this.hostProfileMutationTail.then(() => {
+      if (!this.hosts.some((host) => host.serverId === serverId)) {
+        throw new HostDeviceCredentialError("host_not_found");
+      }
+      return this.applyPersistedHost(serverId, (host) => ({ ...host, deviceCredential }));
+    });
+    this.hostProfileMutationTail = update.catch(() => undefined);
+    await update;
   }
 
   async removeConnection(serverId: string, connectionId: string): Promise<void> {
