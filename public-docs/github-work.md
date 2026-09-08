@@ -77,7 +77,7 @@ This entry creates the Workspace without an agent or terminal, then returns to t
 
 Use a dedicated branch and inspect the repository's worktree setup hooks before running them. A worktree separates files from your main checkout; it does not isolate credentials or other processes. Team Run locking excludes another Team Run from this Workspace, not ordinary agents or manual edits.
 
-On the Assignment, choose **Run Team**. Select the saved Team, the new Workspace, **Supervised**, and the Supervisor role. Workspace creation does not start a Team Run or approve its security preview.
+On the Assignment, choose **Run Team** and select the saved Team. The Workspace you just created is preselected, including after reloading the return page; you can change it before proceeding. If it is unavailable, select another Workspace explicitly. Choose **Supervised** and the Supervisor role. Workspace creation does not start a Team Run or approve its security preview.
 
 ## Review the security preview
 

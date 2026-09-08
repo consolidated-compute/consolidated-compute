@@ -387,6 +387,7 @@ export const ru: TranslationResources = {
           "Идентифицирует точные рабочую область и конфигурацию запуска, которые демон повторно проверит при запуске.",
         validation: {
           ...en.teams.runs.form.validation,
+          workspaces_loading: "Загрузка рабочих пространств.",
           supervisor_required: "Выберите роль руководителя.",
           supervisor_unavailable:
             "Для выполнения под наблюдением команде нужна роль вне рабочего процесса исполнителей.",

@@ -2,12 +2,33 @@ import { describe, expect, it } from "vitest";
 import type { AggregatedAssignment, AssignmentHostState } from "./data";
 import type { AggregatedTeam, TeamHostState } from "@/teams/data";
 import {
+  assignmentWorkspacePreference,
   isAssignmentRunEnabled,
   resolveActiveAssignmentKey,
   teamsForAssignment,
 } from "./screen-state";
 
 describe("Assignment screen state", () => {
+  it("scopes a Workspace preference to the routed host and Assignment", () => {
+    const view = {
+      kind: "detail" as const,
+      serverId: "host-a",
+      assignmentId: "assignment-1",
+      preferredWorkspaceId: "workspace-1",
+    };
+    expect(assignmentWorkspacePreference(view, { serverId: "host-a", id: "assignment-1" })).toBe(
+      "workspace-1",
+    );
+    expect(
+      assignmentWorkspacePreference(view, { serverId: "host-b", id: "assignment-1" }),
+    ).toBeUndefined();
+    expect(
+      assignmentWorkspacePreference(view, { serverId: "host-a", id: "assignment-2" }),
+    ).toBeUndefined();
+    expect(
+      assignmentWorkspacePreference({ kind: "list" }, { serverId: "host-a", id: "assignment-1" }),
+    ).toBeUndefined();
+  });
   it("keeps routed identity host-qualified", () => {
     expect(
       resolveActiveAssignmentKey({ kind: "detail", serverId: "host:a", assignmentId: "b" }, null),

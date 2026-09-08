@@ -48,6 +48,7 @@ import { AssignmentFormSheet } from "./assignment-form-sheet";
 import { AssignmentTeamPickerSheet } from "./assignment-team-picker-sheet";
 import { type AggregatedAssignment, type AssignmentHostState } from "./data";
 import {
+  assignmentWorkspacePreference,
   isAssignmentRunEnabled,
   isAssignmentTeamPickerReady,
   resolveActiveAssignmentKey,
@@ -68,8 +69,13 @@ type FormState =
 
 type RunState =
   | { kind: "closed" }
-  | { kind: "choose-team"; assignment: AggregatedAssignment }
-  | { kind: "preflight"; assignment: AggregatedAssignment; team: AggregatedTeam };
+  | { kind: "choose-team"; assignment: AggregatedAssignment; preferredWorkspaceId?: string }
+  | {
+      kind: "preflight";
+      assignment: AggregatedAssignment;
+      team: AggregatedTeam;
+      preferredWorkspaceId?: string;
+    };
 
 function rpcErrorCode(error: unknown): string | null {
   if (!error || typeof error !== "object" || !("code" in error)) return null;
@@ -170,17 +176,30 @@ function AssignmentsScreenContent({ view }: { view: AssignmentsView }): ReactEle
   }, []);
   const back = useCallback(() => router.replace(buildAssignmentsRoute() as Href), []);
   const closeRun = useCallback(() => setRun({ kind: "closed" }), []);
+  const closeTeamPicker = useCallback(() => {
+    // The outgoing compact sheet may dismiss after the Run form has opened.
+    setRun((current) => (current.kind === "choose-team" ? { kind: "closed" } : current));
+  }, []);
   const openRun = useCallback(
     (assignment: AggregatedAssignment) => {
       if (!isAssignmentTeamPickerReady(assignment.serverId, teamsData.hosts)) return;
-      setRun({ kind: "choose-team", assignment });
+      setRun({
+        kind: "choose-team",
+        assignment,
+        preferredWorkspaceId: assignmentWorkspacePreference(view, assignment),
+      });
     },
-    [teamsData.hosts],
+    [teamsData.hosts, view],
   );
   const chooseTeam = useCallback((team: AggregatedTeam) => {
     setRun((current) =>
       current.kind === "choose-team"
-        ? { kind: "preflight", assignment: current.assignment, team }
+        ? {
+            kind: "preflight",
+            assignment: current.assignment,
+            team,
+            preferredWorkspaceId: current.preferredWorkspaceId,
+          }
         : current,
     );
   }, []);
@@ -282,7 +301,11 @@ function AssignmentsScreenContent({ view }: { view: AssignmentsView }): ReactEle
         />
       ) : null}
       {run.kind === "choose-team" ? (
-        <AssignmentTeamPickerSheet teams={pickerTeams} onClose={closeRun} onSelect={chooseTeam} />
+        <AssignmentTeamPickerSheet
+          teams={pickerTeams}
+          onClose={closeTeamPicker}
+          onSelect={chooseTeam}
+        />
       ) : null}
       {run.kind === "preflight" ? (
         <TeamRunFormSheet
@@ -290,6 +313,7 @@ function AssignmentsScreenContent({ view }: { view: AssignmentsView }): ReactEle
           serverId={run.assignment.serverId}
           team={run.team}
           assignment={run.assignment}
+          preferredWorkspaceId={run.preferredWorkspaceId}
           onClose={closeRun}
           onStarted={runStarted}
         />

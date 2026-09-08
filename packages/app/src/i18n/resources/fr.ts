@@ -389,6 +389,7 @@ export const fr: TranslationResources = {
           "Identifie l’espace de travail et la configuration de lancement exacts que le daemon vérifiera de nouveau au démarrage.",
         validation: {
           ...en.teams.runs.form.validation,
+          workspaces_loading: "Chargement des espaces de travail.",
           supervisor_required: "Sélectionnez un rôle de superviseur.",
           supervisor_unavailable:
             "Cette équipe a besoin d’un rôle hors du flux de travail pour être exécutée sous supervision.",

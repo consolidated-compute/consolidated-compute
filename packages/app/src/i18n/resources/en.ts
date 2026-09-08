@@ -531,6 +531,7 @@ export const en = {
         launchPlan: "Resolved Agent Profiles",
         validation: {
           workspace_required: "Select a Workspace.",
+          workspaces_loading: "Workspaces are loading.",
           workspace_missing: "The selected Workspace is no longer available.",
           objective_required: "Enter an Objective.",
           objective_too_long: "Objectives must be 32,000 characters or fewer.",

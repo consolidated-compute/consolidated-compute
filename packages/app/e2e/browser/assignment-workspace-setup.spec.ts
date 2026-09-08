@@ -1,6 +1,8 @@
 import { rename } from "node:fs/promises";
 import { expect, test } from "../support/fixtures";
 import { connectAssignmentsClient } from "../support/helpers/assignments";
+import { seedAgentProfiles } from "../support/helpers/agent-profiles";
+import { connectTeamsClient, removeTeam } from "../support/helpers/teams";
 import { chooseAddProjectMethod } from "../support/helpers/add-project-flow";
 import { addConnectedHostsAndReload, reloadPreservingHostRegistry } from "../support/helpers/hosts";
 import { startIsolatedHostDaemon } from "../support/helpers/isolated-host-daemon";
@@ -8,7 +10,7 @@ import { connectSeedClient } from "../support/helpers/seed-client";
 import { getServerId } from "../support/helpers/server-id";
 import { createTempGitRepo } from "../support/helpers/workspace";
 
-test("creates an agent-free worktree on the Assignment host and returns after a retry", async ({
+test("creates and preselects the Assignment Workspace without launching agents", async ({
   page,
   e2eWorkerClient,
 }, testInfo) => {
@@ -18,6 +20,9 @@ test("creates an agent-free worktree on the Assignment host and returns after a 
   let secondaryClient: Awaited<ReturnType<typeof connectSeedClient>> | null = null;
   let assignments: Awaited<ReturnType<typeof connectAssignmentsClient>> | null = null;
   let projectId: string | null = null;
+  let profiles: Awaited<ReturnType<typeof seedAgentProfiles>> | null = null;
+  let teams: Awaited<ReturnType<typeof connectTeamsClient>> | null = null;
+  let teamId: string | null = null;
   try {
     repo = await createTempGitRepo("assignment-workspace-setup");
     secondary = await startIsolatedHostDaemon("assignment-other-host");
@@ -72,7 +77,9 @@ test("creates an agent-free worktree on the Assignment host and returns after a 
       await rename(unavailablePath, repo.path);
     }
     await create.click();
-    await expect(page).toHaveURL(new RegExp(`${assignmentPath}$`), { timeout: 30_000 });
+    await expect(page).toHaveURL(new RegExp(`${assignmentPath}\\?workspaceId=`), {
+      timeout: 30_000,
+    });
     await expect(
       page.getByText(
         "Workspace created. Select Run Team when you are ready to review its launch settings.",
@@ -88,7 +95,111 @@ test("creates an agent-free worktree on the Assignment host and returns after a 
     expect((await secondaryClient.listProjects()).projects).toEqual([]);
     expect((await secondaryClient.fetchWorkspaces()).entries).toEqual([]);
     expect((await assignments.getAssignment(assignment.id)).assignment).toEqual(assignment);
+
+    const createdWorkspace = entries[0];
+    expect(new URL(page.url()).searchParams.get("workspaceId")).toBe(createdWorkspace.id);
+    const alternative = await e2eWorkerClient.createWorkspace({
+      source: { kind: "directory", path: repo.path },
+      title: "Unrelated Workspace",
+    });
+    if (!alternative.workspace) throw new Error(alternative.error ?? "Workspace creation failed");
+    profiles = await seedAgentProfiles([
+      {
+        id: "workspace-preselection",
+        name: "Preview only",
+        provider: "mock",
+        model: "ten-second-stream",
+        modeId: "load-test",
+      },
+    ]);
+    teams = await connectTeamsClient();
+    const { team } = await teams.createTeam({
+      name: "Workspace preselection",
+      instructions: "Preview this saved launch configuration without starting it.",
+      roles: [
+        {
+          id: "worker",
+          name: "Worker",
+          instructions: "Work only on the accepted objective.",
+          profileId: "workspace-preselection",
+        },
+      ],
+      workflow: [{ id: "work", roleId: "worker", instructions: null }],
+    });
+    teamId = team.id;
+    await reloadPreservingHostRegistry(page);
+    await page.getByTestId(`assignment-run-open-${serverId}-${assignment.id}`).click();
+    await page.getByTestId(`assignment-team-${serverId}-${team.id}`).click();
+    const form = page.getByTestId("team-run-form-sheet");
+    // Compact sheets portal the body and footer beside the testID-bearing header.
+    const field = page.getByTestId("team-run-workspace-field");
+    await expect(field).toContainText(createdWorkspace.name);
+    const preview = await teams.previewTeamRun({
+      teamId: team.id,
+      expectedRevision: team.revision,
+      workspaceId: createdWorkspace.id,
+    });
+    await expect(page.getByTestId("team-run-security-preview-fingerprint")).toContainText(
+      preview.preview.fingerprint,
+      { timeout: 30_000 },
+    );
+    await expect(page.getByTestId("team-run-start")).toBeEnabled();
+    await page.screenshot({ path: testInfo.outputPath("assignment-selected-workspace.png") });
+    await page.getByRole("button", { name: "Cancel", exact: true }).last().click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await reloadPreservingHostRegistry(page);
+    await page.getByTestId(`assignment-run-open-${serverId}-${assignment.id}`).click();
+    await page.getByTestId(`assignment-team-${serverId}-${team.id}`).click();
+    await expect(form).toBeVisible();
+    await expect(field).toContainText(createdWorkspace.name);
+    await expect(page.getByTestId("team-run-start")).toBeEnabled();
+    await page.screenshot({
+      path: testInfo.outputPath("assignment-selected-workspace-compact.png"),
+    });
+    await field.getByRole("button").click();
+    await page.getByTestId(`team-run-workspace-${alternative.workspace.id}`).click();
+    const alternativePreview = await teams.previewTeamRun({
+      teamId: team.id,
+      expectedRevision: team.revision,
+      workspaceId: alternative.workspace.id,
+    });
+    expect(alternativePreview.preview.fingerprint).not.toBe(preview.preview.fingerprint);
+    await expect(page.getByTestId("team-run-security-preview-fingerprint")).toContainText(
+      alternativePreview.preview.fingerprint,
+      { timeout: 30_000 },
+    );
+    await expect(field).toContainText("Unrelated Workspace");
+    await page.getByRole("button", { name: "Cancel", exact: true }).last().click();
+
+    await e2eWorkerClient.archiveWorkspace(createdWorkspace.id);
+    await page.getByTestId(`assignment-run-open-${serverId}-${assignment.id}`).click();
+    await page.getByTestId(`assignment-team-${serverId}-${team.id}`).click();
+    await expect(
+      page.getByText("The selected Workspace is no longer available.", { exact: true }),
+    ).toBeVisible();
+    await expect(field).not.toContainText("Unrelated Workspace");
+    await expect(page.getByTestId("team-run-start")).toBeDisabled();
+    await page.getByRole("button", { name: "Cancel", exact: true }).last().click();
+
+    const foreign = await secondaryClient.createWorkspace({
+      source: { kind: "directory", path: repo.path },
+      title: "Foreign Workspace",
+    });
+    if (!foreign.workspace) throw new Error(foreign.error ?? "Foreign Workspace creation failed");
+    await page.goto(`${assignmentPath}?workspaceId=${foreign.workspace.id}`);
+    await page.getByTestId(`assignment-run-open-${serverId}-${assignment.id}`).click();
+    await page.getByTestId(`assignment-team-${serverId}-${team.id}`).click();
+    await expect(
+      page.getByText("The selected Workspace is no longer available.", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByTestId("team-run-start")).toBeDisabled();
+    await expect(field).not.toContainText("Foreign Workspace");
+    expect((await e2eWorkerClient.fetchAgents()).entries).toEqual([]);
+    expect((await assignments.getAssignment(assignment.id)).assignment).toEqual(assignment);
   } finally {
+    if (teams && teamId) await removeTeam(teams, teamId);
+    await teams?.close();
+    await profiles?.restore();
     if (projectId) await e2eWorkerClient.removeProject(projectId);
     await assignments?.close();
     await secondaryClient?.close();
