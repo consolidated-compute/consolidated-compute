@@ -1,6 +1,7 @@
 import { compare, compareSync, hashSync } from "bcryptjs";
 import { timingSafeEqual } from "node:crypto";
 import type { RequestHandler } from "express";
+import type { DeviceAccessStore } from "./device-access.js";
 
 export const DAEMON_PASSWORD_BCRYPT_COST = 12;
 
@@ -90,9 +91,46 @@ export function extractWsBearerToken(protocol: string | null): string | null {
 export function createRequireBearerMiddleware(
   auth: DaemonAuthConfig | undefined,
   onReject?: (context: BearerAuthRejectContext) => void,
+  deviceAccess?: DeviceAccessStore,
 ): RequestHandler {
   const password = auth?.password;
   return (req, res, next) => {
+    // Includes legacy requests: activation must fence work admitted before the
+    // mode changed, including an asynchronous password check or file stream.
+    const unsubscribe = deviceAccess?.onAccessChanged(() => res.destroy());
+    if (unsubscribe) {
+      res.once("close", unsubscribe);
+      res.once("finish", unsubscribe);
+    }
+    try {
+      if (deviceAccess?.isDeviceAuthenticationEnabled()) {
+        if (req.method === "OPTIONS" || req.path === "/api/health" || req.path === "/mcp/agents") {
+          next();
+          return;
+        }
+        const admission = deviceAccess.authenticate(
+          extractHttpBearerToken(req.header("authorization")),
+        );
+        if (!admission) {
+          res.status(401).json({ error: "Device credential required" });
+          return;
+        }
+        const permission = deviceHttpPermission(req.path);
+        if (
+          req.method !== "GET" ||
+          permission === null ||
+          !admission.permissions.includes(permission)
+        ) {
+          res.status(403).json({ error: "Permission denied" });
+          return;
+        }
+        next();
+        return;
+      }
+    } catch (error) {
+      next(error);
+      return;
+    }
     if (!password || shouldBypassBearerAuth(req.method, req.path)) {
       next();
       return;
@@ -111,12 +149,18 @@ export function createRequireBearerMiddleware(
           return;
         }
 
-        next();
+        if (!res.destroyed) next();
       } catch (error) {
         next(error);
       }
     })();
   };
+}
+
+function deviceHttpPermission(path: string): "daemon.read" | "workspace.read" | null {
+  if (path === "/api/status") return "daemon.read";
+  if (path === "/api/files/download" || path.startsWith("/public/")) return "workspace.read";
+  return null;
 }
 
 const SELF_AUTHENTICATING_ROUTES = new Set(["/api/files/download", "/mcp/agents"]);

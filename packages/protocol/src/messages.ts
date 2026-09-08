@@ -7137,6 +7137,8 @@ export const WSPongMessageSchema = z.object({
 
 export const WSHelloMessageSchema = z.object({
   type: z.literal("hello"),
+  // Relay credentials belong inside the encrypted hello, not relay HTTP headers.
+  deviceCredential: z.string().max(128).optional(),
   clientId: z.string().min(1),
   clientType: z.enum(["mobile", "browser", "cli", "mcp", "hub"]),
   protocolVersion: z.number().int(),

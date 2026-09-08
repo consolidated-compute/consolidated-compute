@@ -102,6 +102,7 @@ export class DeviceAccessStore {
   private readonly file: string;
   private readonly authenticationFile: string;
   private readonly now: () => number;
+  private readonly accessListeners = new Set<() => void>();
 
   constructor(input: { home: string; now?: () => number }) {
     this.file = path.join(input.home, "device-access.json");
@@ -120,6 +121,18 @@ export class DeviceAccessStore {
     if (enabled) return;
     const state = authenticationStateSchema.parse({ enabled: true, enabledAt: this.now() });
     writeDeviceRecord(this.authenticationFile, JSON.stringify(state));
+    this.notifyAccessChanged();
+  }
+
+  onAccessChanged(listener: () => void): () => void {
+    this.accessListeners.add(listener);
+    return () => {
+      this.accessListeners.delete(listener);
+    };
+  }
+
+  private notifyAccessChanged(): void {
+    for (const listener of this.accessListeners) listener();
   }
 
   isDeviceAuthenticationEnabled(): boolean {
@@ -225,6 +238,7 @@ export class DeviceAccessStore {
     if (!credential) throw new DeviceAccessError("credential_not_found");
     credential.revokedAt ??= this.now();
     this.write(state);
+    this.notifyAccessChanged();
   }
 
   revokePrincipal(id: string): void {
@@ -233,6 +247,7 @@ export class DeviceAccessStore {
     if (!principal) throw new DeviceAccessError("principal_not_found");
     principal.revokedAt ??= this.now();
     this.write(state);
+    this.notifyAccessChanged();
   }
 
   setPrincipalPermissions({
@@ -247,6 +262,7 @@ export class DeviceAccessStore {
     if (!principal) throw new DeviceAccessError("principal_not_found");
     principal.permissions = [...new Set(permissionsSchema.parse(permissions))];
     this.write(state);
+    this.notifyAccessChanged();
   }
 
   private admission(
