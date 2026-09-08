@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { File as FSFile, Paths } from "expo-file-system";
 import * as LegacyFileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
+import { DeviceDownloadError } from "@/utils/device-download";
+import { downloadWithDeviceCredential } from "@/utils/download-with-device";
 import type { HostProfile } from "@/types/host-connection";
 import { buildDaemonWebSocketUrl } from "@/utils/daemon-endpoints";
 import { openExternalUrl } from "@/utils/open-external-url";
@@ -98,8 +100,36 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
       const downloadUrl = buildDownloadUrl(
         downloadTarget.baseUrl,
         tokenResponse.token,
-        isWeb ? downloadTarget.authCredentials : null,
+        isWeb && daemonProfile?.deviceCredential === undefined
+          ? downloadTarget.authCredentials
+          : null,
       );
+
+      const deviceCredential = daemonProfile?.deviceCredential;
+      if (deviceCredential !== undefined) {
+        const startedAt = Date.now();
+        await downloadWithDeviceCredential({
+          url: downloadUrl,
+          credential: deviceCredential,
+          fileName: resolvedFileName,
+          mimeType: tokenResponse.mimeType,
+          createTarget: () => resolveDownloadTargetFile(resolvedFileName),
+          onProgress: (written, total) => {
+            if (total <= 0) return;
+            const elapsed = (Date.now() - startedAt) / 1000;
+            const speed = elapsed > 0 ? written / elapsed : 0;
+            get().updateProgress(id, {
+              percent: written / total,
+              bytesWritten: written,
+              totalBytes: total,
+              speed,
+              eta: speed > 0 ? (total - written) / speed : 0,
+            });
+          },
+        });
+        get().completeDownload(id);
+        return;
+      }
 
       if (isWeb) {
         triggerBrowserDownload(downloadUrl, resolvedFileName);
@@ -155,7 +185,7 @@ export const useDownloadStore = create<DownloadState>()((set, get) => ({
         });
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : i18n.t("downloads.failed");
+      const message = resolveDownloadError(error);
       if (isWeb) {
         console.warn("[DownloadStore] Download failed:", message);
         get().failDownload(id, message);
@@ -236,6 +266,14 @@ function findMostRecentDownloadId(downloads: Map<string, Download>): string | nu
     }
   }
   return mostRecent?.id ?? null;
+}
+
+function resolveDownloadError(error: unknown): string {
+  if (error instanceof DeviceDownloadError) {
+    const status = error.status === undefined ? "" : ` (HTTP ${error.status})`;
+    return `${i18n.t("downloads.failed")}${status}`;
+  }
+  return error instanceof Error ? error.message : i18n.t("downloads.failed");
 }
 
 interface DownloadTarget {
