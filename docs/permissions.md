@@ -31,6 +31,8 @@ Authority changes close user sockets and in-flight HTTP responses, including con
 
 One daemon process owns device-store mutations. Future CLI and desktop adapters must route changes through that owner rather than opening concurrent file writers. Clients retain their generated credential before redeeming an invitation so a lost enrollment response can be retried without storing plaintext credentials on the daemon.
 
+Direct WebSocket clients can redeem an existing invitation on `/ws` using the separate `paseo.device-enrollment.v1` subprotocol and the schemas in `packages/protocol/src/device-enrollment.ts`. This one-exchange connection requires the invitation rather than the daemon password, closes after its response, and never opens a control-plane session. Require the typed enrollment acknowledgement; protocol negotiation alone does not prove success on older hosts. Use loopback or a trusted TLS connection because both invitation and credential are secrets. Relay redemption, SDK enrollment, local invitation approval, and setup UI are still outstanding. Redemption neither creates invitations nor activates device authentication.
+
 Device credentials identify approved clients. They do not isolate provider processes running as the same OS user, which may read client storage or modify daemon files. Credential storage and provider isolation need separate threat models.
 
 ## Permissions
